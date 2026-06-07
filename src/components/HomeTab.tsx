@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { MapPin, Trophy, Flag, Clock, X } from 'lucide-react';
+import { MapPin, Trophy, Flag, Clock, X, Check } from 'lucide-react';
 import { User, db } from '../lib/db';
 import { CHALLENGES, difficultyLabel, Challenge } from '../data/challenges';
 import { getLevelInfo } from '../data/levels';
@@ -112,7 +112,8 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
             const completed = progress.completed.includes(ch.id);
             const active = progress.activeId === ch.id; // 現在挑戦中
             const distToGoal = distKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng);
-            const distText = distToGoal < 1 ? `${Math.round(distToGoal * 1000)}m` : `${distToGoal.toFixed(1)}km`;
+            const distValue = distToGoal < 1 ? `${Math.round(distToGoal * 1000)}` : `${distToGoal.toFixed(1)}`;
+            const distUnit = distToGoal < 1 ? 'm' : 'km';
             const levelOk = userLevel >= ch.minLevel; // 必須レベルを満たすか
 
             const total = ch.steps.length;
@@ -126,7 +127,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
                   active
                     ? 'bg-[#2563eb] border-[#2563eb] shadow-md'
                     : completed
-                    ? 'bg-amber-50/40 border-gold/40'
+                    ? 'bg-gold/10 border-gold shadow-sm'
                     : !levelOk
                     ? 'bg-gray-100 border-gray-200 opacity-60'
                     : 'bg-white border-black/5 shadow-sm'
@@ -139,6 +140,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       {active && <span className="text-[13px] font-black bg-white/25 text-white px-1.5 py-0.5 rounded-full flex-shrink-0">挑戦中</span>}
+                      {completed && !active && <span className="text-[11px] font-black bg-gold text-white px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5"><Check className="w-3 h-3" />達成済み</span>}
                       <h3 className={`text-base font-black truncate ${active ? 'text-white' : 'text-gray-900'}`}>{ch.title}</h3>
                     </div>
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -152,7 +154,9 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
                         <Clock className="w-3 h-3" />約{ch.estMinutes}分
                       </span>
                       <span className={`text-[13px] font-black flex items-center gap-0.5 ${active ? 'text-white' : 'text-shrine-red'}`}>
-                        <MapPin className="w-3 h-3" />{distText}
+                        <MapPin className="w-3 h-3" />
+                        <span className="tabular-nums">{distValue}</span>
+                        <span className="text-[11px]">{distUnit}</span>
                       </span>
                     </div>
                     {/* 進捗インジケータ（ステップごとのドット） */}
@@ -195,24 +199,23 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
                 <span>🏆 {confirmCh.badgeName}</span>
               </div>
 
-              <div className="flex gap-2 mt-4">
-                <button onClick={() => setConfirmCh(null)} className="flex-1 bg-gray-100 text-gray-500 text-base font-black py-3 rounded-xl cursor-pointer">とじる</button>
+              <div className="mt-4">
                 {isActive ? (
                   <button
                     onClick={() => { setConfirmCh(null); onEndChallenge?.(); }}
-                    className="flex-1 bg-rose-600 text-white text-base font-black py-3 rounded-xl hover:opacity-90 cursor-pointer flex items-center justify-center gap-1.5"
+                    className="w-full bg-rose-600 text-white text-base font-black py-3 rounded-xl hover:opacity-90 cursor-pointer flex items-center justify-center gap-1.5"
                   >
                     <X className="w-4 h-4" />チャレンジを終了する
                   </button>
                 ) : ok ? (
                   <button
                     onClick={() => { const id = confirmCh.id; setConfirmCh(null); onStartChallenge(id); }}
-                    className="flex-1 bg-shrine-red text-white text-base font-black py-3 rounded-xl hover:opacity-90 cursor-pointer flex items-center justify-center gap-1.5"
+                    className="w-full bg-shrine-red text-white text-base font-black py-3 rounded-xl hover:opacity-90 cursor-pointer flex items-center justify-center gap-1.5"
                   >
                     <Flag className="w-4 h-4" />このチャレンジに参加
                   </button>
                 ) : (
-                  <div className="flex-1 bg-gray-100 text-gray-400 text-[13px] font-black py-3 rounded-xl flex items-center justify-center">🔒 Lv.{confirmCh.minLevel} 以上で参加可能</div>
+                  <div className="w-full bg-gray-100 text-gray-400 text-[13px] font-black py-3 rounded-xl flex items-center justify-center">🔒 Lv.{confirmCh.minLevel} 以上で参加可能</div>
                 )}
               </div>
             </div>
