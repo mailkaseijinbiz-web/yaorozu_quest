@@ -7,17 +7,19 @@
 
 ---
 
-## 🔴 最優先（実用化のボトルネック）
+## ✅ 完了（旧・最優先）
 
-### 1. データの永続化（バックエンド）
-- **現状**: 全データ（ユーザー・徳・投稿・チャレンジ進捗・バッジ・証拠写真）を**ブラウザの localStorage** に保存（`src/lib/db.ts` の `MockDatabase`）。
-- **課題**: 別端末／別ブラウザで共有されない。データ消去で消える。
-- **進捗**: Supabase 導入の**土台のみ完了**。
-  - `@supabase/supabase-js` 導入済み
-  - `supabase/schema.sql`（テーブル定義）作成済み
-  - `src/lib/supabase.ts`（サーバー専用クライアント）作成済み
-- **残作業**: Supabaseプロジェクト作成＋キー設定 → 書き込みAPIルート → localStorage⇄クラウド同期の実装。
-- **ブロッカー**: アカウント作成・秘密鍵入力は要ユーザー操作（`Project URL` と `service_role key` の提供待ち）。
+### 1. データの永続化（バックエンド）— Supabase で稼働中
+- **方式**: snapshot 方式。ユーザーごとのデータ(JSON)を `user_snapshots` テーブルに1行で保存・復元。
+- **構成**:
+  - `supabase/schema.sql` … `user_snapshots` テーブル
+  - `src/lib/supabase.ts` … サーバー専用クライアント（secretキーはAPI Routeのみ）
+  - `src/app/api/persist/route.ts` … 保存(POST)／復元(GET)
+  - `src/lib/cloud-sync.ts` … 起動時 `pullSnapshot`、書込時 `schedulePush`（デバウンス）
+  - `src/lib/db.ts` の `save()` で自動同期、`src/app/page.tsx` 起動時に復元
+- **同期対象**: 徳・ユーザー・UGC投稿・チャレンジ進捗・証拠写真（重い生成データSPOTS等は除外）。
+- **本番**: 環境変数 `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` 設定済み。エンドツーエンド動作確認済み。
+- **今後**: 認証導入で「端末固定の user-self」から「実ユーザー単位」へ拡張。Storage への写真移行。
 
 ---
 
