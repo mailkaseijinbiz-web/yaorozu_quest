@@ -78,6 +78,8 @@ export default function MapTab({
 
   const onPickProof = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
+    // 同じ画像を再選択しても onChange が発火するよう値をリセット（2回目が達成できない不具合の対策）
+    e.target.value = '';
     if (!f) return;
     const reader = new FileReader();
     reader.onload = () => setProofPhoto(typeof reader.result === 'string' ? reader.result : null);
