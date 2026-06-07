@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Home, Award, Bell, UserCircle2, Trophy, Sparkles, MapPin, Check, Edit2 } from 'lucide-react';
+import { Home, Award, UserCircle2, Trophy, Sparkles, MapPin, Check, Edit2 } from 'lucide-react';
 import { db, Spot, Agent, User as UserType } from '../lib/db';
 import HomeTab from '../components/HomeTab';
-import QuestTab from '../components/QuestTab';
-import { getLevelInfo } from '../data/levels';
+import MapTab from '../components/MapTab';
+import { getLevelInfo, LEVELS } from '../data/levels';
 
-type TabType = 'home' | 'quest' | 'notifications' | 'mypage';
+type TabType = 'home' | 'quest' | 'mypage';
 
 const FALLBACK_CURRENT_USER: UserType = {
   id: 'user-self',
@@ -135,19 +135,11 @@ export default function HomePage() {
   const currentCreatorToku = (activeSpot && activeSpot.creatorId) ? db.getTokuAtSpot(activeSpot.creatorId, activeSpot.id) : 0;
 
 
-  // Notification mock data
-  const notifications = [
-    { id: '1', icon: '👍', text: 'あなたの口コミが「役に立った」と評価されました', time: '5分前', unread: true },
-    { id: '2', icon: '⛩️', text: '浅草寺 に新しいUGCが投稿されました', time: '1時間前', unread: true },
-    { id: '3', icon: '🏆', text: 'クエスト「神仏との対話」が達成可能になりました', time: '3時間前', unread: false },
-    { id: '4', icon: '👑', text: '伏見稲荷大社 に新しい創世主が誕生しました', time: '1日前', unread: false },
-    { id: '5', icon: '✨', text: '徳ポイントが100ptを超えました！称号「巡礼ガイド」解放', time: '2日前', unread: false },
-  ];
+  
 
   const NAV_TABS = [
     { key: 'home' as TabType, label: 'ホーム', icon: Home },
-    { key: 'quest' as TabType, label: 'クエスト', icon: Award },
-    { key: 'notifications' as TabType, label: '通知', icon: Bell },
+    { key: 'quest' as TabType, label: 'マップ', icon: MapPin },
     { key: 'mypage' as TabType, label: 'マイページ', icon: UserCircle2 },
   ];
 
@@ -184,63 +176,20 @@ export default function HomePage() {
               />
             )}
 
-            {/* ── クエスト ── */}
+            {/* ── マップ ── */}
             {activeTab === 'quest' && (
-              <div className="p-3 pb-4 h-full overflow-y-auto">
-                <QuestTab
-                  currentUser={currentUser || FALLBACK_CURRENT_USER}
+              <div className="relative h-full w-full">
+                <MapTab
                   spots={spots}
-                  claimedQuests={claimedQuests}
-                  onClaimReward={handleClaimReward}
-                  onNavigateTab={(tab) => setActiveTab(tab as TabType)}
-                  isNearAnySpot={isNearAnySpot}
-                  hasChatted={hasChatted}
-                  hasTakenPhoto={hasTakenPhoto}
+                  activeSpot={activeSpot}
+                  onSelectSpot={setActiveSpot}
                   userLocation={userLocation}
                   setUserLocation={setUserLocation}
-                  activeSpot={activeSpot}
-                  agent={agent}
-                  onUpdateAgent={handleUpdateAgent}
-                  userTokuAtSpot={userTokuAtSpot}
-                  currentCreatorToku={currentCreatorToku}
+                  creatorProfiles={creatorProfiles}
                 />
               </div>
             )}
 
-            {/* ── 通知 ── */}
-            {activeTab === 'notifications' && (
-              <div className="p-4 space-y-2 overflow-y-auto h-full">
-                <div className="pb-2 border-b border-black/5">
-                  <h2 className="text-base font-black text-gray-900 flex items-center gap-2">
-                    <Bell className="w-4 h-4 text-shrine-red" />
-                    通知
-                  </h2>
-                </div>
-                {notifications.map((n) => (
-                  <div
-                    key={n.id}
-                    className={`flex items-start gap-3 p-3 rounded-2xl transition-all ${
-                      n.unread ? 'bg-white shadow-sm border border-black/5' : 'bg-gray-50/80'
-                    }`}
-                  >
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-base flex-shrink-0 ${
-                      n.unread ? 'bg-shrine-red/10' : 'bg-gray-100'
-                    }`}>
-                      {n.icon}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-[11px] leading-relaxed ${n.unread ? 'text-gray-800 font-semibold' : 'text-gray-500'}`}>
-                        {n.text}
-                      </p>
-                      <span className="text-[9px] text-gray-400 mt-0.5 block">{n.time}</span>
-                    </div>
-                    {n.unread && (
-                      <div className="w-2 h-2 rounded-full bg-shrine-red flex-shrink-0 mt-1" />
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
 
             {/* ── マイページ ── */}
             {activeTab === 'mypage' && currentUser && (
@@ -321,6 +270,65 @@ export default function HomePage() {
                     </div>
                   ))}
                 </div>
+
+                {/* Badge / Level section */}
+                <div className="bg-white rounded-3xl p-4 shadow-sm border border-black/5 space-y-3">
+                  <h3 className="text-xs font-black text-gray-700 flex items-center gap-1.5">
+                    <Trophy className="w-3.5 h-3.5 text-gold" />
+                    バッジ・称号
+                  </h3>
+                  <div className="grid grid-cols-1 gap-2">
+                    {LEVELS.map((lv) => {
+                      const earned = currentUser.totalToku >= lv.minToku;
+                      const isCurrent = getLevelInfo(currentUser.totalToku).current.level === lv.level;
+                      const BADGE_ICONS: Record<number, string> = { 1: '🚶', 2: '🗺️', 3: '🧘', 4: '⛩️', 5: '✨' };
+                      return (
+                        <div
+                          key={lv.level}
+                          className={`flex items-center gap-3 p-3 rounded-2xl border-2 transition-all ${
+                            isCurrent
+                              ? 'border-gold bg-amber-50 shadow-md'
+                              : earned
+                              ? 'border-gray-200 bg-gray-50'
+                              : 'border-dashed border-gray-200 bg-gray-50/50 opacity-40'
+                          }`}
+                        >
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0 ${
+                              isCurrent ? 'bg-gold/20' : earned ? 'bg-gray-100' : 'bg-gray-100'
+                            }`}
+                            style={earned && lv.frameColor ? { boxShadow: `0 0 0 2px ${lv.frameColor}` } : {}}
+                          >
+                            {BADGE_ICONS[lv.level]}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-xs font-black ${
+                                isCurrent ? 'text-amber-800' : earned ? 'text-gray-700' : 'text-gray-400'
+                              }`}>
+                                {lv.title}
+                              </span>
+                              {isCurrent && (
+                                <span className="text-[8px] bg-gold text-white font-bold px-1.5 py-0.5 rounded-full">現在</span>
+                              )}
+                              {earned && !isCurrent && (
+                                <span className="text-[8px] bg-green-100 text-green-700 font-bold px-1.5 py-0.5 rounded-full">獲得済</span>
+                              )}
+                            </div>
+                            <div className="text-[9px] text-gray-400 mt-0.5">
+                              {lv.minToku === 0 ? '初期称号' : `得 ${lv.minToku}pt で解放`}
+                            </div>
+                          </div>
+                          {!earned && (
+                            <span className="text-[9px] text-gray-400 font-mono whitespace-nowrap">
+                              あと {lv.minToku - currentUser.totalToku}pt
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -333,7 +341,7 @@ export default function HomePage() {
         >
           {NAV_TABS.map(({ key, label, icon: Icon }) => {
             const isActive = activeTab === key;
-            const hasUnread = key === 'notifications' && notifications.some(n => n.unread);
+            const hasUnread = false; // notifications removed
             return (
               <button
                 key={key}

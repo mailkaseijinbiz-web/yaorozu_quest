@@ -24,6 +24,9 @@ export interface Spot {
   terrain: number; // D/T - Terrain rating (1-5)
   attributes: string[]; // Geocaching attributes e.g. ['⛰️ 階段多め']
   cacheType: string; // Geocaching cache type e.g. 'Virtual', 'EarthCache', etc.
+  godName: string; // 神の名前 (人格)
+  godEmoji: string; // 神のアイコン絵文字
+  godRequests: string[]; // 神がフキダシで出す要望リスト (ローテーション表示)
 }
 
 export interface UgcPost {
@@ -75,76 +78,148 @@ const INITIAL_USERS: User[] = [
     displayName: 'タカシ@ローカルガイド',
     avatarUrl: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=takashi',
     totalToku: 320,
-    currentTitle: '名誉ガイド',
-  },
+    currentTitle: 'const INITIAL_SPOTS: Spot[] = [
   {
-    id: 'user-history-geek',
-    displayName: '歴オタのハルカ',
-    avatarUrl: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=haruka',
-    totalToku: 480,
-    currentTitle: '大徳者',
-  }
-];
-
-const INITIAL_SPOTS: Spot[] = [
-  {
-    id: 'spot-sensoji',
-    name: '浅草寺 (金龍山)',
-    description: '都内最古の寺院。提灯の雷門や、仲見世通りが有名。五重塔がそびえ立つ。',
-    latitude: 35.7148,
-    longitude: 139.7967,
-    creatorId: 'user-history-geek', // Starts with Haruka as Creator
-    imageUrl: 'https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=800&q=80',
+    id: 'spot-jukusen',
+    name: '成願寺',
+    description: '新中野駅から徒歩3分。中野区本町にある曹洞宗の寺院。静謐な境内に歴史ある本堂が佇む。',
+    latitude: 35.6945,
+    longitude: 139.6651,
+    creatorId: 'user-history-geek',
+    imageUrl: 'https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=800&q=80',
     category: '寺院',
-    tokuRequirement: 100,
+    tokuRequirement: 50,
     enjoyments: [
-      '「雷門」の巨大提灯の下の「木彫りの龍神像」を見上げてみよう',
-      '活気あふれる「仲見世通り」で焼きたての人形焼やきびだんごを味わう',
-      '本堂前の「常香炉」から立ち上る煙を浴びて、心身を清める'
+      '静謐な境内で心を落ち着けて参拝する',
+      '歴史ある山門をくぐり本堂の建築美を眺める',
+      '周辺の住宅街と寺院のコントラストを楽しむ'
     ],
     difficulty: 1,
     terrain: 1,
-    attributes: ['♿ バリアフリー', '🍵 茶屋あり', '🌸 桜名所', '👪 ファミリー向け'],
-    cacheType: 'Virtual'
+    attributes: ['🏛️ 寺院', '🚶 散歩途中', '🍵 静謐', '👪 ファミリー向け'],
+    cacheType: 'Virtual',
+    godName: '成願の守り仏',
+    godEmoji: '🙏',
+    godRequests: [
+      '📸 本堂の写真を撮ってほしいのじゃ',
+      '📝 ここのクイズを作ってくれぬか？',
+      '🗣️ この寺の歴史を口コミで広めてくれ',
+      '🎨 境内の美しさを絵にしてみよ',
+    ]
   },
   {
-    id: 'spot-fushimi',
-    name: '伏見稲荷大社',
-    description: '全国に3万社ある稲荷神社の総本宮。千本鳥居が神秘的な朱色のトンネルを作る。',
-    latitude: 34.9671,
-    longitude: 135.7727,
-    creatorId: 'user-guide-1', // Starts with Takashi as Creator
-    imageUrl: 'https://images.unsplash.com/photo-1490730141103-6cac27aaab94?w=800&q=80',
-    category: '神社',
-    tokuRequirement: 150,
+    id: 'spot-suzumori',
+    name: '鈴森公園',
+    description: '新中野駅近くの憩いの場。地元の子供たちが遊ぶ小さな公園で四季折々の緑が楽しめる。',
+    latitude: 35.6933,
+    longitude: 139.6625,
+    creatorId: null,
+    imageUrl: 'https://images.unsplash.com/photo-1522383225653-ed111181a951?w=800&q=80',
+    category: '公園',
+    tokuRequirement: 30,
     enjoyments: [
-      '朱塗りの鳥居がどこまでも続く「千本鳥居」の神秘的な光景をカメラに収める',
-      '「奥社奉拝所」にある「おもかる石」を持ち上げて願いが早く叶うか占う',
-      '参道付近の茶屋で、キツネの大好物とされる「きつねうどん」や「いなり寿司」を食す'
+      '公園のベンチで休憩しながら四季の花を眺める',
+      '子供たちの遊ぶ姿を見ながらほっこりする',
+      '夕暮れ時の空と木々のシルエットを撮影する'
     ],
-    difficulty: 3,
-    terrain: 3,
-    attributes: ['⛩️ 神社', '🌲 山道あり', '🦊 稲荷', '🌅 夜間参拝可'],
-    cacheType: 'Traditional'
+    difficulty: 1,
+    terrain: 1,
+    attributes: ['🌳 公園', '☀️ 散歩途中', '👪 ファミリー向け', '🌸 季節の花'],
+    cacheType: 'Virtual',
+    godName: '鈴の木の精霊',
+    godEmoji: '🌳',
+    godRequests: [
+      '📸 季節の花の写真が欲しいな～',
+      '🧩 公園の植物クイズを作ってくれない？',
+      '🗣️ みんなに鈴森の良さを伝えて！',
+      '🌅 夕焼けの美しい瞬間を撮ってほしいの',
+    ]
   },
   {
-    id: 'spot-todaiji',
-    name: '東大寺 (大仏殿)',
-    description: '奈良の大仏さま（盧舎那仏）が鎮座する世界最大級 of 木造建築物。柱くぐりが有名。',
-    latitude: 34.6901,
-    longitude: 135.8398,
-    creatorId: null, // No creator yet
+    id: 'spot-nakano-broadway',
+    name: '中野ブロードウェイ',
+    description: '日本有数のサブカル聖地。アニメ・マンガ・フィギュアの専門店が集まる商業ビル。',
+    latitude: 35.7079,
+    longitude: 139.6655,
+    creatorId: 'user-guide-1',
+    imageUrl: 'https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=800&q=80',
+    category: '商業施設',
+    tokuRequirement: 80,
+    enjoyments: [
+      'まんだらけ本店で掘り出し物のレアアイテムを探す',
+      '隠れた名店の絶品ソフトクリームを味わう',
+      'レトロゲーム専門店でノスタルジーに浸る'
+    ],
+    difficulty: 1,
+    terrain: 1,
+    attributes: ['🎮 サブカル', '🛍️ ショッピング', '🍦 グルメ', '📚 マンガ'],
+    cacheType: 'Traditional',
+    godName: 'サブカルの神・オタクノカミ',
+    godEmoji: '🎮',
+    godRequests: [
+      '📸 推しフィギュアの写真を撮ってくれ！',
+      '🧩 ブロードウェイ通検定を作ろうぜ！',
+      '🗣️ 隠れた名店を口コミしてくれ！',
+      '🎨 ブロードウェイの魅力を世界に広めろ！',
+    ]
+  },
+  {
+    id: 'spot-arai-yakushi',
+    name: '新井薬師 梅照院',
+    description: '中野区新井にある真言宗の寺院。眼病平癒の御利益で知られ、地域に親しまれる。',
+    latitude: 35.7137,
+    longitude: 139.6669,
+    creatorId: null,
     imageUrl: 'https://images.unsplash.com/photo-1545569341-9eb8b30979d9?w=800&q=80',
     category: '寺院',
     tokuRequirement: 100,
     enjoyments: [
-      '大仏殿の前に立ち、世界最大級の木造建築としての圧倒的スケールを実感する',
-      '高さ約15mの「盧舎那仏（奈良の大仏）」の印相（手のポーズ）に込められた意味を学ぶ',
-      '大仏の鼻の穴と同じ大きさと言われる「柱の穴くぐり」に挑戦して無病息災を願う'
+      '眼病平癒の薬師如来に健康を祈願する',
+      '四季折々の花が彩る境内を散策する',
+      '毎月8日の縁日で賑わう参道を楽しむ'
     ],
     difficulty: 1,
     terrain: 1,
-    attributes: ['♿ バリアフリー', '🦌 鹿あり', '🏛️ 世界遺産', '👪 ファミリー向け'],
+    attributes: ['🏛️ 寺院', '👁️ 眼病平癒', '🌸 花の寺', '🎪 縁日あり'],
+    cacheType: 'Virtual',
+    godName: '薬師の守り神',
+    godEmoji: '💊',
+    godRequests: [
+      '📸 季節の花と本堂を一緒に撮ってほしい',
+      '📝 薬師如来のクイズを作ってくれぬか',
+      '🗣️ 眼病平癒の御利益をみんなに伝えて',
+      '🙏 静かな気持ちで参拝した感想を聞かせて',
+    ]
+  },
+  {
+    id: 'spot-shinnakano-shotengai',
+    name: '新中野鍋屋横丁商店街',
+    description: '新中野駅前に広がる活気ある商店街。昔ながらの個人商店と新しい飲食店が共存する。',
+    latitude: 35.6925,
+    longitude: 139.6636,
+    creatorId: null,
+    imageUrl: 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800&q=80',
+    category: '商店街',
+    tokuRequirement: 40,
+    enjoyments: [
+      '地元の酒場で仕事後の一杯を楽しむ',
+      '商店街を散歩しながら隠れた名店を発見する',
+      '昔ながらの雰囲気を感じながら食べ歩きする'
+    ],
+    difficulty: 1,
+    terrain: 1,
+    attributes: ['🍺 居酒屋', '🚶 散歩向き', '🍽️ 食べ歩き', '🏮 下町情緒'],
+    cacheType: 'Traditional',
+    godName: '鍋横の商売神・ナベヨコ',
+    godEmoji: '🏮',
+    godRequests: [
+      '📸 お気に入りの店の写真を撮ってくれ！',
+      '🧩 商店街クイズを作って盛り上げてよ！',
+      '🗣️ 美味い店を口コミで教えてくれ！',
+      '🍺 夜の商店街の雰囲気を伝えてほしい！',
+    ]
+  }
+];��ー向け'],
     cacheType: 'Virtual'
   },
   {

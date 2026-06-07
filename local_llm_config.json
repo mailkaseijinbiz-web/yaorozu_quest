@@ -1,0 +1,9 @@
+{
+  "endpoint": "http://localhost:11434/api/generate",
+  "model": "llama3:8b",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "maxTokens": 1024,
+  "temperature": 0.7
+}
