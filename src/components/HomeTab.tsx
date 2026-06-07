@@ -72,7 +72,6 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
           <span className="text-shrine-red">YAOROZU</span>
           <span className="text-gray-900"> QUEST</span>
         </h1>
-        <p className="text-xs text-gray-400 mt-1.5 tracking-wider font-medium">八百万の神が息づく世界へ</p>
       </div>
 
       {/* ── 近くのヤオロズクエスト（チャレンジ） ── */}
@@ -82,7 +81,6 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
             <Flag className="w-4 h-4 text-shrine-red" />
             近くのヤオロズクエスト
           </h2>
-          <span className="text-[13px] text-gray-400 font-bold">達成でバッジ獲得</span>
         </div>
 
         {/* フィルタ */}
