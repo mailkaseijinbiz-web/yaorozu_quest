@@ -21,6 +21,59 @@ interface AffiliateLink {
   rating: number;
 }
 
+interface SpotContext {
+  name: string;
+  category: string;
+  description: string;
+  enjoyments: string[];
+  godName?: string;
+}
+
+// spot 情報に基づく動的フォールバック（個別Agent未登録のスポット用）
+function getSpotFallbackResponse(
+  message: string,
+  spot: SpotContext,
+  ugc: UgcPost[],
+  affiliates: AffiliateLink[],
+  godName: string
+): string {
+  const msg = message.toLowerCase();
+  const wantsFood = msg.includes('飯') || msg.includes('食') || msg.includes('おいしい') || msg.includes('ランチ') || msg.includes('店') || msg.includes('グルメ') || msg.includes('ディナー');
+  const wantsHotel = msg.includes('宿') || msg.includes('泊') || msg.includes('ホテル') || msg.includes('旅館');
+  const wantsActivity = msg.includes('体験') || msg.includes('ツアー') || msg.includes('遊') || msg.includes('観光') || msg.includes('見どころ') || msg.includes('おすすめ') || msg.includes('楽し') || msg.includes('何');
+  const wantsHistory = msg.includes('歴史') || msg.includes('由来') || msg.includes('起源') || msg.includes('豆知識') || msg.includes('知識') || msg.includes('いつ') || msg.includes('どんな');
+
+  const restaurant = affiliates.find(a => a.category === 'restaurant');
+  const hotel = affiliates.find(a => a.category === 'hotel');
+  const activity = affiliates.find(a => a.category === 'activity');
+  const randomUgc = ugc.length > 0 ? ugc[Math.floor(Math.random() * ugc.length)] : null;
+  const enjoy = spot.enjoyments && spot.enjoyments.length > 0
+    ? spot.enjoyments[Math.floor(Math.random() * spot.enjoyments.length)]
+    : null;
+
+  if (wantsFood) {
+    if (restaurant) return `ほう、腹が減ったか。${spot.name}の界隈なら「${restaurant.title}」がよいぞ。立ち寄ってみるがよい。 (${restaurant.url})`;
+    return `この${spot.name}の周りには、地元に愛される小さな店が多い。歩きながら気になる暖簾をくぐってみるのも一興じゃ。`;
+  }
+  if (wantsHotel) {
+    if (hotel) return `旅の疲れを癒やすなら「${hotel.title}」がよかろう。ゆるりと体を休めるがよい。 (${hotel.url})`;
+    return `この辺りは都心ゆえ、宿には事欠かぬ。新中野・中野駅の周辺を探せば、よき宿が見つかるじゃろう。`;
+  }
+  if (wantsActivity && activity) {
+    return `この地を深く味わうなら「${activity.title}」もよいぞ。新たな発見があるじゃろう。 (${activity.url})`;
+  }
+  if (wantsHistory) {
+    return `${spot.name}はな…${spot.description} 古きを訪ねて新しきを知る、よき心がけじゃ。`;
+  }
+  if (randomUgc) {
+    return `ある巡礼者、${randomUgc.userDisplayName}がこう申しておった。「${randomUgc.content.substring(0, 60)}…」とな。参考にするがよい。`;
+  }
+  if (enjoy) {
+    return `わしは${godName}。この${spot.name}での過ごし方を一つ授けよう——「${enjoy}」。ゆるりと楽しむがよい。`;
+  }
+  return `わしは${spot.name}に宿る${godName}じゃ。${spot.description} さあ、何が知りたい？歴史でも、見どころでも、尋ねるがよい。`;
+}
+
 // Local mock templates for when OpenAI API key is missing
 function getFallbackResponse(
   message: string,
@@ -129,14 +182,19 @@ function getFallbackResponse(
 
 export async function POST(request: Request) {
   try {
-    const { message, history, spotId, agent, ugc, affiliates, userName } = await request.json();
+    const { message, history, spotId, agent, ugc, affiliates, userName, spot } = await request.json();
 
     const apiKey = process.env.OPENAI_API_KEY;
 
+    // 個別Agentが無いスポット（合成エージェント）は spot 情報で応答する
+    const isSynthetic = typeof agent?.id === 'string' && agent.id.startsWith('agent-synthetic-');
+
     if (!apiKey) {
       // API Key is not set, use the robust rule-based fallback
-      const responseText = getFallbackResponse(message, agent, ugc, affiliates, userName || '巡礼者');
-      
+      const responseText = (isSynthetic && spot)
+        ? getSpotFallbackResponse(message, spot, ugc, affiliates, agent?.name || spot.name)
+        : getFallbackResponse(message, agent, ugc, affiliates, userName || '巡礼者');
+
       // Simulate network latency (500ms)
       await new Promise((resolve) => setTimeout(resolve, 600));
 
@@ -201,13 +259,16 @@ Remember: Answer in character, be extremely concise (under 150 characters), and 
     
     // In case of error (e.g. invalid key, timeout), fallback gracefully
     const body = await request.clone().json();
-    const responseText = getFallbackResponse(
-      body.message,
-      body.agent,
-      body.ugc,
-      body.affiliates,
-      body.userName || '巡礼者'
-    );
+    const bodySynthetic = typeof body.agent?.id === 'string' && body.agent.id.startsWith('agent-synthetic-');
+    const responseText = (bodySynthetic && body.spot)
+      ? getSpotFallbackResponse(body.message, body.spot, body.ugc, body.affiliates, body.agent?.name || body.spot.name)
+      : getFallbackResponse(
+          body.message,
+          body.agent,
+          body.ugc,
+          body.affiliates,
+          body.userName || '巡礼者'
+        );
     
     return NextResponse.json({ 
       response: responseText, 

@@ -1,11 +1,14 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Home, Award, UserCircle2, Trophy, Sparkles, MapPin, Check, Edit2 } from 'lucide-react';
-import { db, Spot, Agent, User as UserType } from '../lib/db';
+import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, MessageSquare, Heart } from 'lucide-react';
+import { db, Spot, Agent, User as UserType, UserContribution } from '../lib/db';
 import HomeTab from '../components/HomeTab';
 import MapTab from '../components/MapTab';
-import { getLevelInfo, LEVELS } from '../data/levels';
+import SpotDetail from '../components/SpotDetail';
+import { getLevelInfo } from '../data/levels';
+import { getBadgeStates, godAvatarEmoji } from '../data/badges';
+import { getChallenge } from '../data/challenges';
 
 type TabType = 'home' | 'quest' | 'mypage';
 
@@ -22,9 +25,12 @@ export default function HomePage() {
   const [spots, setSpots] = useState<Spot[]>([]);
   const [activeSpot, setActiveSpot] = useState<Spot | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
+  const [detailSpot, setDetailSpot] = useState<Spot | null>(null);
+  const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
 
   // User state
   const [currentUser, setCurrentUser] = useState<UserType | null>(null);
+  const [userStats, setUserStats] = useState<UserContribution | null>(null);
   const [creatorProfiles, setCreatorProfiles] = useState<{ [userId: string]: UserType }>({});
   const [userLocation, setUserLocation] = useState({ lat: 35.6580, lng: 139.7514 });
 
@@ -38,6 +44,8 @@ export default function HomePage() {
   const [editName, setEditName] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [mypageTab, setMypageTab] = useState<'posts' | 'badges' | 'quests'>('posts');
 
   // Initial load
   useEffect(() => {
@@ -55,12 +63,25 @@ export default function HomePage() {
       setCurrentUser(self);
       setEditName(self.displayName);
     }
+    setUserStats(db.getUserStats('user-self'));
+    setActiveChallengeId(db.getChallengeProgress().activeId);
 
     if (typeof window !== 'undefined') {
       const claimed = localStorage.getItem('yaorozu_claimed_quests');
       if (claimed) setClaimedQuests(JSON.parse(claimed));
       setHasChatted(localStorage.getItem('yaorozu_quest_chatted') === 'true');
       setHasTakenPhoto(localStorage.getItem('yaorozu_quest_photo') === 'true');
+    }
+  }, []);
+
+  // 実際のGPS現在地を取得して反映
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => { /* 取得失敗時は既定の現在地を維持 */ },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+      );
     }
   }, []);
 
@@ -78,6 +99,7 @@ export default function HomePage() {
     setCreatorProfiles(profiles);
     const self = db.getUser('user-self');
     if (self) setCurrentUser(self);
+    setUserStats(db.getUserStats('user-self'));
     if (activeSpot) {
       const refreshedSpot = db.getSpot(activeSpot.id);
       if (refreshedSpot) setActiveSpot(refreshedSpot);
@@ -138,7 +160,7 @@ export default function HomePage() {
   
 
   const NAV_TABS = [
-    { key: 'home' as TabType, label: 'ホーム', icon: Home },
+    { key: 'home' as TabType, label: 'クエスト', icon: Flag },
     { key: 'quest' as TabType, label: 'マップ', icon: MapPin },
     { key: 'mypage' as TabType, label: 'マイページ', icon: UserCircle2 },
   ];
@@ -164,15 +186,15 @@ export default function HomePage() {
             {/* ── ホーム (Map) ── */}
             {activeTab === 'home' && (
               <HomeTab
-                spots={spots}
                 currentUser={currentUser || FALLBACK_CURRENT_USER}
                 userLocation={userLocation}
-                setUserLocation={setUserLocation}
-                creatorProfiles={creatorProfiles}
-                activeSpot={activeSpot}
-                onSelectSpot={setActiveSpot}
-                onNavigateToQuest={() => setActiveTab('quest')}
-                homeResetSignal={homeResetSignal}
+                onStartChallenge={(cid) => {
+                  db.setActiveChallenge(cid);
+                  setActiveChallengeId(cid);
+                  setActiveTab('quest');
+                }}
+                onEndChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
+                onChanged={refreshDatabaseStates}
               />
             )}
 
@@ -186,6 +208,16 @@ export default function HomePage() {
                   userLocation={userLocation}
                   setUserLocation={setUserLocation}
                   creatorProfiles={creatorProfiles}
+                  onOpenDetail={setDetailSpot}
+                  activeChallenge={activeChallengeId ? getChallenge(activeChallengeId) ?? null : null}
+                  onClearChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
+                  onAdvanceChallenge={(stepId) => {
+                    if (!activeChallengeId || !currentUser) return;
+                    const ch = getChallenge(activeChallengeId);
+                    if (!ch) return;
+                    db.completeChallengeStep(currentUser.id, activeChallengeId, stepId, ch.steps.length);
+                    refreshDatabaseStates();
+                  }}
                 />
               </div>
             )}
@@ -193,141 +225,182 @@ export default function HomePage() {
 
             {/* ── マイページ ── */}
             {activeTab === 'mypage' && currentUser && (
-              <div className="p-4 space-y-4 overflow-y-auto h-full">
-                {/* Profile Card */}
-                <div className="bg-white rounded-3xl p-5 shadow-sm border border-black/5 flex flex-col items-center text-center gap-3">
+              <div className="overflow-y-auto h-full bg-white">
+                {/* ヘッダ：アイコン＋名前（編集はコンパクト） */}
+                <div className="px-5 pt-8 pb-5 flex flex-col items-center text-center border-b border-black/5">
                   <div
-                    className="w-20 h-20 rounded-full overflow-hidden border-4 shadow-lg"
-                    style={{ borderColor: currentUser.avatarFrameColor || '#e5e7eb' }}
+                    className="w-20 h-20 rounded-full border-4 shadow-lg bg-gradient-to-br from-blue-100 via-white to-amber-100 flex items-center justify-center text-4xl"
+                    style={{ borderColor: currentUser.avatarFrameColor || '#93c5fd' }}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={currentUser.avatarUrl} alt={currentUser.displayName} className="w-full h-full object-cover" />
+                    {godAvatarEmoji(currentUser.id)}
                   </div>
-                  <div>
-                    <h2 className="text-lg font-black text-gray-900">{currentUser.displayName}</h2>
-                    <span className="text-[10px] bg-gold/15 border border-gold/30 text-amber-800 font-bold px-2.5 py-0.5 rounded-full mt-1 inline-block">
-                      {currentUser.currentTitle}
-                    </span>
-                  </div>
-                  {/* Stats */}
-                  <div className="grid grid-cols-2 gap-3 w-full mt-1">
-                    <div className="bg-amber-50 rounded-2xl p-3 flex flex-col items-center">
-                      <Trophy className="w-4 h-4 text-gold mb-1" />
-                      <span className="text-lg font-black text-gray-900">{currentUser.totalToku}</span>
-                      <span className="text-[9px] text-gray-500">累積徳ポイント</span>
+
+                  {/* 名前＋コンパクト編集 */}
+                  {editingProfile ? (
+                    <div className="flex items-center gap-1.5 mt-2.5">
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        maxLength={12}
+                        className="bg-white border border-gray-200 rounded-lg px-2.5 py-1 text-sm text-gray-800 focus:outline-none focus:border-shrine-red w-40 text-center"
+                        placeholder="名前"
+                      />
+                      <button
+                        onClick={() => { handleSaveProfile(); setEditingProfile(false); }}
+                        disabled={!editName.trim()}
+                        className="w-7 h-7 rounded-lg bg-shrine-red text-white flex items-center justify-center disabled:opacity-40 cursor-pointer"
+                      >
+                        <Check className="w-4 h-4" />
+                      </button>
                     </div>
-                    <div className="bg-red-50 rounded-2xl p-3 flex flex-col items-center">
-                      <MapPin className="w-4 h-4 text-shrine-red mb-1" />
-                      <span className="text-lg font-black text-gray-900">
-                        {spots.filter(s => s.creatorId === currentUser.id).length}
-                      </span>
-                      <span className="text-[9px] text-gray-500">創世主スポット</span>
+                  ) : (
+                    <div className="flex items-center gap-1.5 mt-2.5">
+                      <h2 className="text-lg font-black text-gray-900">{currentUser.displayName}</h2>
+                      <button
+                        onClick={() => { setEditName(currentUser.displayName); setEditingProfile(true); }}
+                        className="w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-400 hover:text-shrine-red transition-all cursor-pointer"
+                        title="名前を編集"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                  </div>
+                  )}
+
+                  {/* レベル（目立つ大きな表示）＆経験値バー */}
+                  {(() => {
+                    const lvInfo = getLevelInfo(currentUser.totalToku);
+                    const pct = Math.round(lvInfo.progress * 100);
+                    return (
+                      <div className="w-full mt-3 bg-gray-50 rounded-2xl px-4 py-3.5">
+                        <div className="flex items-center gap-3 mb-2.5">
+                          {/* 大きなLvバッジ */}
+                          <div className="flex flex-col items-center justify-center bg-gradient-to-br from-shrine-red to-sky-400 text-white rounded-2xl px-3 py-1.5 shadow-sm flex-shrink-0">
+                            <span className="text-[11px] font-black leading-none opacity-80">LEVEL</span>
+                            <span className="text-2xl font-black leading-none">{lvInfo.current.level}</span>
+                          </div>
+                          <div className="flex-1 min-w-0 text-left">
+                            <div className="text-sm font-black text-gray-900 truncate">{lvInfo.current.title}</div>
+                            <div className="text-[13px] text-gray-500">
+                              <span className="text-gold font-black">{currentUser.totalToku}</span> 徳
+                            </div>
+                          </div>
+                        </div>
+                        <div className="relative pt-3">
+                          <div className="absolute top-0 -translate-x-1/2 flex flex-col items-center transition-all duration-500" style={{ left: `${pct}%` }}>
+                            <Flag className="w-3 h-3 text-shrine-red fill-shrine-red" />
+                          </div>
+                          <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden border border-gray-200/60">
+                            <div className="h-full rounded-full bg-gradient-to-r from-amber-300 to-gold transition-all duration-500" style={{ width: `${pct}%` }} />
+                          </div>
+                          <div className="flex items-center justify-between mt-1.5">
+                            {lvInfo.next ? (
+                              <>
+                                <span className="text-[11px] text-gray-400">次のレベルまで <span className="font-black text-gray-600">あと {lvInfo.tokuToNext} 徳</span></span>
+                                <span className="text-[11px] text-gray-400">次：{lvInfo.next.title}</span>
+                              </>
+                            ) : (
+                              <span className="text-[11px] text-gold font-black">最高位に到達！</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
-                {/* Profile Edit */}
-                <div className="bg-white rounded-3xl p-4 shadow-sm border border-black/5 space-y-3">
-                  <h3 className="text-xs font-black text-gray-700 flex items-center gap-1.5">
-                    <Edit2 className="w-3.5 h-3.5 text-gold" />
-                    プロフィール編集
-                  </h3>
-                  <div className="space-y-1.5">
-                    <label className="text-[9px] text-gray-500 block font-bold">表示名</label>
-                    <input
-                      type="text"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      maxLength={12}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-800 focus:outline-none focus:border-gold transition-all"
-                      placeholder="名前を入力"
-                    />
-                  </div>
-                  <button
-                    onClick={handleSaveProfile}
-                    disabled={!editName.trim() || isSavingProfile}
-                    className="w-full bg-gold hover:opacity-90 text-amber-950 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-40 shadow-sm"
-                  >
-                    {profileSaved ? (
-                      <><Check className="w-3.5 h-3.5" />保存しました！</>
-                    ) : (
-                      <><Sparkles className="w-3.5 h-3.5" />保存する</>
-                    )}
-                  </button>
-                </div>
-
-                {/* Activity summary */}
-                <div className="bg-white rounded-3xl p-4 shadow-sm border border-black/5 space-y-2.5">
-                  <h3 className="text-xs font-black text-gray-700">活動履歴</h3>
-                  {[
-                    { label: '口コミ投稿数', val: db.getUgc().filter(u => u.userId === currentUser.id).length, color: 'text-cyber-blue' },
-                    { label: '獲得いいね数', val: db.getUgc().filter(u => u.userId === currentUser.id).reduce((sum, u) => sum + u.likesCount, 0), color: 'text-shrine-red' },
-                    { label: 'クエスト達成数', val: claimedQuests.length, color: 'text-gold' },
-                  ].map(({ label, val, color }) => (
-                    <div key={label} className="flex items-center justify-between text-xs">
-                      <span className="text-gray-500">{label}</span>
-                      <span className={`font-black ${color}`}>{val}</span>
-                    </div>
+                {/* タブ */}
+                <div className="flex border-b border-black/5 bg-white sticky top-0 z-10">
+                  {([
+                    { key: 'posts', label: '投稿', icon: MessageSquare },
+                    { key: 'quests', label: '達成クエスト', icon: Flag },
+                    { key: 'badges', label: 'バッジ', icon: Trophy },
+                  ] as const).map(({ key, label, icon: Icon }) => (
+                    <button key={key} onClick={() => setMypageTab(key)} className={`flex-1 py-3 flex items-center justify-center gap-1.5 text-xs font-black transition-all cursor-pointer border-b-2 ${mypageTab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
+                      <Icon className="w-3.5 h-3.5" />{label}
+                    </button>
                   ))}
                 </div>
 
-                {/* Badge / Level section */}
-                <div className="bg-white rounded-3xl p-4 shadow-sm border border-black/5 space-y-3">
-                  <h3 className="text-xs font-black text-gray-700 flex items-center gap-1.5">
-                    <Trophy className="w-3.5 h-3.5 text-gold" />
-                    バッジ・称号
-                  </h3>
-                  <div className="grid grid-cols-1 gap-2">
-                    {LEVELS.map((lv) => {
-                      const earned = currentUser.totalToku >= lv.minToku;
-                      const isCurrent = getLevelInfo(currentUser.totalToku).current.level === lv.level;
-                      const BADGE_ICONS: Record<number, string> = { 1: '🚶', 2: '🗺️', 3: '🧘', 4: '⛩️', 5: '✨' };
-                      return (
-                        <div
-                          key={lv.level}
-                          className={`flex items-center gap-3 p-3 rounded-2xl border-2 transition-all ${
-                            isCurrent
-                              ? 'border-gold bg-amber-50 shadow-md'
-                              : earned
-                              ? 'border-gray-200 bg-gray-50'
-                              : 'border-dashed border-gray-200 bg-gray-50/50 opacity-40'
-                          }`}
-                        >
-                          <div
-                            className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0 ${
-                              isCurrent ? 'bg-gold/20' : earned ? 'bg-gray-100' : 'bg-gray-100'
-                            }`}
-                            style={earned && lv.frameColor ? { boxShadow: `0 0 0 2px ${lv.frameColor}` } : {}}
-                          >
-                            {BADGE_ICONS[lv.level]}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className={`text-xs font-black ${
-                                isCurrent ? 'text-amber-800' : earned ? 'text-gray-700' : 'text-gray-400'
-                              }`}>
-                                {lv.title}
+                {/* タブ内容 */}
+                <div className="p-4">
+                  {/* 投稿コンテンツ（自分の口コミ・できごと等） */}
+                  {mypageTab === 'posts' && (() => {
+                    const myPosts = db.getUgc().filter((u) => u.userId === currentUser.id).sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
+                    const spotName = (id: string) => db.getSpot(id)?.name || 'スポット';
+                    return myPosts.length === 0 ? (
+                      <div className="text-center py-12">
+                        <MessageSquare className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                        <p className="text-xs text-gray-400">まだ投稿がありません。<br />スポットで神の依頼に応えて投稿しよう。</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {myPosts.map((post) => (
+                          <div key={post.id} className="bg-white rounded-2xl p-3.5 border border-black/5 shadow-sm">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-[13px] font-black text-shrine-red bg-shrine-red/10 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                <MapPin className="w-2.5 h-2.5" />{spotName(post.spotId)}
                               </span>
-                              {isCurrent && (
-                                <span className="text-[8px] bg-gold text-white font-bold px-1.5 py-0.5 rounded-full">現在</span>
-                              )}
-                              {earned && !isCurrent && (
-                                <span className="text-[8px] bg-green-100 text-green-700 font-bold px-1.5 py-0.5 rounded-full">獲得済</span>
-                              )}
+                              <span className="text-[11px] text-gray-400 flex items-center gap-1">
+                                <Heart className="w-2.5 h-2.5 fill-shrine-red text-shrine-red" />{post.likesCount}
+                              </span>
                             </div>
-                            <div className="text-[9px] text-gray-400 mt-0.5">
-                              {lv.minToku === 0 ? '初期称号' : `得 ${lv.minToku}pt で解放`}
-                            </div>
+                            <p className="text-xs text-gray-700 leading-relaxed">{post.content}</p>
+                            <p className="text-[11px] text-gray-400 mt-1.5">{new Date(post.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
                           </div>
-                          {!earned && (
-                            <span className="text-[9px] text-gray-400 font-mono whitespace-nowrap">
-                              あと {lv.minToku - currentUser.totalToku}pt
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
+                  {/* バッジ */}
+                  {mypageTab === 'badges' && userStats && (() => {
+                    const badges = getBadgeStates(userStats, currentUser);
+                    return (
+                      <div className="grid grid-cols-3 gap-2.5">
+                        {badges.map((b) => (
+                          <div key={b.id} className={`flex flex-col items-center text-center rounded-2xl border p-2.5 ${b.earned ? 'border-gold/40 bg-amber-50' : 'border-gray-200 bg-white'}`}>
+                            <div className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl mb-1 ${b.earned ? 'bg-white shadow-sm' : 'bg-gray-100 grayscale opacity-40'}`}>{b.icon}</div>
+                            <span className={`text-[11px] font-black leading-tight ${b.earned ? 'text-gray-800' : 'text-gray-400'}`}>{b.name}</span>
+                            {b.earned ? (
+                              <span className="text-[11px] text-emerald-600 font-bold mt-0.5">獲得済</span>
+                            ) : (
+                              <div className="w-full mt-1">
+                                <div className="h-1 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-shrine-red/60 rounded-full" style={{ width: `${b.progress * 100}%` }} /></div>
+                                <span className="text-[11px] text-gray-400 mt-0.5 block">{Math.floor(b.current(userStats, currentUser))}/{b.target}</span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
+                  {/* 称号 */}
+                  {/* 達成したクエスト */}
+                  {mypageTab === 'quests' && (() => {
+                    const completedIds = db.getChallengeProgress().completed;
+                    const completedChallenges = completedIds.map((id) => getChallenge(id)).filter((c): c is NonNullable<typeof c> => !!c);
+                    return completedChallenges.length === 0 ? (
+                      <div className="text-center py-12">
+                        <Flag className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                        <p className="text-sm text-gray-400">まだ達成したクエストがありません。<br />クエストを制覇してバッジを集めよう。</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {completedChallenges.map((ch) => (
+                          <div key={ch.id} className="flex items-center gap-3 bg-amber-50/50 rounded-2xl p-3 border border-gold/40">
+                            <div className="w-12 h-12 rounded-xl bg-gold/20 flex items-center justify-center text-3xl flex-shrink-0">{ch.badgeIcon}</div>
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-base font-black text-gray-900 truncate">{ch.title}</h4>
+                              <p className="text-[13px] text-amber-700 font-bold">🏆 「{ch.badgeName}」バッジ獲得</p>
+                            </div>
+                            <span className="text-[11px] font-black text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full flex-shrink-0">制覇</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -354,7 +427,7 @@ export default function HomePage() {
                 }`}
               >
                 <Icon className="w-6 h-6" />
-                <span className="text-[11px]">{label}</span>
+                <span className="text-[13px]">{label}</span>
                 {hasUnread && (
                   <span className="absolute top-0.5 right-2 w-2 h-2 bg-shrine-red rounded-full" />
                 )}
@@ -362,6 +435,31 @@ export default function HomePage() {
             );
           })}
         </nav>
+
+        {/* ── 寺の詳細ページ（写真＋会話＋依頼）── */}
+        {detailSpot && (
+          <SpotDetail
+            key={detailSpot.id}
+            spot={detailSpot}
+            currentUser={currentUser || FALLBACK_CURRENT_USER}
+            allSpots={spots}
+            onClose={() => setDetailSpot(null)}
+            onOpenRelated={(s) => setDetailSpot(s)}
+            onChanged={refreshDatabaseStates}
+            onStartChallenge={(cid) => {
+              db.setActiveChallenge(cid);
+              setActiveChallengeId(cid);
+              setDetailSpot(null);
+              setActiveTab('quest');
+            }}
+            onMessageSent={() => {
+              if (!hasChatted) {
+                setHasChatted(true);
+                localStorage.setItem('yaorozu_quest_chatted', 'true');
+              }
+            }}
+          />
+        )}
       </div>
     </div>
   );

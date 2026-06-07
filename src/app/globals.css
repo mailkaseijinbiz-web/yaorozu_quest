@@ -33,7 +33,8 @@
 @theme {
   --color-gold: #c5a028;
   --color-gold-light: #f3e5ab;
-  --color-shrine-red: #e60012;
+  /* アクセントカラー＝青（旧shrine-redトークンを青に再定義し全体へ反映） */
+  --color-shrine-red: #2563eb;
   --color-shrine-orange: #ff4500;
   --color-cyber-purple: #8b5cf6;
   --color-cyber-blue: #0284c7;
@@ -64,6 +65,56 @@
       border-color: rgba(197, 160, 40, 0.6);
     }
   }
+}
+
+/* 地図ピンのオーバーフロー許可（波紋がはみ出せるように） */
+.custom-spot-icon {
+  overflow: visible !important;
+}
+
+/* スポットの波紋エフェクト（神の存在感） */
+.god-ripple {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(37, 99, 235, 0.45);
+  transform: translate(-50%, -50%) scale(0.4);
+  animation: god-ripple 2.6s ease-out infinite;
+  pointer-events: none;
+}
+.god-ripple-delay { animation-delay: 1.3s; }
+.god-ripple-active { border-color: rgba(37, 99, 235, 0.85); }
+@keyframes god-ripple {
+  0% { transform: translate(-50%, -50%) scale(0.35); opacity: 0.7; }
+  100% { transform: translate(-50%, -50%) scale(2.6); opacity: 0; }
+}
+
+/* チャレンジ達成演出 */
+.celebrate-fade { animation: celebrate-fade 2.6s ease-out forwards; }
+@keyframes celebrate-fade { 0% { opacity: 0; } 12% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+.celebrate-pop { animation: celebrate-pop 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+@keyframes celebrate-pop { 0% { transform: scale(0.4); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+.celebrate-confetti { animation: celebrate-confetti 1.2s ease-in-out infinite; }
+@keyframes celebrate-confetti { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+
+/* スポット名（フキダシ外の縁取り文字・Google Map ラベル風） */
+.map-spot-name {
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+  color: #1e2024;
+  /* 白フチで地図上でも読みやすく */
+  text-shadow:
+    -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff,
+    0 1px 2px rgba(0,0,0,0.25);
+  pointer-events: none;
+}
+.map-spot-name-active {
+  color: #2563eb;
 }
 
 /* Custom Scrollbar (Light Theme) */

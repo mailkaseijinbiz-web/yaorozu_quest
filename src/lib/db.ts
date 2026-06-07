@@ -1,4 +1,6 @@
 // Yaorozu God OS - Mock Database & State Management
+import { generateTokyoSpots } from '../data/tokyo-spots';
+import { generateTrivia } from '../data/trivia-seed';
 
 export interface User {
   id: string;
@@ -27,6 +29,15 @@ export interface Spot {
   godName: string; // 神の名前 (人格)
   godEmoji: string; // 神のアイコン絵文字
   godRequests: string[]; // 神がフキダシで出す要望リスト (ローテーション表示)
+  taskTypes?: string[]; // 神が依頼できるタスク種別 (未設定ならカテゴリ標準。管理画面で設定)
+  photos?: string[]; // ユーザー投稿写真 (初期は空。投稿でセット、不適切は却下で削除)
+}
+
+export interface SpotPhoto {
+  url: string;
+  userId: string;
+  userDisplayName: string;
+  createdAt: string;
 }
 
 export interface UgcPost {
@@ -65,6 +76,7 @@ export interface AffiliateLink {
 }
 
 // Initial Mock Data
+
 const INITIAL_USERS: User[] = [
   {
     id: 'user-self',
@@ -78,7 +90,18 @@ const INITIAL_USERS: User[] = [
     displayName: 'タカシ@ローカルガイド',
     avatarUrl: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=takashi',
     totalToku: 320,
-    currentTitle: 'const INITIAL_SPOTS: Spot[] = [
+    currentTitle: '名誉ガイド',
+  },
+  {
+    id: 'user-history-geek',
+    displayName: '歴オタのハルカ',
+    avatarUrl: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=haruka',
+    totalToku: 480,
+    currentTitle: '大徳者',
+  }
+];
+
+const INITIAL_SPOTS: Spot[] = [
   {
     id: 'spot-jukusen',
     name: '成願寺',
@@ -114,7 +137,8 @@ const INITIAL_USERS: User[] = [
     latitude: 35.6933,
     longitude: 139.6625,
     creatorId: null,
-    imageUrl: 'https://images.unsplash.com/photo-1522383225653-ed111181a951?w=800&q=80',
+    imageUrl: '', // 初期は写真なし。ユーザー投稿でセットされる
+    photos: [],
     category: '公園',
     tokuRequirement: 30,
     enjoyments: [
@@ -218,9 +242,6 @@ const INITIAL_USERS: User[] = [
       '🗣️ 美味い店を口コミで教えてくれ！',
       '🍺 夜の商店街の雰囲気を伝えてほしい！',
     ]
-  }
-];��ー向け'],
-    cacheType: 'Virtual'
   },
   {
     id: 'spot-meijijingu',
@@ -240,7 +261,15 @@ const INITIAL_USERS: User[] = [
     difficulty: 1,
     terrain: 1,
     attributes: ['🌲 森林浴', '⛩️ 神社', '♿ バリアフリー', '👪 ファミリー向け'],
-    cacheType: 'Virtual'
+    cacheType: 'Virtual',
+    godName: '明治の杜の精霊・コダマ',
+    godEmoji: '🌲',
+    godRequests: [
+      '📸 杜の静けさが伝わる一枚を撮ってほしい',
+      '🧩 参拝の作法クイズを作ってくれませんか',
+      '🗣️ 都会の森の魅力を口コミで伝えて',
+      '🙏 清正井で感じたことを聞かせてください',
+    ]
   },
   {
     id: 'spot-itsukushima',
@@ -260,9 +289,20 @@ const INITIAL_USERS: User[] = [
     difficulty: 2,
     terrain: 2,
     attributes: ['🌊 海辺', '🦌 鹿あり', '⛩️ 神社', '🚢 フェリー必須'],
-    cacheType: 'EarthCache'
-  }
+    cacheType: 'EarthCache',
+    godName: '市杵島姫・イチカ',
+    godEmoji: '🌊',
+    godRequests: [
+      '📸 潮の満ち引きで変わる大鳥居を撮ってほしい',
+      '🧩 平清盛にまつわるクイズを作っておくれ',
+      '🗣️ 宮島の美しさを口コミで広めて',
+      '🍶 焼き牡蠣やもみじ饅頭の感想を聞かせて',
+    ]
+  },
+  // 東京周辺の手続き生成スポット（合計で約1000件になる）
+  ...generateTokyoSpots(),
 ];
+
 
 const INITIAL_AGENTS: Agent[] = [
   {
@@ -431,14 +471,80 @@ const INITIAL_AFFILIATE_LINKS: AffiliateLink[] = [
   }
 ];
 
+// 蘊蓄データベース 初期データ（管理コンソールで追加・編集可能）
+const INITIAL_TRIVIA: TriviaEntry[] = [
+  { id: 'tr-1', title: '鍋屋横丁の由来', category: '歴史', area: '新中野', content: '江戸期、妙法寺への参道入口にあった茶屋「鍋屋」が地名の由来。参詣客の目印になった。' },
+  { id: 'tr-2', title: '青梅街道は石灰の道', category: '道路', area: '新中野', content: '江戸城の漆喰に使う石灰を青梅・成木から運ぶために整備された街道。' },
+  { id: 'tr-3', title: '桃園川の暗渠', category: '地形', area: '中野', content: '桃園川は暗渠化され緑道に。S字に蛇行する道筋が旧河道を物語る。' },
+  { id: 'tr-4', title: '看板建築', category: '建築', area: '新中野', content: '正面だけを洋風に装飾した商店建築。下町の商店街に点在する。' },
+  { id: 'tr-5', title: '丸ノ内線 新中野駅', category: '建築', area: '新中野', content: '昭和36年（1961）開業。「新」は中野駅と区別するため付けられた。' },
+  // 東京各エリアの蘊蓄を約1000件 収集・保持
+  ...generateTrivia(),
+];
+
 // Local Storage Keys
 const KEYS = {
   USERS: 'yaorozu_users',
-  SPOTS: 'yaorozu_spots',
+  SPOTS: 'yaorozu_spots_v2', // v2: 東京1000スポットへ拡張のため再シード
   AGENTS: 'yaorozu_agents',
   UGC: 'yaorozu_ugc',
   AFFILIATE: 'yaorozu_affiliate',
+  STATS: 'yaorozu_user_stats',
+  CHALLENGE: 'yaorozu_challenge_progress',
+  TRIVIA: 'yaorozu_trivia',
 };
+
+// チャレンジ進捗
+export interface ChallengeProgress {
+  activeId: string | null; // 今挑戦中のチャレンジ
+  done: { [challengeId: string]: string[] }; // 達成済みステップID
+  completed: string[]; // 制覇したチャレンジ（バッジ獲得）
+}
+
+// 町歩きの蘊蓄（管理コンソールで収集・保持するデータベース）
+export interface TriviaEntry {
+  id: string;
+  title: string;
+  category: '地形' | '歴史' | '建築' | '道路';
+  area: string;
+  content: string;
+}
+
+// 訪問でもらえるアイテム（他スポットへ届けられる）
+export interface InventoryItem {
+  id: string;
+  name: string;
+  icon: string;
+  fromSpotName: string; // 入手元スポット
+  toSpotId: string; // 届け先スポット
+  toSpotName: string;
+  delivered: boolean;
+}
+
+// ユーザーの貢献度（訪問・タスク達成数・フォロー・アイテム）
+export interface UserContribution {
+  visitedSpotIds: string[];
+  taskCounts: { [type: string]: number }; // photo/cleaning/review/... の達成回数
+  spotContrib: { [spotId: string]: number }; // スポット別の貢献徳（石碑ランキング用）
+  items: InventoryItem[]; // 所持アイテム
+  followers: number;
+  following: number;
+}
+
+function defaultContribution(): UserContribution {
+  return { visitedSpotIds: [], taskCounts: {}, spotContrib: {}, items: [], followers: 0, following: 0 };
+}
+
+// アイテムの種類（神社仏閣にちなんだ品）
+const ITEM_POOL: { name: string; icon: string }[] = [
+  { name: 'お守り', icon: '🧿' },
+  { name: '御神酒', icon: '🍶' },
+  { name: '絵馬', icon: '🎴' },
+  { name: '神札', icon: '🎋' },
+  { name: '鈴', icon: '🔔' },
+  { name: '御朱印', icon: '📜' },
+  { name: '破魔矢', icon: '🏹' },
+];
 
 // Database class wrapping client side state
 class MockDatabase {
@@ -664,6 +770,265 @@ class MockDatabase {
   // Share spot to SNS and earn +15 Toku
   shareSpot(userId: string, spotId: string): void {
     this.rewardToku(userId, 15);
+  }
+
+  // ────────────────────────────────────────────────
+  // 写真UGC（初期は空。投稿でセット、不適切は却下で削除）
+  // ────────────────────────────────────────────────
+
+  /** スポットの投稿写真一覧 */
+  getSpotPhotos(spotId: string): string[] {
+    const spot = this.getSpot(spotId);
+    return spot?.photos ?? [];
+  }
+
+  /** 表示用のメイン写真（無ければ空文字＝未投稿） */
+  getPrimaryPhoto(spotId: string): string {
+    const spot = this.getSpot(spotId);
+    if (!spot) return '';
+    if (spot.photos && spot.photos.length > 0) return spot.photos[0];
+    return spot.imageUrl || '';
+  }
+
+  /** 写真を投稿（神への奉納）。初投稿ならスポット写真がセットされる。+30徳 */
+  addSpotPhoto(userId: string, spotId: string, url: string): Spot | undefined {
+    const spots = this.getSpots();
+    const idx = spots.findIndex(s => s.id === spotId);
+    if (idx === -1) return undefined;
+
+    const spot = spots[idx];
+    spot.photos = [...(spot.photos ?? []), url];
+    // メイン画像が未設定ならこの投稿をメインにする
+    if (!spot.imageUrl) spot.imageUrl = url;
+    spots[idx] = spot;
+    this.save(KEYS.SPOTS, spots);
+
+    this.rewardToku(userId, 30);
+    this.recalculateSpotCreator(spotId);
+    return spot;
+  }
+
+  /** 不適切な写真を却下（削除）。誰でも実行可能なコミュニティモデレーション */
+  rejectSpotPhoto(spotId: string, url: string): Spot | undefined {
+    const spots = this.getSpots();
+    const idx = spots.findIndex(s => s.id === spotId);
+    if (idx === -1) return undefined;
+
+    const spot = spots[idx];
+    spot.photos = (spot.photos ?? []).filter(p => p !== url);
+    // メイン画像が却下されたら次の投稿写真へ差し替え（無ければ空）
+    if (spot.imageUrl === url) spot.imageUrl = spot.photos[0] ?? '';
+    spots[idx] = spot;
+    this.save(KEYS.SPOTS, spots);
+    return spot;
+  }
+
+  /** 神がUGCによって成長：楽しみ方を1つ追加 */
+  addEnjoyment(spotId: string, text: string): Spot | undefined {
+    const spots = this.getSpots();
+    const idx = spots.findIndex(s => s.id === spotId);
+    if (idx === -1) return undefined;
+    const spot = spots[idx];
+    if (!spot.enjoyments.includes(text)) {
+      spot.enjoyments = [...spot.enjoyments, text];
+      spots[idx] = spot;
+      this.save(KEYS.SPOTS, spots);
+    }
+    return spot;
+  }
+
+  /** 汎用：神の依頼タスク達成で徳を付与 */
+  completeGodTask(userId: string, spotId: string, reward: number): void {
+    this.rewardToku(userId, reward);
+    this.recalculateSpotCreator(spotId);
+  }
+
+  // ────────────────────────────────────────────────
+  // 貢献度（訪問・タスク達成数・フォロー）
+  // ────────────────────────────────────────────────
+
+  private getAllStats(): { [userId: string]: UserContribution } {
+    return this.load(KEYS.STATS, {} as { [userId: string]: UserContribution });
+  }
+
+  /** ユーザーの貢献度を取得（未登録なら既定値。user-self は初期フォロー数を付与） */
+  getUserStats(userId: string): UserContribution {
+    const all = this.getAllStats();
+    const existing = all[userId];
+    if (existing) return { ...defaultContribution(), ...existing };
+    const base = defaultContribution();
+    if (userId === 'user-self') {
+      base.followers = 256;
+      base.following = 128;
+    }
+    return base;
+  }
+
+  private saveUserStats(userId: string, stats: UserContribution): void {
+    const all = this.getAllStats();
+    all[userId] = stats;
+    this.save(KEYS.STATS, all);
+  }
+
+  /** スポット別貢献徳を加算（石碑ランキング用） */
+  private addSpotContrib(userId: string, spotId: string, amount: number): void {
+    const stats = this.getUserStats(userId);
+    stats.spotContrib = { ...stats.spotContrib, [spotId]: (stats.spotContrib[spotId] || 0) + amount };
+    this.saveUserStats(userId, stats);
+  }
+
+  /** スポット訪問を記録（重複は無視）。+5徳の探訪ボーナス。一部でアイテム付与 */
+  recordVisit(userId: string, spotId: string): UserContribution {
+    const stats = this.getUserStats(userId);
+    if (!stats.visitedSpotIds.includes(spotId)) {
+      stats.visitedSpotIds = [...stats.visitedSpotIds, spotId];
+      this.rewardToku(userId, 5);
+      this.addSpotContrib(userId, spotId, 5);
+      // 一部のスポットでアイテムを授かる（決定論的）
+      const spot = this.getSpot(spotId);
+      let h = 0;
+      for (let i = 0; i < spotId.length; i++) h = (h * 31 + spotId.charCodeAt(i)) >>> 0;
+      if (spot && h % 2 === 0 && !stats.items.some((it) => it.id === `item-${spotId}`)) {
+        const tmpl = ITEM_POOL[h % ITEM_POOL.length];
+        const others = this.getSpots().filter((s) => s.id !== spotId);
+        const dest = others.length > 0 ? others[h % others.length] : spot;
+        stats.items = [
+          ...stats.items,
+          {
+            id: `item-${spotId}`,
+            name: tmpl.name,
+            icon: tmpl.icon,
+            fromSpotName: spot.name,
+            toSpotId: dest.id,
+            toSpotName: dest.name,
+            delivered: false,
+          },
+        ];
+      }
+      this.saveUserStats(userId, stats);
+    }
+    return stats;
+  }
+
+  /** 所持アイテム一覧 */
+  getItems(userId: string): InventoryItem[] {
+    return this.getUserStats(userId).items;
+  }
+
+  /** アイテムを届け先スポットへ配達。+25徳＋配達先へ貢献徳 */
+  deliverItem(userId: string, itemId: string): InventoryItem | undefined {
+    const stats = this.getUserStats(userId);
+    const item = stats.items.find((i) => i.id === itemId);
+    if (!item || item.delivered) return undefined;
+    item.delivered = true;
+    this.saveUserStats(userId, stats);
+    this.rewardToku(userId, 25);
+    this.addSpotContrib(userId, item.toSpotId, 25);
+    return item;
+  }
+
+  /** 神タスク達成回数を記録（称号・バッジ判定に使う） */
+  recordTaskDone(userId: string, type: string, spotId?: string, reward?: number): UserContribution {
+    const stats = this.getUserStats(userId);
+    stats.taskCounts = { ...stats.taskCounts, [type]: (stats.taskCounts[type] || 0) + 1 };
+    this.saveUserStats(userId, stats);
+    if (spotId && reward) this.addSpotContrib(userId, spotId, reward);
+    return stats;
+  }
+
+  /** フォロワー/フォロー数を加算（デモ用） */
+  adjustFollow(userId: string, dFollowers: number, dFollowing: number): UserContribution {
+    const stats = this.getUserStats(userId);
+    stats.followers = Math.max(0, stats.followers + dFollowers);
+    stats.following = Math.max(0, stats.following + dFollowing);
+    this.saveUserStats(userId, stats);
+    return stats;
+  }
+
+  // ────────────────────────────────────────────────
+  // チャレンジ進捗
+  // ────────────────────────────────────────────────
+  getChallengeProgress(): ChallengeProgress {
+    return this.load(KEYS.CHALLENGE, { activeId: null, done: {}, completed: [] } as ChallengeProgress);
+  }
+
+  setActiveChallenge(challengeId: string | null): void {
+    const p = this.getChallengeProgress();
+    p.activeId = challengeId;
+    this.save(KEYS.CHALLENGE, p);
+  }
+
+  /** チャレンジのステップを達成。+rewardの徳。全ステップ達成でcompletedに追加（バッジ獲得） */
+  completeChallengeStep(userId: string, challengeId: string, stepId: string, totalSteps: number, reward = 20): ChallengeProgress {
+    const p = this.getChallengeProgress();
+    const done = new Set(p.done[challengeId] || []);
+    if (!done.has(stepId)) {
+      done.add(stepId);
+      p.done[challengeId] = Array.from(done);
+      this.rewardToku(userId, reward);
+    }
+    if (done.size >= totalSteps && !p.completed.includes(challengeId)) {
+      p.completed.push(challengeId);
+      this.rewardToku(userId, 100); // 制覇ボーナス
+    }
+    this.save(KEYS.CHALLENGE, p);
+    return p;
+  }
+
+  // ────────────────────────────────────────────────
+  // 蘊蓄データベース（管理コンソール）
+  // ────────────────────────────────────────────────
+  getTrivia(): TriviaEntry[] {
+    return this.load(KEYS.TRIVIA, INITIAL_TRIVIA);
+  }
+
+  adminSaveTrivia(t: TriviaEntry): TriviaEntry {
+    const all = this.getTrivia();
+    const i = all.findIndex((x) => x.id === t.id);
+    if (i === -1) all.push(t);
+    else all[i] = t;
+    this.save(KEYS.TRIVIA, all);
+    return t;
+  }
+
+  adminDeleteTrivia(id: string): void {
+    this.save(KEYS.TRIVIA, this.getTrivia().filter((t) => t.id !== id));
+  }
+
+  /** スポットの徳ランキング（石碑）：そのスポットで徳を生んだユーザー上位
+   *  UGC投稿による徳＋タスク/写真/訪問による貢献徳を合算する。 */
+  getSpotRanking(spotId: string): { user: User; toku: number }[] {
+    const users = this.getUsers();
+    const allStats = this.getAllStats();
+    return users
+      .map((user) => {
+        const ugcToku = this.getTokuAtSpot(user.id, spotId);
+        const contribToku = allStats[user.id]?.spotContrib?.[spotId] || 0;
+        return { user, toku: ugcToku + contribToku };
+      })
+      .filter((r) => r.toku > 0)
+      .sort((a, b) => b.toku - a.toku)
+      .slice(0, 5);
+  }
+
+  /** スポットに集まった徳の総量（地図のフキダシ「徳 123」用）。
+   *  シード人気値＋全ユーザーの貢献徳＋UGC由来の徳。 */
+  getSpotToku(spotId: string): number {
+    let h = 0;
+    for (let i = 0; i < spotId.length; i++) h = (h * 31 + spotId.charCodeAt(i)) >>> 0;
+    const base = h % 1800; // シード人気値
+
+    const allStats = this.getAllStats();
+    let contrib = 0;
+    Object.keys(allStats).forEach((uid) => {
+      contrib += allStats[uid]?.spotContrib?.[spotId] || 0;
+    });
+
+    const ugcToku = this.getUgc()
+      .filter((p) => p.spotId === spotId)
+      .reduce((sum, p) => sum + 50 + p.likesCount * 10, 0);
+
+    return base + contrib + ugcToku;
   }
 
   // Reward Toku points to user and update their title

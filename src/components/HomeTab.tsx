@@ -1,234 +1,225 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Award, Map, MapPin, ChevronRight, Compass, Target, Lock, Sparkles, Flag } from 'lucide-react';
-import { Spot, User } from '../lib/db';
-import MapTab from './MapTab';
-import { SHINNAKANO_QUIZZES, quizDistance, isQuizUnlocked } from '../data/shinnakano-quiz';
+import { MapPin, Trophy, Flag, Clock, X } from 'lucide-react';
+import { User, db } from '../lib/db';
+import { CHALLENGES, difficultyLabel, Challenge } from '../data/challenges';
 import { getLevelInfo } from '../data/levels';
 
 interface HomeTabProps {
-  spots: Spot[];
   currentUser: User;
   userLocation: { lat: number; lng: number };
-  setUserLocation: (loc: { lat: number; lng: number }) => void;
-  creatorProfiles: { [userId: string]: User };
-  activeSpot: Spot | null;
-  onSelectSpot: (spot: Spot) => void;
-  onNavigateToQuest: () => void;
-  homeResetSignal?: number;
+  onStartChallenge: (challengeId: string) => void;
+  onEndChallenge?: () => void;
+  onChanged?: () => void;
 }
 
-export default function HomeTab({
-  spots,
-  currentUser,
-  userLocation,
-  setUserLocation,
-  creatorProfiles,
-  activeSpot,
-  onSelectSpot,
-  onNavigateToQuest,
-  homeResetSignal,
-}: HomeTabProps) {
-  const [view, setView] = useState<'discover' | 'map'>('discover');
+function distKm(aLat: number, aLng: number, bLat: number, bLng: number) {
+  const R = 6371;
+  const dLat = ((bLat - aLat) * Math.PI) / 180;
+  const dLng = ((bLng - aLng) * Math.PI) / 180;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
 
-  // ホームタブを押されたら地図ビューからホーム（discover）へ戻す
-  useEffect(() => {
-    if (homeResetSignal !== undefined) setView('discover');
-  }, [homeResetSignal]);
+export default function HomeTab({ currentUser, userLocation, onStartChallenge, onEndChallenge }: HomeTabProps) {
+  // localStorage 依存のため、マウント後にのみ動的レンダリング（ハイドレーション不一致回避）
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
-  // 近くのミッション（クイズ）— 距離順
-  const sortedMissions = SHINNAKANO_QUIZZES
-    .map(q => ({ quiz: q, dist: quizDistance(q, userLocation), unlocked: isQuizUnlocked(q, userLocation) }))
-    .sort((a, b) => a.dist - b.dist);
+  // フィルタ：すべて / 未達成のみ / 達成したもの / 参加できるもの
+  const [filter, setFilter] = useState<'all' | 'todo' | 'done' | 'joinable'>('all');
+  const [confirmCh, setConfirmCh] = useState<Challenge | null>(null); // 参加確認モーダル
 
+  const progress = db.getChallengeProgress();
+  const userLevel = getLevelInfo(currentUser.totalToku).current.level;
 
+  // フィルタごとの件数
+  const FILTERS = [
+    { key: 'all', label: 'すべて', n: CHALLENGES.length },
+    { key: 'todo', label: '未達成', n: CHALLENGES.filter((c) => !progress.completed.includes(c.id)).length },
+    { key: 'done', label: '達成', n: progress.completed.length },
+    { key: 'joinable', label: '参加できる', n: CHALLENGES.filter((c) => userLevel >= c.minLevel && !progress.completed.includes(c.id)).length },
+  ] as const;
 
-  if (view === 'map') {
-    return (
-      <div className="relative w-full h-full flex flex-col">
-        <button
-          onClick={() => setView('discover')}
-          className="absolute top-4 left-4 z-[2000] flex items-center gap-1.5 bg-white/95 border border-black/10 shadow-lg px-3 py-2 rounded-full text-sm font-black text-gray-700 cursor-pointer hover:bg-white transition-all backdrop-blur-md"
-        >
-          ← ホームに戻る
-        </button>
-        <MapTab
-          spots={spots}
-          activeSpot={activeSpot}
-          onSelectSpot={onSelectSpot}
-          userLocation={userLocation}
-          setUserLocation={setUserLocation}
-          creatorProfiles={creatorProfiles}
-        />
-      </div>
-    );
-  }
+  // フィルタ → 第1ソート＝参加できるもの、第2ソート＝距離の近い順
+  const nearChallenges = [...CHALLENGES]
+    .filter((ch) => {
+      const completed = progress.completed.includes(ch.id);
+      const ok = userLevel >= ch.minLevel;
+      if (filter === 'todo') return !completed;
+      if (filter === 'done') return completed;
+      if (filter === 'joinable') return ok && !completed;
+      return true;
+    })
+    .map((ch) => ({
+      ch,
+      d: distKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng),
+      ok: userLevel >= ch.minLevel,
+    }))
+    .sort((a, b) => {
+      if (a.ok !== b.ok) return a.ok ? -1 : 1;
+      return a.d - b.d;
+    })
+    .slice(0, 20)
+    .map((x) => x.ch);
 
   return (
     <div className="flex flex-col h-full overflow-y-auto bg-[#f5f7fa]">
-
       {/* ── ブランドヘッダー ── */}
-      <div className="px-5 pt-8 pb-5 flex flex-col items-center text-center">
+      <div className="px-5 pt-8 pb-4 flex flex-col items-center text-center">
         <h1 className="text-2xl font-black tracking-tight leading-none">
           <span className="text-shrine-red">YAOROZU</span>
           <span className="text-gray-900"> QUEST</span>
         </h1>
         <p className="text-xs text-gray-400 mt-1.5 tracking-wider font-medium">八百万の神が息づく世界へ</p>
-
-        {/* ── レベル & 経験値バー ── */}
-        {(() => {
-          const lvInfo = getLevelInfo(currentUser.totalToku);
-          const pct = Math.round(lvInfo.progress * 100);
-          return (
-            <div className="w-full max-w-[300px] mt-4 bg-white border border-amber-100 rounded-2xl px-4 pt-2.5 pb-3 shadow-sm">
-              {/* 称号・徳 */}
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-black text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
-                    Lv.{lvInfo.current.level}
-                  </span>
-                  <span className="text-xs font-black text-gray-800">{lvInfo.current.title}</span>
-                </div>
-                <span className="text-[11px] text-gray-500 font-semibold">
-                  <span className="text-gold font-black">{currentUser.totalToku}</span> 徳
-                </span>
-              </div>
-
-              {/* バー（旗で現在地を表示） */}
-              <div className="relative pt-3">
-                {/* 旗マーカー */}
-                <div
-                  className="absolute top-0 -translate-x-1/2 flex flex-col items-center transition-all duration-500"
-                  style={{ left: `${pct}%` }}
-                >
-                  <Flag className="w-3 h-3 text-shrine-red fill-shrine-red" />
-                </div>
-                <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden border border-gray-200/60">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-amber-300 to-gold transition-all duration-500"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-                {/* 下部ラベル */}
-                <div className="flex items-center justify-between mt-1.5">
-                  {lvInfo.next ? (
-                    <>
-                      <span className="text-[9px] text-gray-400">
-                        次のレベルまで <span className="font-black text-gray-600">あと {lvInfo.tokuToNext} 徳</span>
-                      </span>
-                      <span className="text-[9px] text-gray-400 flex items-center gap-0.5">
-                        次：{lvInfo.next.title}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-[9px] text-gold font-black">最高位に到達！</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })()}
       </div>
 
-      {/* ── 縦並びアクションボタン ── */}
-      <div className="px-5 py-4 flex flex-col gap-3">
-        {/* クエストを探す */}
-        <button
-          onClick={onNavigateToQuest}
-          className="relative overflow-hidden bg-gradient-to-r from-shrine-red to-rose-500 text-white rounded-2xl px-5 py-4 flex items-center gap-4 shadow-lg shadow-shrine-red/20 hover:opacity-95 active:scale-98 transition-all cursor-pointer"
-        >
-          <div className="w-11 h-11 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
-            <Award className="w-6 h-6 text-white" />
-          </div>
-          <div className="text-left flex-1">
-            <p className="font-black text-base leading-tight">クエストを探す</p>
-            <p className="text-xs text-white/75 mt-0.5">徳を積んで称号をゲット</p>
-          </div>
-          <ChevronRight className="w-5 h-5 text-white/60 flex-shrink-0" />
-        </button>
-
-        {/* 地図から探す */}
-        <button
-          onClick={() => setView('map')}
-          className="relative overflow-hidden bg-gradient-to-r from-slate-700 to-slate-800 text-white rounded-2xl px-5 py-4 flex items-center gap-4 shadow-lg shadow-slate-900/20 hover:opacity-95 active:scale-98 transition-all cursor-pointer"
-        >
-          <div className="w-11 h-11 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
-            <Map className="w-6 h-6 text-white" />
-          </div>
-          <div className="text-left flex-1">
-            <p className="font-black text-base leading-tight">地図から探す</p>
-            <p className="text-xs text-white/75 mt-0.5">レーダーで周辺スポットを確認</p>
-          </div>
-          <ChevronRight className="w-5 h-5 text-white/60 flex-shrink-0" />
-        </button>
-      </div>
-
-      {/* ── 近くのミッション ── */}
-      <div className="px-5 pb-6">
+      {/* ── 近くのヤオロズクエスト（チャレンジ） ── */}
+      <div className="px-5 pb-8">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-base font-black text-gray-900 flex items-center gap-2">
-            <Target className="w-4 h-4 text-shrine-red" />
-            近くのクエスト
+            <Flag className="w-4 h-4 text-shrine-red" />
+            近くのヤオロズクエスト
           </h2>
-          <span className="text-[10px] text-gray-400 font-bold">
-            近づくと神様が呼びかける
-          </span>
+          <span className="text-[13px] text-gray-400 font-bold">達成でバッジ獲得</span>
         </div>
 
-        <div className="flex flex-col gap-2.5">
-          {sortedMissions.map(({ quiz, dist, unlocked }) => {
-            const distText = dist < 1 ? `${Math.round(dist * 1000)}m` : `${dist.toFixed(1)}km`;
+        {/* フィルタ */}
+        <div className="flex gap-1.5 mb-3 overflow-x-auto scrollbar-none">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setFilter(f.key)}
+              className={`flex-shrink-0 text-[13px] font-black px-3 py-1.5 rounded-full border transition-all cursor-pointer ${
+                filter === f.key
+                  ? 'bg-shrine-red text-white border-shrine-red'
+                  : 'bg-white text-gray-500 border-gray-200 hover:border-shrine-red/40'
+              }`}
+            >
+              {f.label} <span className={filter === f.key ? 'text-white/80' : 'text-gray-400'}>{f.n}</span>
+            </button>
+          ))}
+        </div>
+
+        {!mounted ? (
+          <div className="text-center py-10 text-xs text-gray-400">読み込み中…</div>
+        ) : nearChallenges.length === 0 ? (
+          <div className="text-center py-12 text-sm text-gray-400">
+            {filter === 'done' ? 'まだ達成したクエストがありません。' : '該当するクエストがありません。'}
+          </div>
+        ) : (
+        <div className="flex flex-col gap-3">
+          {nearChallenges.map((ch) => {
+            const diff = difficultyLabel(ch.difficulty);
+            const completed = progress.completed.includes(ch.id);
+            const active = progress.activeId === ch.id; // 現在挑戦中
+            const distToGoal = distKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng);
+            const distText = distToGoal < 1 ? `${Math.round(distToGoal * 1000)}m` : `${distToGoal.toFixed(1)}km`;
+            const levelOk = userLevel >= ch.minLevel; // 必須レベルを満たすか
+
+            const total = ch.steps.length;
+            const doneN = (progress.done[ch.id] || []).length;
+            // カードをタップするとモーダル（参加/終了ボタンはモーダル内）。
             return (
               <button
-                key={quiz.id}
-                onClick={() => setView('map')}
-                className={`relative flex items-center gap-3 rounded-2xl p-3 border text-left transition-all cursor-pointer active:scale-[0.98] ${
-                  unlocked
-                    ? 'bg-white shadow-sm border-amber-200 hover:shadow-md'
-                    : 'bg-white/70 border-black/5 hover:bg-white'
+                key={ch.id}
+                onClick={() => setConfirmCh(ch)}
+                className={`w-full text-left rounded-2xl border p-3.5 transition-all cursor-pointer active:scale-[0.99] ${
+                  active
+                    ? 'bg-[#2563eb] border-[#2563eb] shadow-md'
+                    : completed
+                    ? 'bg-amber-50/40 border-gold/40'
+                    : 'bg-white border-black/5 shadow-sm'
                 }`}
               >
-                {/* アイコン */}
-                <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                  unlocked ? 'bg-gradient-to-br from-amber-300 to-shrine-red' : 'bg-gray-100'
-                }`}>
-                  {unlocked
-                    ? <span className="text-lg">⛩️</span>
-                    : <Lock className="w-5 h-5 text-gray-400" />}
-                </div>
-
-                {/* テキスト */}
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-xs font-black text-gray-900 truncate leading-tight">{quiz.title}</h3>
-                  <div className="flex items-center gap-1 mt-0.5">
-                    <MapPin className="w-2.5 h-2.5 text-shrine-red flex-shrink-0" />
-                    <span className="text-[10px] text-gray-500 truncate">{quiz.landmark}</span>
+                <div className="flex items-center gap-3">
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-3xl flex-shrink-0 ${active ? 'bg-white/20' : completed ? 'bg-gold/20' : 'bg-gradient-to-br from-blue-100 to-amber-100'}`}>
+                    {ch.badgeIcon}
                   </div>
-                  <p className={`text-[10px] mt-0.5 leading-tight line-clamp-1 ${unlocked ? 'text-amber-700 font-bold' : 'text-gray-400'}`}>
-                    {unlocked
-                      ? '神様が呼びかけています — 挑戦できます'
-                      : `現地に近づくと解放（あと ${distText}）`}
-                  </p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      {active && <span className="text-[13px] font-black bg-white/25 text-white px-1.5 py-0.5 rounded-full flex-shrink-0">挑戦中</span>}
+                      <h3 className={`text-base font-black truncate ${active ? 'text-white' : 'text-gray-900'}`}>{ch.title}</h3>
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      <span className={`text-[13px] font-black px-1.5 py-0.5 rounded-full border ${active ? 'bg-white/15 text-white border-white/30' : diff.tone}`}>
+                        {diff.stars} {diff.label}
+                      </span>
+                      <span className={`text-[13px] font-black px-1.5 py-0.5 rounded-full border ${active ? 'bg-white/15 text-white border-white/30' : levelOk ? 'text-gray-500 bg-gray-50 border-gray-200' : 'text-rose-600 bg-rose-50 border-rose-200'}`}>
+                        {levelOk ? '' : '🔒 '}Lv.{ch.minLevel}〜
+                      </span>
+                      <span className={`text-[13px] flex items-center gap-0.5 ${active ? 'text-white/80' : 'text-gray-400'}`}>
+                        <Clock className="w-3 h-3" />約{ch.estMinutes}分
+                      </span>
+                      <span className={`text-[13px] font-black flex items-center gap-0.5 ${active ? 'text-white' : 'text-shrine-red'}`}>
+                        <MapPin className="w-3 h-3" />{distText}
+                      </span>
+                    </div>
+                    {/* 進捗インジケータ（ステップごとのドット） */}
+                    <div className="flex items-center gap-1 mt-2">
+                      {ch.steps.map((_, i) => (
+                        <span
+                          key={i}
+                          className={`h-1.5 flex-1 rounded-full ${
+                            i < doneN
+                              ? active ? 'bg-white' : completed ? 'bg-gold' : 'bg-shrine-red'
+                              : active ? 'bg-white/30' : 'bg-gray-200'
+                          }`}
+                        />
+                      ))}
+                      <span className={`text-[13px] font-black ml-1 ${active ? 'text-white' : 'text-gray-500'}`}>{doneN}/{total}</span>
+                    </div>
+                  </div>
+                  {completed && <Trophy className={`w-6 h-6 flex-shrink-0 ${active ? 'text-white' : 'text-gold'}`} />}
                 </div>
-
-                {/* 右側: 距離 / 解放バッジ */}
-                {unlocked ? (
-                  <span className="flex items-center gap-0.5 text-[10px] font-black text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full flex-shrink-0">
-                    <Sparkles className="w-3 h-3 text-gold" />
-                    挑戦
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-0.5 text-[10px] font-black text-gray-500 bg-gray-50 border border-gray-200 px-2 py-1 rounded-full flex-shrink-0">
-                    <Compass className="w-3 h-3" />
-                    {distText}
-                  </span>
-                )}
               </button>
             );
           })}
         </div>
+        )}
       </div>
+
+      {/* チャレンジモーダル（参加 / 終了 ボタンはここに表示） */}
+      {confirmCh && (() => {
+        const isActive = progress.activeId === confirmCh.id;
+        const ok = userLevel >= confirmCh.minLevel;
+        return (
+          <div className="fixed inset-0 z-[4000] bg-black/40 flex items-center justify-center p-6" onClick={() => setConfirmCh(null)}>
+            <div className="w-full max-w-[320px] bg-white rounded-3xl p-5 text-center animate-in" onClick={(e) => e.stopPropagation()}>
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-100 to-amber-100 flex items-center justify-center text-4xl mx-auto mb-3">{confirmCh.badgeIcon}</div>
+              <h3 className="text-lg font-black text-gray-900">{confirmCh.title}</h3>
+              <p className="text-[13px] text-gray-500 mt-1 leading-relaxed">{confirmCh.description}</p>
+              <div className="flex items-center justify-center gap-2 mt-3 text-[13px] text-gray-500">
+                <span className="flex items-center gap-0.5"><Clock className="w-3 h-3" />約{confirmCh.estMinutes}分</span>
+                <span>・</span>
+                <span>🏆 {confirmCh.badgeName}</span>
+              </div>
+
+              <div className="flex gap-2 mt-4">
+                <button onClick={() => setConfirmCh(null)} className="flex-1 bg-gray-100 text-gray-500 text-base font-black py-3 rounded-xl cursor-pointer">とじる</button>
+                {isActive ? (
+                  <button
+                    onClick={() => { setConfirmCh(null); onEndChallenge?.(); }}
+                    className="flex-1 bg-rose-600 text-white text-base font-black py-3 rounded-xl hover:opacity-90 cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <X className="w-4 h-4" />チャレンジを終了する
+                  </button>
+                ) : ok ? (
+                  <button
+                    onClick={() => { const id = confirmCh.id; setConfirmCh(null); onStartChallenge(id); }}
+                    className="flex-1 bg-shrine-red text-white text-base font-black py-3 rounded-xl hover:opacity-90 cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Flag className="w-4 h-4" />このチャレンジに参加
+                  </button>
+                ) : (
+                  <div className="flex-1 bg-gray-100 text-gray-400 text-[13px] font-black py-3 rounded-xl flex items-center justify-center">🔒 Lv.{confirmCh.minLevel} 以上で参加可能</div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
