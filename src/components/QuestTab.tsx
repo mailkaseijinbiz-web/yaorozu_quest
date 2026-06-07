@@ -1,8 +1,21 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Trophy, Check, ArrowRight, Shield, Award, Calendar, Sparkles, MapPin, Lock, ShieldCheck, Palette, Cpu, Settings2, AlertTriangle, Plus, Users, Send, X } from 'lucide-react';
+import { Trophy, Check, ArrowRight, Shield, Award, Calendar, Sparkles, MapPin, Lock, ShieldCheck, Palette, Cpu, Settings2, AlertTriangle, Plus, Users, Send, X, Brain, Flame, TrendingUp, Navigation, Compass } from 'lucide-react';
 import { Spot, Agent, User, UgcPost, db } from '../lib/db';
+import {
+  SHINNAKANO_QUIZZES,
+  SHINNAKANO_SERIES,
+  QuizStat,
+  computeOdds,
+  computeToku,
+  correctRate,
+  difficultyBadge,
+  quizDistance,
+  isQuizUnlocked,
+  isSeriesCompleted,
+  QUIZ_UNLOCK_RADIUS_KM,
+} from '../data/shinnakano-quiz';
 
 // ユーザー投稿クエスト型
 export interface UserQuest {
@@ -133,6 +146,8 @@ interface QuestTabProps {
   isNearAnySpot: boolean;
   hasChatted: boolean;
   hasTakenPhoto: boolean;
+  userLocation: { lat: number; lng: number };
+  setUserLocation: (loc: { lat: number; lng: number }) => void;
   // CreatorTab props
   activeSpot: Spot | null;
   agent: Agent | null;
@@ -150,6 +165,8 @@ export default function QuestTab({
   isNearAnySpot,
   hasChatted,
   hasTakenPhoto,
+  userLocation,
+  setUserLocation,
   activeSpot,
   agent,
   onUpdateAgent,
@@ -217,6 +234,58 @@ export default function QuestTab({
     saveUserQuests(userQuests.filter(q => q.id !== questId));
   };
 
+  // ── 新中野クイズ巡礼 state ──
+  // 全プレイヤーの正答率（シード + 自分の挑戦分の差分）を localStorage で保持
+  const [quizStatDelta, setQuizStatDelta] = useState<Record<string, QuizStat>>({});
+  // 自分が選んだ回答（quizId -> 選択肢index）
+  const [quizAnswers, setQuizAnswers] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    const savedStats = localStorage.getItem('yaorozu_quiz_stats');
+    if (savedStats) setQuizStatDelta(JSON.parse(savedStats));
+    const savedAnswers = localStorage.getItem('yaorozu_quiz_answers');
+    if (savedAnswers) setQuizAnswers(JSON.parse(savedAnswers));
+  }, []);
+
+  // クイズの実効 stat(シード + 差分)を返す
+  const getQuizStat = (q: typeof SHINNAKANO_QUIZZES[number]): QuizStat => {
+    const d = quizStatDelta[q.id] ?? { attempts: 0, correct: 0 };
+    return {
+      attempts: q.seedAttempts + d.attempts,
+      correct: q.seedCorrect + d.correct,
+    };
+  };
+
+  const handleAnswerQuiz = (quizId: string, choiceIndex: number) => {
+    const quiz = SHINNAKANO_QUIZZES.find(q => q.id === quizId);
+    if (!quiz || quizAnswers[quizId] !== undefined) return; // 回答は一度きり
+
+    const isCorrect = choiceIndex === quiz.answerIndex;
+
+    // 回答を記録
+    const updatedAnswers = { ...quizAnswers, [quizId]: choiceIndex };
+    setQuizAnswers(updatedAnswers);
+    localStorage.setItem('yaorozu_quiz_answers', JSON.stringify(updatedAnswers));
+
+    // 正答率の差分を更新（自分の挑戦をみんなの集計に反映）
+    const prev = quizStatDelta[quizId] ?? { attempts: 0, correct: 0 };
+    const updatedDelta = {
+      ...quizStatDelta,
+      [quizId]: {
+        attempts: prev.attempts + 1,
+        correct: prev.correct + (isCorrect ? 1 : 0),
+      },
+    };
+    setQuizStatDelta(updatedDelta);
+    localStorage.setItem('yaorozu_quiz_stats', JSON.stringify(updatedDelta));
+
+    // 正解なら、回答時点のオッズで徳を付与
+    if (isCorrect) {
+      const award = computeToku(quiz.baseToku, getQuizStat(quiz));
+      onClaimReward(quizId, award);
+    }
+  };
+
   // Creator customizer state
   const [name, setName] = useState('');
   const [personaDescription, setPersonaDescription] = useState('');
@@ -257,27 +326,13 @@ export default function QuestTab({
 
   return (
     <div className="flex flex-col h-full gap-4 overflow-y-auto pr-1">
-      {/* Tab Header */}
-      <div className="flex items-center justify-between border-b border-black/5 pb-3">
-        <div>
-          <h2 className="text-xl font-bold text-amber-700 flex items-center gap-2">
-            <Award className="w-5 h-5 text-gold animate-pulse" />
-            クエスト
-          </h2>
-          <p className="text-xs text-gray-500">達成するとボーナス徳を獲得できます。</p>
-        </div>
-        {/* 投稿ボタン */}
-        <button
-          onClick={() => setShowQuestForm(!showQuestForm)}
-          className={`flex items-center gap-1 px-3 py-2 rounded-xl text-[10px] font-black transition-all cursor-pointer shadow-sm ${
-            showQuestForm
-              ? 'bg-gray-100 text-gray-600'
-              : 'bg-shrine-red text-white shadow-shrine-red/20'
-          }`}
-        >
-          {showQuestForm ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-          {showQuestForm ? 'キャンセル' : 'クエスト投稿'}
-        </button>
+      {/* Tab Header - ホームと揃えたレイアウト */}
+      <div className="px-5 pt-8 pb-6 flex flex-col items-center text-center border-b border-black/5">
+        <h1 className="text-2xl font-black tracking-tight leading-none">
+          <span className="text-shrine-red">YAOROZU</span>
+          <span className="text-gray-900"> QUEST</span>
+        </h1>
+        <p className="text-xs text-gray-400 mt-1.5 tracking-wider font-medium">達成するとボーナス徳を獲得できます。</p>
       </div>
 
       {/* ── クエスト投稿フォーム ── */}
@@ -465,6 +520,273 @@ export default function QuestTab({
             </div>
           );
         })}
+      </div>
+
+      {/* ─── バッジコレクション（クエスト進捗） ─── */}
+      <div className="border-b border-black/5 pb-4 pt-1">
+        <h3 className="text-xs font-black text-gray-500 uppercase tracking-wider px-1 mb-3">バッジコレクション</h3>
+
+        {(() => {
+          const answeredQuizIds = new Set(Object.keys(quizAnswers));
+          const completed = answeredQuizIds.size;
+          const total = SHINNAKANO_QUIZZES.length;
+          const isSeriesCompletd = isSeriesCompleted(SHINNAKANO_SERIES, answeredQuizIds);
+          const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+          return (
+            <div className="space-y-4">
+              {/* チャレンジ中 */}
+              {!isSeriesCompletd && (
+                <div className="space-y-2.5">
+                  <h4 className="text-[10px] font-black text-gray-600 px-1">チャレンジ中</h4>
+                  <div className="glass-panel bg-white border border-gray-200 rounded-2xl p-3 flex items-center gap-3">
+                    {/* バッジアイコン */}
+                    <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-amber-100 to-orange-50 flex items-center justify-center flex-shrink-0 text-4xl shadow-sm">
+                      {SHINNAKANO_SERIES.badgeIcon}
+                    </div>
+
+                    {/* 中央情報 */}
+                    <div className="flex-1 min-w-0 flex flex-col gap-2">
+                      <div>
+                        <h4 className="text-xs font-black text-gray-900">
+                          {SHINNAKANO_SERIES.title}
+                        </h4>
+                        <p className="text-[9px] text-gray-500 mt-0.5">期限: なし</p>
+                      </div>
+                      {/* プログレスバー */}
+                      <div className="w-full bg-gray-150 h-2 rounded-full overflow-hidden border border-gray-200/50">
+                        <div
+                          className="h-full bg-gradient-to-r from-cyber-blue to-shrine-red rounded-full transition-all duration-500"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* 右側カウンター */}
+                    <div className="flex-shrink-0 text-right">
+                      <p className="text-[10px] text-gray-500 mb-1">達成状況</p>
+                      <span className="text-2xl font-black text-gray-900">{completed}/{total}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 達成済み */}
+              {isSeriesCompletd && (
+                <div className="space-y-2.5">
+                  <h4 className="text-[10px] font-black text-gold px-1">達成済み</h4>
+                  <div className="glass-panel bg-gradient-to-br from-gold/15 to-shrine-red/10 border border-gold/30 rounded-2xl p-3 flex items-center gap-3 shadow-sm shadow-gold/10">
+                    {/* バッジアイコン */}
+                    <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-gold/30 to-amber-200/30 flex items-center justify-center flex-shrink-0 text-4xl shadow-sm border border-gold/20">
+                      {SHINNAKANO_SERIES.badgeIcon}
+                    </div>
+
+                    {/* 中央情報 */}
+                    <div className="flex-1 min-w-0 flex flex-col gap-2">
+                      <div>
+                        <h4 className="text-xs font-black text-gray-900">
+                          {SHINNAKANO_SERIES.title}
+                        </h4>
+                        <p className="text-[9px] text-gray-500 mt-0.5">期限: なし</p>
+                      </div>
+                      {/* 完了バー */}
+                      <div className="w-full bg-gold/80 h-2 rounded-full overflow-hidden border border-gold/40" />
+                    </div>
+
+                    {/* 右側チェック & カウンター */}
+                    <div className="flex-shrink-0 text-right">
+                      <div className="flex items-center justify-end gap-1 text-gold mb-1">
+                        <Check className="w-4 h-4" />
+                        <Sparkles className="w-3 h-3" />
+                      </div>
+                      <span className="text-2xl font-black text-gold">{completed}/{total}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* ─── 新中野クイズ巡礼 ─── */}
+      <div className="border-t border-black/5 pt-5 space-y-3">
+        <div>
+          <h3 className="text-xs font-black text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+            <Brain className="w-4 h-4 text-shrine-red" />
+            新中野クイズ巡礼
+            <span className="ml-auto text-[9px] bg-shrine-red/10 border border-shrine-red/20 text-shrine-red px-2 py-0.5 rounded-full font-bold">
+              動的御利益
+            </span>
+          </h3>
+          <p className="text-[10px] text-gray-500 mt-1 leading-relaxed">
+            <strong className="text-shrine-red">現地に近づくと神様が呼びかけ</strong>、クイズが始まる。みんなの正答率で徳が変わる。
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          {SHINNAKANO_QUIZZES.map((quiz) => {
+            const stat = getQuizStat(quiz);
+            const odds = computeOdds(stat);
+            const reward = computeToku(quiz.baseToku, stat);
+            const rate = correctRate(stat);
+            const badge = difficultyBadge(stat);
+            const answered = quizAnswers[quiz.id] !== undefined;
+            const selected = quizAnswers[quiz.id];
+            const isCorrect = answered && selected === quiz.answerIndex;
+
+            const dist = quizDistance(quiz, userLocation);
+            const unlocked = isQuizUnlocked(quiz, userLocation);
+            const distText = dist < 1 ? `${Math.round(dist * 1000)}m` : `${dist.toFixed(1)}km`;
+
+            const badgeColor =
+              badge.tone === 'secret' ? 'bg-purple-100 border-purple-300 text-purple-700'
+              : badge.tone === 'hard' ? 'bg-red-100 border-red-300 text-red-700'
+              : badge.tone === 'easy' ? 'bg-green-100 border-green-300 text-green-700'
+              : 'bg-blue-100 border-blue-300 text-blue-700';
+
+            // ── 圏外: ロック表示（現地に行かないとクイズは現れない） ──
+            if (!unlocked) {
+              return (
+                <div
+                  key={quiz.id}
+                  className="glass-panel p-3.5 rounded-2xl border-black/5 bg-gray-50/80 flex items-center gap-3"
+                >
+                  <div className="w-10 h-10 rounded-full bg-gray-200/70 flex items-center justify-center flex-shrink-0">
+                    <Lock className="w-4 h-4 text-gray-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <MapPin className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                      <span className="text-xs font-bold text-gray-600 truncate">{quiz.landmark}</span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      現地に近づくと神様が呼びかけます（あと {distText}）
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setUserLocation({ lat: quiz.latitude, lng: quiz.longitude })}
+                    className="flex items-center gap-1 text-[10px] font-black text-cyber-blue border border-cyber-blue/30 bg-cyber-blue/5 px-2.5 py-1.5 rounded-lg flex-shrink-0 hover:bg-cyber-blue/10 transition-all cursor-pointer"
+                    title="デモ: この地点にワープ"
+                  >
+                    <Navigation className="w-3 h-3" />
+                    ワープ
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <div
+                key={quiz.id}
+                className={`glass-panel p-3.5 rounded-2xl border-black/5 flex flex-col gap-3 transition-all ${
+                  answered ? (isCorrect ? 'bg-amber-50/40 border-amber-300 shadow-sm' : 'bg-gray-50 border-black/5') : 'bg-white/80 shadow-sm'
+                }`}
+              >
+                {/* 現地解放バッジ */}
+                <div className="flex items-center gap-1 text-[9px] font-black text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full self-start">
+                  <Compass className="w-2.5 h-2.5" />
+                  現地に到達（{distText}）
+                </div>
+
+                {/* 神からの呼びかけ */}
+                <div className="flex items-start gap-2">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-300 to-shrine-red flex items-center justify-center flex-shrink-0 shadow-sm">
+                    <span className="text-sm">⛩️</span>
+                  </div>
+                  <div className="flex-1 bg-amber-50/70 border border-amber-200 rounded-2xl rounded-tl-sm px-3 py-2">
+                    <p className="text-[9px] font-black text-amber-700 mb-0.5 flex items-center gap-1">
+                      <Sparkles className="w-2.5 h-2.5 text-gold" />
+                      鍋屋横丁の道祖神・ナベ爺
+                    </p>
+                    <p className="text-[11px] text-gray-700 leading-relaxed">{quiz.call}</p>
+                  </div>
+                </div>
+                {/* ヘッダー: 難易度・オッズ */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border flex items-center gap-0.5 ${badgeColor}`}>
+                      {badge.tone === 'secret' && <Flame className="w-2.5 h-2.5" />}
+                      {badge.label}
+                    </span>
+                    <span className="text-[9px] text-gray-400 flex items-center gap-0.5">
+                      <MapPin className="w-2.5 h-2.5" />
+                      {quiz.landmark}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 bg-amber-50 border border-amber-300 text-amber-700 text-[9px] font-black px-2 py-0.5 rounded-full flex-shrink-0">
+                    <TrendingUp className="w-2.5 h-2.5 text-gold" />
+                    <span>×{odds.toFixed(1)} → +{reward}徳</span>
+                  </div>
+                </div>
+
+                {/* 正答率バー */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] text-gray-400 font-mono whitespace-nowrap">
+                    全体正答率 {rate === null ? '集計中' : `${rate}%`}
+                  </span>
+                  <div className="flex-1 bg-gray-100 h-1 rounded-full overflow-hidden border border-gray-200/50">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-cyber-blue to-shrine-red transition-all duration-300"
+                      style={{ width: `${rate ?? 50}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* 問い */}
+                <p className="text-xs font-bold text-gray-800 leading-relaxed">{quiz.question}</p>
+
+                {/* 選択肢 */}
+                <div className="space-y-1.5">
+                  {quiz.choices.map((choice, idx) => {
+                    const isAns = idx === quiz.answerIndex;
+                    const isPicked = selected === idx;
+                    let cls = 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50';
+                    if (answered) {
+                      if (isAns) cls = 'bg-green-50 border-green-400 text-green-700';
+                      else if (isPicked) cls = 'bg-red-50 border-red-300 text-red-600';
+                      else cls = 'bg-white border-gray-150 text-gray-400';
+                    }
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => handleAnswerQuiz(quiz.id, idx)}
+                        disabled={answered}
+                        className={`w-full text-left px-3 py-2 rounded-xl border text-[11px] font-bold transition-all flex items-center justify-between ${cls} ${answered ? 'cursor-default' : 'cursor-pointer'}`}
+                      >
+                        <span>{choice}</span>
+                        {answered && isAns && <Check className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />}
+                        {answered && isPicked && !isAns && <X className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* 御託宣（正解時 or 回答後に開封） */}
+                {answered && (
+                  <div className={`rounded-xl p-3 text-[10px] leading-relaxed border ${isCorrect ? 'bg-amber-50/60 border-amber-200 text-gray-700' : 'bg-gray-100 border-gray-200 text-gray-600'}`}>
+                    <div className="flex items-center gap-1 mb-1 font-black">
+                      {isCorrect ? (
+                        <span className="text-amber-700 flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-gold" /> 御託宣を授かった（+{reward}徳）
+                        </span>
+                      ) : (
+                        <span className="text-gray-500 flex items-center gap-1">
+                          <Brain className="w-3 h-3" /> 御託宣（次は正解を）
+                        </span>
+                      )}
+                    </div>
+                    <p>{quiz.lore}</p>
+                    <p className="mt-1.5 text-gray-500 flex items-start gap-1">
+                      <MapPin className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                      {quiz.walkTip}
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* ─── コミュニティクエスト ─── */}

@@ -2,21 +2,26 @@
 
 import React, { useState, useEffect } from 'react';
 import { Home, Award, Bell, UserCircle2, Trophy, Sparkles, MapPin, Check, Edit2 } from 'lucide-react';
-import { db, Spot, Agent, UgcPost, AffiliateLink, User as UserType } from '../lib/db';
+import { db, Spot, Agent, User as UserType } from '../lib/db';
 import HomeTab from '../components/HomeTab';
-import UgcPanel from '../components/UgcPanel';
 import QuestTab from '../components/QuestTab';
-import BottomSheet from '../components/BottomSheet';
+import { getLevelInfo } from '../data/levels';
 
 type TabType = 'home' | 'quest' | 'notifications' | 'mypage';
+
+const FALLBACK_CURRENT_USER: UserType = {
+  id: 'user-self',
+  displayName: 'あなた (巡礼者)',
+  avatarUrl: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=you',
+  totalToku: 0,
+  currentTitle: '見習い巡礼者',
+};
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [spots, setSpots] = useState<Spot[]>([]);
   const [activeSpot, setActiveSpot] = useState<Spot | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
-  const [ugcList, setUgcList] = useState<UgcPost[]>([]);
-  const [affiliates, setAffiliates] = useState<AffiliateLink[]>([]);
 
   // User state
   const [currentUser, setCurrentUser] = useState<UserType | null>(null);
@@ -25,17 +30,14 @@ export default function HomePage() {
 
   // Quest states
   const [claimedQuests, setClaimedQuests] = useState<string[]>([]);
+  const [homeResetSignal, setHomeResetSignal] = useState(0);
   const [hasChatted, setHasChatted] = useState(false);
   const [hasTakenPhoto, setHasTakenPhoto] = useState(false);
-
-  // Bottom Sheet State
-  const [sheetState, setSheetState] = useState<'collapsed' | 'half' | 'expanded'>('collapsed');
 
   // Profile Edit State
   const [editName, setEditName] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
 
   // Initial load
   useEffect(() => {
@@ -47,7 +49,6 @@ export default function HomePage() {
 
     const initialSpot = db.getSpots()[0];
     setActiveSpot(initialSpot);
-    setSheetState('collapsed');
 
     const self = db.getUser('user-self');
     if (self) {
@@ -66,9 +67,6 @@ export default function HomePage() {
   useEffect(() => {
     if (activeSpot) {
       setAgent(db.getAgentBySpot(activeSpot.id) || null);
-      setUgcList(db.getUgcBySpot(activeSpot.id));
-      setAffiliates(db.getAffiliatesBySpot(activeSpot.name));
-      setSheetState('collapsed');
     }
   }, [activeSpot]);
 
@@ -83,26 +81,7 @@ export default function HomePage() {
     if (activeSpot) {
       const refreshedSpot = db.getSpot(activeSpot.id);
       if (refreshedSpot) setActiveSpot(refreshedSpot);
-      setUgcList(db.getUgcBySpot(activeSpot.id));
     }
-  };
-
-  const handleAddUgc = (content: string) => {
-    if (!activeSpot || !currentUser) return;
-    db.addUgcPost(currentUser.id, activeSpot.id, content);
-    refreshDatabaseStates();
-  };
-
-  const handleLikePost = (postId: string) => {
-    if (!currentUser) return;
-    db.likeUgcPost(currentUser.id, postId);
-    refreshDatabaseStates();
-  };
-
-  const handleUnlikePost = (postId: string) => {
-    if (!currentUser) return;
-    db.unlikeUgcPost(currentUser.id, postId);
-    refreshDatabaseStates();
   };
 
   const handleUpdateAgent = (updatedAgent: Agent) => {
@@ -130,24 +109,15 @@ export default function HomePage() {
     if (selfIdx !== -1) {
       users[selfIdx].totalToku += reward;
       const toku = users[selfIdx].totalToku;
-      if (toku >= 500) { users[selfIdx].currentTitle = '大創世神'; users[selfIdx].avatarFrameColor = '#c5a028'; }
-      else if (toku >= 300) { users[selfIdx].currentTitle = '徳高き修行僧'; users[selfIdx].avatarFrameColor = '#8b5cf6'; }
-      else if (toku >= 100) { users[selfIdx].currentTitle = '巡礼ガイド'; users[selfIdx].avatarFrameColor = '#0284c7'; }
-      else { users[selfIdx].currentTitle = '見習い巡礼者'; users[selfIdx].avatarFrameColor = undefined; }
+      const { current } = getLevelInfo(toku);
+      users[selfIdx].currentTitle = current.title;
+      users[selfIdx].avatarFrameColor = current.frameColor;
       localStorage.setItem('yaorozu_users', JSON.stringify(users));
       const updatedClaimed = [...claimedQuests, questId];
       setClaimedQuests(updatedClaimed);
       localStorage.setItem('yaorozu_claimed_quests', JSON.stringify(updatedClaimed));
       refreshDatabaseStates();
     }
-  };
-
-  const handleShareSpot = (spotId: string) => {
-    if (!currentUser) return;
-    db.shareSpot(currentUser.id, spotId);
-    setToastMessage('SNSで共有しました！ +15 徳を獲得！');
-    setTimeout(() => setToastMessage(''), 3000);
-    refreshDatabaseStates();
   };
 
   const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -163,7 +133,6 @@ export default function HomePage() {
 
   const userTokuAtSpot = (currentUser && activeSpot) ? db.getTokuAtSpot(currentUser.id, activeSpot.id) : 0;
   const currentCreatorToku = (activeSpot && activeSpot.creatorId) ? db.getTokuAtSpot(activeSpot.creatorId, activeSpot.id) : 0;
-  const activeSpotCreatorProfile = (activeSpot && activeSpot.creatorId) ? creatorProfiles[activeSpot.creatorId] || null : null;
 
 
   // Notification mock data
@@ -197,13 +166,6 @@ export default function HomePage() {
         {/* Viewport */}
         <div className="flex-1 relative overflow-hidden bg-[#f5f7fa] flex flex-col">
 
-          {/* Toast */}
-          {toastMessage && (
-            <div className="absolute top-4 left-4 right-4 z-[5000] bg-amber-500 text-white font-bold text-[10px] py-2 px-3 rounded-xl shadow-lg flex items-center justify-center gap-1.5 animate-bounce">
-              <span>✨</span><span>{toastMessage}</span>
-            </div>
-          )}
-
           {/* Tab content */}
           <div className={`flex-1 h-full overflow-hidden relative z-0 ${activeTab === 'home' ? '' : 'overflow-y-auto'}`}>
 
@@ -211,14 +173,14 @@ export default function HomePage() {
             {activeTab === 'home' && (
               <HomeTab
                 spots={spots}
-                currentUser={currentUser || db.getUsers()[0]}
+                currentUser={currentUser || FALLBACK_CURRENT_USER}
                 userLocation={userLocation}
                 setUserLocation={setUserLocation}
                 creatorProfiles={creatorProfiles}
                 activeSpot={activeSpot}
-                onSelectSpot={(s) => { setActiveSpot(s); setSheetState('half'); }}
-                sheetState={sheetState}
+                onSelectSpot={setActiveSpot}
                 onNavigateToQuest={() => setActiveTab('quest')}
+                homeResetSignal={homeResetSignal}
               />
             )}
 
@@ -226,7 +188,7 @@ export default function HomePage() {
             {activeTab === 'quest' && (
               <div className="p-3 pb-4 h-full overflow-y-auto">
                 <QuestTab
-                  currentUser={currentUser || db.getUsers()[0]}
+                  currentUser={currentUser || FALLBACK_CURRENT_USER}
                   spots={spots}
                   claimedQuests={claimedQuests}
                   onClaimReward={handleClaimReward}
@@ -234,6 +196,8 @@ export default function HomePage() {
                   isNearAnySpot={isNearAnySpot}
                   hasChatted={hasChatted}
                   hasTakenPhoto={hasTakenPhoto}
+                  userLocation={userLocation}
+                  setUserLocation={setUserLocation}
                   activeSpot={activeSpot}
                   agent={agent}
                   onUpdateAgent={handleUpdateAgent}
@@ -361,29 +325,6 @@ export default function HomePage() {
             )}
           </div>
 
-          {/* Bottom sheet (home only) - always in DOM for smooth animation */}
-          {activeTab === 'home' && activeSpot && (
-            <BottomSheet
-              state={sheetState}
-              onStateChange={setSheetState}
-            >
-              <UgcPanel
-                activeSpot={activeSpot}
-                ugcList={ugcList}
-                affiliates={affiliates}
-                currentUser={currentUser || db.getUsers()[0]}
-                creatorProfile={activeSpotCreatorProfile}
-                userTokuAtSpot={userTokuAtSpot}
-                onAddUgc={handleAddUgc}
-                onLikePost={handleLikePost}
-                onUnlikePost={handleUnlikePost}
-                onShareSpot={handleShareSpot}
-                sheetState={sheetState}
-                setSheetState={setSheetState}
-                onNavigateToChat={() => {}}
-              />
-            </BottomSheet>
-          )}
         </div>
 
         <nav
@@ -396,7 +337,10 @@ export default function HomePage() {
             return (
               <button
                 key={key}
-                onClick={() => setActiveTab(key)}
+                onClick={() => {
+                  if (key === 'home') setHomeResetSignal(s => s + 1);
+                  setActiveTab(key);
+                }}
                 className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-xl transition-all cursor-pointer relative ${
                   isActive ? 'text-shrine-red font-bold scale-105' : 'text-gray-400 hover:text-gray-600'
                 }`}

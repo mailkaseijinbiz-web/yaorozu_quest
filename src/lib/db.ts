@@ -527,6 +527,65 @@ class MockDatabase {
     return users[index];
   }
 
+  // ────────────────────────────────────────────────
+  // Admin operations (管理者ダッシュボード用)
+  // ────────────────────────────────────────────────
+
+  // Upsert a spot (create if id is new, otherwise update)
+  adminSaveSpot(spot: Spot): Spot {
+    const spots = this.getSpots();
+    const index = spots.findIndex(s => s.id === spot.id);
+    if (index === -1) spots.push(spot);
+    else spots[index] = spot;
+    this.save(KEYS.SPOTS, spots);
+    return spot;
+  }
+
+  adminDeleteSpot(id: string): void {
+    this.save(KEYS.SPOTS, this.getSpots().filter(s => s.id !== id));
+    // Cascade: remove agent + UGC tied to this spot
+    this.save(KEYS.AGENTS, this.getAgents().filter(a => a.spotId !== id));
+    this.save(KEYS.UGC, this.getUgc().filter(p => p.spotId !== id));
+  }
+
+  // Upsert a user
+  adminSaveUser(user: User): User {
+    const users = this.getUsers();
+    const index = users.findIndex(u => u.id === user.id);
+    if (index === -1) users.push(user);
+    else users[index] = user;
+    this.save(KEYS.USERS, users);
+    return user;
+  }
+
+  adminDeleteUser(id: string): void {
+    this.save(KEYS.USERS, this.getUsers().filter(u => u.id !== id));
+  }
+
+  adminDeleteUgc(id: string): void {
+    this.save(KEYS.UGC, this.getUgc().filter(p => p.id !== id));
+  }
+
+  // Upsert an agent (神様AI)
+  adminSaveAgent(agent: Agent): Agent {
+    const agents = this.getAgents();
+    const index = agents.findIndex(a => a.id === agent.id);
+    if (index === -1) agents.push(agent);
+    else agents[index] = agent;
+    this.save(KEYS.AGENTS, agents);
+    return agent;
+  }
+
+  adminDeleteAgent(id: string): void {
+    this.save(KEYS.AGENTS, this.getAgents().filter(a => a.id !== id));
+  }
+
+  // Reset all data back to initial seeds
+  adminResetAll(): void {
+    if (!this.isBrowser) return;
+    Object.values(KEYS).forEach(key => localStorage.removeItem(key));
+  }
+
   // Share spot to SNS and earn +15 Toku
   shareSpot(userId: string, spotId: string): void {
     this.rewardToku(userId, 15);

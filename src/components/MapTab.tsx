@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Navigation, Compass, ArrowRight, MessageSquare, Camera, Check } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { Spot, User, db } from '../lib/db';
@@ -23,7 +23,6 @@ interface MapTabProps {
   setUserLocation: (loc: { lat: number; lng: number }) => void;
   creatorProfiles: { [userId: string]: User };
   onNavigateTab?: (tab: 'map' | 'chat' | 'ar' | 'quest') => void; // Parent navigation hook
-  sheetState?: 'collapsed' | 'half' | 'expanded'; // Bottom sheet state
 }
 
 const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -48,9 +47,7 @@ export default function MapTab({
   setUserLocation,
   creatorProfiles,
   onNavigateTab,
-  sheetState,
 }: MapTabProps) {
-  const [filter, setFilter] = useState<'all' | 'shrine' | 'temple' | 'claimed'>('all');
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Compute UGC counts per spot
@@ -60,13 +57,7 @@ export default function MapTab({
     ugcCounts[spot.id] = allUgc.filter((u) => u.spotId === spot.id).length;
   });
 
-  // Filter spots dynamically
-  const filteredSpots = spots.filter((spot) => {
-    if (filter === 'shrine') return spot.category === '神社';
-    if (filter === 'temple') return spot.category === '寺院';
-    if (filter === 'claimed') return spot.creatorId !== null;
-    return true;
-  });
+  const filteredSpots = spots;
 
   const warpToSpot = (spot: Spot) => {
     setUserLocation({
@@ -104,50 +95,12 @@ export default function MapTab({
         />
       </div>
 
-      {/* 2. Floating Filter Pills (Sauna-ikitai style top search HUD) */}
-      <div className="absolute top-3 left-3 right-3 z-[1000] flex gap-1.5 overflow-x-auto pb-1 scrollbar-none pointer-events-auto">
-        {(['all', 'shrine', 'temple', 'claimed'] as const).map((type) => {
-          const labels = {
-            all: 'すべて',
-            shrine: '⛩️ 神社',
-            temple: '🙏 寺院',
-            claimed: '👑 創世済',
-          };
-          const isActive = filter === type;
-          return (
-            <button
-              key={type}
-              onClick={() => setFilter(type)}
-              className={`whitespace-nowrap px-3 py-1.5 rounded-full text-[10px] font-black tracking-wide border shadow-md transition-all cursor-pointer ${
-                isActive
-                  ? 'bg-shrine-red border-shrine-red text-white'
-                  : 'bg-white/95 border-[#1e2024]/10 text-gray-700 hover:bg-white hover:text-shrine-red'
-              }`}
-            >
-              {labels[type]}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Floating GPS coordinates */}
-      <div className="absolute top-[55px] right-3 z-[999] flex items-center gap-1.5 text-[8px] font-mono bg-white/90 border border-black/5 px-2 py-0.5 rounded-md text-gray-600 pointer-events-none shadow-sm">
-        <span>N {userLocation.lat.toFixed(4)}°</span>
-        <span className="text-gray-300">|</span>
-        <span>E {userLocation.lng.toFixed(4)}°</span>
-      </div>
-
-      {/* 
+      {/*
         3. Bottom Horizontal Card Slider (Sauna-ikitai style carousel slider)
       */}
-      {/* カードスライダーはボトムシートが表示されていないときのみ表示 */}
       <div 
         ref={scrollRef}
-        className={`absolute bottom-[72px] left-3 right-3 z-[1000] flex gap-3 overflow-x-auto pb-1.5 scrollbar-none snap-x snap-mandatory pointer-events-auto transition-all duration-300 ${
-          activeSpot && sheetState && sheetState !== 'collapsed'
-            ? 'opacity-0 pointer-events-none translate-y-4'
-            : 'opacity-100'
-        }`}
+        className="absolute bottom-[72px] left-3 right-3 z-[1000] flex gap-3 overflow-x-auto pb-1.5 scrollbar-none snap-x snap-mandatory pointer-events-auto transition-all duration-300"
       >
         {filteredSpots.map((spot) => {
           const isActive = activeSpot?.id === spot.id;
