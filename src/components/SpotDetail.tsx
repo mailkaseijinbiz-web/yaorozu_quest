@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { X, Send, Sparkles, MapPin, MessageCircle, ShoppingBag, Star, ImagePlus, Trash2, Camera, Heart, Flag } from 'lucide-react';
+import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag } from 'lucide-react';
 import { Spot, Agent, User, db } from '../lib/db';
 import { getGodTasks, GodTask, TASK_TONE } from '../data/god-tasks';
 
@@ -71,7 +71,7 @@ export default function SpotDetail({
   onMessageSent,
   onStartChallenge,
 }: SpotDetailProps) {
-  const [tab, setTab] = useState<'chat' | 'info' | 'requests' | 'photos'>('chat');
+  const [tab, setTab] = useState<'chat' | 'requests' | 'photos'>('chat');
   const [agent] = useState<Agent>(() => resolveAgent(spot));
 
   // UGCで変化する状態（写真・楽しみ方）は db から都度読む
@@ -79,7 +79,6 @@ export default function SpotDetail({
   const [enjoyments, setEnjoyments] = useState<string[]>(spot.enjoyments ?? []);
   const [doneTasks, setDoneTasks] = useState<Record<string, boolean>>({});
   const [toast, setToast] = useState<string | null>(null);
-  const [murmurIdx, setMurmurIdx] = useState(0); // 神のつぶやき回転
   const [ugcTick, setUgcTick] = useState(0); // 口コミいいね後の再読込
   const [postingTask, setPostingTask] = useState<GodTask | null>(null); // 投稿モーダル
   const [postText, setPostText] = useState('');
@@ -93,31 +92,9 @@ export default function SpotDetail({
   const ugc = useMemo(() => db.getUgcBySpot(spot.id), [spot.id, ugcTick]);
   const affiliates = db.getAffiliatesBySpot(spot.name);
 
-  // 口コミにいいね → 投稿者に+10徳
-  const handleLikeUgc = (postId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    db.likeUgcPost(currentUser.id, postId);
-    setUgcTick((t) => t + 1);
-    flashToast('❤️ いいね！ 投稿者に +10徳');
-    onChanged?.();
-  };
   const godEmoji = spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏');
   const tasks = getGodTasks(spot);
   const heroPhoto = photos[0] || spot.imageUrl || '';
-
-  // 神のつぶやき：人格をもった話し方で。場所紹介 → みどころ → 要望 の順で回転表示
-  const murmurs = [
-    `わしは${agent.name}。よう参った、${spot.name}へ。${spot.description}`,
-    ...enjoyments.slice(0, 3).map((e) => `ふむ、みどころを一つ授けよう…「${e}」じゃ。`),
-    ...tasks.map((t) => t.call(spot.name)),
-  ];
-  const currentMurmur = murmurs.length > 0 ? murmurs[murmurIdx % murmurs.length] : '';
-
-  // つぶやきを一定間隔で切り替え
-  useEffect(() => {
-    const id = setInterval(() => setMurmurIdx((i) => i + 1), 4000);
-    return () => clearInterval(id);
-  }, []);
 
   const flashToast = (text: string) => {
     setToast(text);
@@ -294,7 +271,6 @@ export default function SpotDetail({
       <div className="flex border-b border-black/5 bg-white flex-shrink-0">
         {([
           { key: 'chat', label: '会話', icon: MessageCircle },
-          { key: 'info', label: '詳細', icon: Sparkles },
           { key: 'requests', label: '依頼', icon: Flag },
           { key: 'photos', label: '写真', icon: Camera },
         ] as const).map(({ key, label, icon: Icon }) => (
@@ -383,102 +359,6 @@ export default function SpotDetail({
               })}
             </div>
           </div>
-        </div>
-      ) : tab === 'info' ? (
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* 神様・つぶやき・説明を1枚に纏めたカード */}
-          <div className="bg-white rounded-2xl shadow-sm border border-shrine-red/15 overflow-hidden">
-            {/* 神様ヘッダ */}
-            <div className="flex items-center gap-3 p-4 bg-gradient-to-br from-amber-50 to-white border-b border-black/5">
-              <div className="w-12 h-12 rounded-full bg-white flex items-center justify-center text-2xl border-2 border-gold/30 shadow-sm">{godEmoji}</div>
-              <div className="flex-1 min-w-0">
-                <p className="text-[13px] text-amber-700 font-bold">この地に宿る神</p>
-                <h3 className="text-sm font-black text-gray-900 truncate">{agent.name}</h3>
-              </div>
-              <button onClick={() => setTab('chat')} className="flex items-center gap-1 bg-shrine-red text-white text-[13px] font-black px-3 py-2 rounded-full hover:opacity-90 transition-all cursor-pointer flex-shrink-0">
-                <MessageCircle className="w-3.5 h-3.5" />話す
-              </button>
-            </div>
-            {/* つぶやき（固定高さで画面が動かない） */}
-            <div className="px-4 pt-3">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-[13px] text-shrine-red font-bold">@{spot.category}</span>
-                <span className="text-[13px] text-gray-400">・今</span>
-                <span className="ml-auto text-[11px] text-gray-400 flex items-center gap-0.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-shrine-red animate-pulse" /> つぶやき中
-                </span>
-              </div>
-              <div className="mt-1 h-[3.6em] overflow-hidden">
-                <p key={murmurIdx} className="text-[13px] text-gray-800 leading-relaxed animate-in">
-                  {currentMurmur}
-                </p>
-              </div>
-            </div>
-            {/* 説明 */}
-            <div className="px-4 pb-4 pt-2">
-              <p className="text-xs text-gray-600 leading-relaxed border-t border-black/5 pt-3">{spot.description}</p>
-            </div>
-          </div>
-
-          {/* ここでの楽しみ方（UGCで増える）— 上部に表示 */}
-          {enjoyments.length > 0 && (
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-black/5">
-              <h3 className="text-xs font-black text-gray-700 mb-2.5 flex items-center gap-1.5">
-                <Star className="w-3.5 h-3.5 text-gold" />
-                ここでの楽しみ方
-                <span className="text-[11px] font-bold text-gray-400">（巡礼者の貢献で増える）</span>
-              </h3>
-              <div className="space-y-2">
-                {enjoyments.map((e, i) => (
-                  <div key={i} className="flex items-start gap-2">
-                    <span className="text-[13px] font-black text-white bg-gold rounded-full w-4 h-4 flex items-center justify-center flex-shrink-0 mt-0.5">{i + 1}</span>
-                    <span className="text-[13px] text-gray-600 leading-relaxed">{e}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 属性タグ */}
-          {spot.attributes?.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {spot.attributes.map((a, i) => (
-                <span key={i} className="text-[13px] bg-white border border-gray-200 text-gray-600 px-2.5 py-1 rounded-full">{a}</span>
-              ))}
-            </div>
-          )}
-
-          {/* 口コミ */}
-          {ugc.length > 0 && (
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-black/5">
-              <h3 className="text-xs font-black text-gray-700 mb-2.5">巡礼者の口コミ ({ugc.length})</h3>
-              <div className="space-y-3">
-                {ugc.slice(0, 3).map((post) => {
-                  const liked = post.likedBy.includes(currentUser.id);
-                  return (
-                    <div key={post.id} className="border-l-2 border-gold/40 pl-2.5">
-                      <p className="text-[13px] text-gray-600 leading-relaxed line-clamp-3">{post.content}</p>
-                      <div className="flex items-center justify-between mt-1">
-                        <p className="text-[11px] text-gray-400">— {post.userDisplayName}</p>
-                        <button
-                          onClick={(e) => handleLikeUgc(post.id, e)}
-                          disabled={liked}
-                          className={`flex items-center gap-1 text-[13px] font-bold px-2 py-0.5 rounded-full transition-all cursor-pointer ${
-                            liked ? 'bg-shrine-red/10 text-shrine-red' : 'bg-gray-100 text-gray-500 hover:bg-shrine-red/10 hover:text-shrine-red'
-                          }`}
-                        >
-                          <Heart className={`w-3 h-3 ${liked ? 'fill-shrine-red' : ''}`} />
-                          {post.likesCount}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="text-[11px] text-gray-400 mt-2">※ いいねされると投稿者に +10徳。</p>
-            </div>
-          )}
-
         </div>
       ) : (
         /* ── チャット ── */
