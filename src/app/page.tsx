@@ -35,7 +35,13 @@ export default function HomePage() {
     window.history.pushState({ yaorozuDetail: true }, '');
     const onPop = () => setDetailSpot(null);
     window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
+    // 背景スクロールをロック（詳細を開いた瞬間の画面ズレを防止）
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      document.body.style.overflow = prevOverflow;
+    };
   }, [detailSpot]);
 
   // User state

@@ -256,7 +256,7 @@ export default function SpotDetail({
   const PRESETS = ['この場所の歴史は？', '見どころを教えて', '近くのおすすめは？'];
 
   return (
-    <div className="absolute inset-0 z-[3000] bg-[#f5f7fa] flex flex-col">
+    <div className="fixed sm:absolute inset-0 z-[3000] bg-[#f5f7fa] flex flex-col">
       {/* ── ヒーロー写真（無ければ NO IMAGE） ── */}
       <div className="relative h-52 flex-shrink-0 bg-gray-200">
         {heroPhoto ? (
