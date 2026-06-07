@@ -22,7 +22,8 @@ interface MapTabProps {
   userLocation: { lat: number; lng: number };
   setUserLocation: (loc: { lat: number; lng: number }) => void;
   creatorProfiles: { [userId: string]: User };
-  onNavigateTab?: (tab: 'map' | 'chat' | 'ar' | 'creator') => void; // Parent navigation hook
+  onNavigateTab?: (tab: 'map' | 'chat' | 'ar' | 'quest') => void; // Parent navigation hook
+  sheetState?: 'collapsed' | 'half' | 'expanded'; // Bottom sheet state
 }
 
 const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -47,6 +48,7 @@ export default function MapTab({
   setUserLocation,
   creatorProfiles,
   onNavigateTab,
+  sheetState,
 }: MapTabProps) {
   const [filter, setFilter] = useState<'all' | 'shrine' | 'temple' | 'claimed'>('all');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -88,7 +90,7 @@ export default function MapTab({
   }, [activeSpot]);
 
   return (
-    <div className="relative w-full h-full flex flex-col min-h-[400px]">
+    <div className="relative w-full h-full flex flex-col">
       
       {/* 1. Geographical Leaflet Map */}
       <div className="absolute inset-0 z-0">
@@ -138,9 +140,14 @@ export default function MapTab({
       {/* 
         3. Bottom Horizontal Card Slider (Sauna-ikitai style carousel slider)
       */}
+      {/* カードスライダーはボトムシートが表示されていないときのみ表示 */}
       <div 
         ref={scrollRef}
-        className="absolute bottom-4 left-3 right-3 z-[1000] flex gap-3 overflow-x-auto pb-1.5 scrollbar-none snap-x snap-mandatory pointer-events-auto"
+        className={`absolute bottom-[72px] left-3 right-3 z-[1000] flex gap-3 overflow-x-auto pb-1.5 scrollbar-none snap-x snap-mandatory pointer-events-auto transition-all duration-300 ${
+          activeSpot && sheetState && sheetState !== 'collapsed'
+            ? 'opacity-0 pointer-events-none translate-y-4'
+            : 'opacity-100'
+        }`}
       >
         {filteredSpots.map((spot) => {
           const isActive = activeSpot?.id === spot.id;
