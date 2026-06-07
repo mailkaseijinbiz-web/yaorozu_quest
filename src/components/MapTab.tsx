@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Compass, ChevronRight, Flag, X, Camera, Check } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { Spot, User, db } from '../lib/db';
+import { haptic } from '../lib/haptics';
 import { getHeartVoices } from '../data/god-tasks';
 import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON } from '../data/challenges';
 
@@ -91,6 +92,7 @@ export default function MapTab({
     // この達成で全ステップ完了になるか
     const doneNow = new Set(db.getChallengeProgress().done[activeChallenge.id] || []);
     const willComplete = doneNow.size + 1 >= activeChallenge.steps.length;
+    haptic(willComplete ? 'celebrate' : 'success');
     onAdvanceChallenge?.(proofStep.id, proofPhoto);
     setCelebrate({
       title: willComplete ? `「${activeChallenge.badgeName}」獲得！` : `${proofStep.title} 達成！`,
