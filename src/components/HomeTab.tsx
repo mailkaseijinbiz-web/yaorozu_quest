@@ -28,7 +28,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
   useEffect(() => { setMounted(true); }, []);
 
   // フィルタ：すべて / 未達成のみ / 達成したもの / 参加できるもの
-  const [filter, setFilter] = useState<'all' | 'todo' | 'done' | 'joinable'>('all');
+  const [filter, setFilter] = useState<'all' | 'todo' | 'done' | 'joinable'>('todo');
   const [confirmCh, setConfirmCh] = useState<Challenge | null>(null); // 参加確認モーダル
 
   const progress = db.getChallengeProgress();
@@ -36,7 +36,6 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
 
   // フィルタごとの件数
   const FILTERS = [
-    { key: 'all', label: 'すべて', n: null },
     { key: 'todo', label: '未達成', n: null },
     { key: 'done', label: '達成', n: progress.completed.length },
   ] as const;
