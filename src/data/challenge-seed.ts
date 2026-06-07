@@ -38,23 +38,68 @@ const THEMES: { key: string; title: string; icon: string; badge: string; cats: T
   { key: 'terrain', title: '地形を読む', icon: '⛰️', badge: 'の地形読み', cats: ['地形', '建築'] },
 ];
 
-const STEP_TMPL: Record<TriviaCategory, { title: string; action: string; trivia: string }[]> = {
-  歴史: [
-    { title: '門前町を歩く', action: '{a}の門前や旧街道沿いを歩いてみよう。', trivia: '{a}は寺社の門前・宿場として栄え、商家や茶屋が軒を連ねた。' },
-    { title: '地名の由来を探す', action: '由緒書きや石碑を探して読んでみよう。', trivia: '{a}の地名は名主・地形・産物に由来すると伝わる。' },
-  ],
-  地形: [
-    { title: '坂を下る', action: '{a}の坂を下り、低地と台地の境を体感しよう。', trivia: '{a}は武蔵野台地の縁。坂下は旧河川沿いの低地が広がる。' },
-    { title: '暗渠を辿る', action: 'くねる路地を辿って旧水路を読み解こう。', trivia: '{a}の曲がる路地は暗渠化された小川の名残。' },
-  ],
-  建築: [
-    { title: '看板建築を探す', action: '商店街で正面だけ洋風の建物を探そう。', trivia: '{a}の商店街には看板建築が点在する。' },
-    { title: '銭湯を見上げる', action: '宮造りの破風や煙突を観察しよう。', trivia: '{a}の銭湯は地域の社交場でもあった。' },
-  ],
-  道路: [
-    { title: '街道の直線を歩く', action: '{a}の旧街道を歩き、道幅と線形を体感しよう。', trivia: '{a}の街道は物資輸送や参詣の道として開かれた。' },
-    { title: '変則交差点を観察', action: '放射と格子が交わる三角地を探そう。', trivia: '{a}では放射状街道と区画が交わり変則交差点が生まれる。' },
-  ],
+// 物語テンプレート（テーマごとの起承転結）。
+// 神からの依頼として始まり、序章→探索→転機→結末で街を読み解く構成。
+// {a}=丁目, {area}=エリア名 を置換。各幕は triviaCategory と蘊蓄を持つ。
+type StoryAct = { title: string; action: string; trivia: string; cat: TriviaCategory };
+type ThemeStory = {
+  premise: string;      // description（依頼の導入）
+  acts: StoryAct[];     // 序・承・転（3幕）
+  climaxTitle: string;  // 結（ゴール地点）
+  climaxAction: string;
+};
+
+const STORY: Record<string, ThemeStory> = {
+  history: {
+    premise: '{area}に栄えた門前町の記憶が、時とともに薄れつつある。土地の神に代わり、街に刻まれた歴史の断片を辿って、失われた物語を取り戻そう。',
+    acts: [
+      { title: '序章 ── 門前町へ', action: 'まず{a}の門前や旧街道沿いに立ち、往時の賑わいを想像しながら歩き出そう。', trivia: '{area}は寺社の門前・宿場として栄え、商家や茶屋が軒を連ねた。', cat: '歴史' },
+      { title: '探索 ── 地名の謎', action: '由緒書きや石碑を探し、土地の名がどこから来たのかを読み解こう。', trivia: '{area}の地名は名主・地形・産物に由来すると伝わる。', cat: '歴史' },
+      { title: '転機 ── 道が語る真実', action: '街道の分かれ道に立ち、人々がどこへ向かったのかに思いを馳せよう。', trivia: '{area}の街道は参詣と物流の動脈で、宿場が人を集めた。', cat: '道路' },
+    ],
+    climaxTitle: '結末 ── 語り部となる',
+    climaxAction: '集めた記憶を胸に、ゴールで{area}の物語をあなたの一枚で締めくくろう。',
+  },
+  water: {
+    premise: 'かつて{area}を潤した小川は、今は地下に姿を隠した。水の神の声を頼りに、街に残る「水の記憶」を辿って暗渠の物語を解き明かそう。',
+    acts: [
+      { title: '序章 ── 水のささやき', action: '{a}でいちばん低い場所を探し、水がどこへ流れたのかを感じ取ろう。', trivia: '{area}は武蔵野台地の縁。坂下には旧河川沿いの低地が広がる。', cat: '地形' },
+      { title: '探索 ── 暗渠を辿る', action: 'くねくねと曲がる路地を辿り、消えた小川の道筋を読み解こう。', trivia: '{area}の不自然に曲がる路地は、暗渠化された小川の名残。', cat: '地形' },
+      { title: '転機 ── 橋の痕跡', action: '欄干跡や「◯◯橋」の地名標を探し、かつての水辺を思い描こう。', trivia: '{area}には今も橋の名だけが残る交差点がある。', cat: '道路' },
+    ],
+    climaxTitle: '結末 ── 川の記憶を継ぐ',
+    climaxAction: 'ゴールで、地上に残る水の痕跡をあなたの一枚に収めて物語を結ぼう。',
+  },
+  arch: {
+    premise: '{area}の街並みには、時代の異なる建物が静かに同居している。建築の神に導かれ、ファサードに刻まれた人々の暮らしの物語を読み解こう。',
+    acts: [
+      { title: '序章 ── 街の表情', action: '{a}の商店街を歩き、正面だけ洋風に飾った「看板建築」を探そう。', trivia: '{area}の商店街には、震災・戦後復興期の看板建築が点在する。', cat: '建築' },
+      { title: '探索 ── 湯けむりの記憶', action: '宮造りの破風や高い煙突を見上げ、銭湯の佇まいを観察しよう。', trivia: '{area}の銭湯は、地域の社交場でもあった。', cat: '建築' },
+      { title: '転機 ── 時代の境目', action: '古い木造と新しいビルが隣り合う一角を探し、街の移ろいを感じよう。', trivia: '{area}は再開発と古い区画が混在し、時代の断層が見える。', cat: '歴史' },
+    ],
+    climaxTitle: '結末 ── 街の肖像を描く',
+    climaxAction: 'ゴールで、あなたが一番惹かれた建物を一枚に収めて物語を結ぼう。',
+  },
+  road: {
+    premise: '{area}の道は、なぜこんな形をしているのか。道の神の問いかけに答えるべく、街道と区画が織りなす街の成り立ちを歩いて確かめよう。',
+    acts: [
+      { title: '序章 ── 古道に立つ', action: '{a}の旧街道を歩き、道幅と緩やかな曲がりを体で感じ取ろう。', trivia: '{area}の街道は、物資輸送や参詣の道として開かれた。', cat: '道路' },
+      { title: '探索 ── 変則交差点の謎', action: '放射状の道と格子の区画が交わる三角地を探そう。', trivia: '{area}では放射街道と区画が交わり、変則的な交差点が生まれた。', cat: '道路' },
+      { title: '転機 ── 地形が決めた道', action: '坂や谷に沿って曲がる道を辿り、地形が街道を決めた跡を読もう。', trivia: '{area}の道は、台地と低地の地形に素直に従って引かれている。', cat: '地形' },
+    ],
+    climaxTitle: '結末 ── 道の語り部に',
+    climaxAction: 'ゴールで、街の成り立ちを物語る道の一枚を撮って締めくくろう。',
+  },
+  terrain: {
+    premise: '{area}の起伏には、太古の地形の記憶が眠っている。地形の神とともに、坂と谷をめぐって大地が描いた物語を読み解こう。',
+    acts: [
+      { title: '序章 ── 台地の縁へ', action: '{a}で坂の上に立ち、見晴らしから台地の広がりを確かめよう。', trivia: '{area}は武蔵野台地の上にあり、縁では急な崖線が走る。', cat: '地形' },
+      { title: '探索 ── 谷を下る', action: '坂を下って低地へ。空気や音の変化から谷地形を体感しよう。', trivia: '{area}の谷は、かつての川が削った地形であることが多い。', cat: '地形' },
+      { title: '転機 ── 高低差が生んだ街', action: '崖下に寄り添う家並みや擁壁を探し、人が地形とどう暮らしたか見よう。', trivia: '{area}では高低差に沿って建物や道が複雑に積み重なる。', cat: '建築' },
+    ],
+    climaxTitle: '結末 ── 大地の物語を結ぶ',
+    climaxAction: 'ゴールで、いちばん高低差を感じた景色を一枚に収めて締めくくろう。',
+  },
 };
 
 // 簡単な単発チャレンジ（写真を1枚撮る等）を動的生成
@@ -105,28 +150,33 @@ export function generateChallenges(count = 697): Challenge[] {
     const goalLat = +(area.lat + (rand() - 0.5) * 0.02).toFixed(5);
     const goalLng = +(area.lng + (rand() - 0.5) * 0.02).toFixed(5);
 
-    const stepCount = 3 + Math.floor(rand() * 2);
-    const steps: ChallengeStep[] = [];
-    for (let s = 0; s < stepCount; s++) {
-      const cat = theme.cats[s % theme.cats.length];
-      const tmpl = STEP_TMPL[cat][Math.floor(rand() * STEP_TMPL[cat].length)];
-      steps.push({
-        id: `s${s}`,
-        title: tmpl.title,
-        action: tmpl.action.replace(/\{a\}/g, place),
-        triviaCategory: cat,
-        trivia: tmpl.trivia.replace(/\{a\}/g, place),
-        lat: +(goalLat + (rand() - 0.5) * 0.006).toFixed(5),
-        lng: +(goalLng + (rand() - 0.5) * 0.006).toFixed(5),
-      });
-    }
-    // 最後は写真ミッション
-    steps.push({ id: `s${stepCount}`, title: 'お気に入りを撮影', action: `${place}で気になった景色を1枚撮ろう。`, photo: true, lat: goalLat, lng: goalLng });
+    const story = STORY[theme.key];
+    const fill = (s: string) => s.replace(/\{a\}/g, place).replace(/\{area\}/g, area.name);
+
+    // 起承転結：序・承・転（3幕の探索）＋ 結（ゴールでの写真）
+    const steps: ChallengeStep[] = story.acts.map((act, s) => ({
+      id: `s${s}`,
+      title: act.title,
+      action: fill(act.action),
+      triviaCategory: act.cat,
+      trivia: fill(act.trivia),
+      lat: +(goalLat + (rand() - 0.5) * 0.006).toFixed(5),
+      lng: +(goalLng + (rand() - 0.5) * 0.006).toFixed(5),
+    }));
+    // 結末：ゴール地点での写真ミッション
+    steps.push({
+      id: `s${story.acts.length}`,
+      title: story.climaxTitle,
+      action: fill(story.climaxAction),
+      photo: true,
+      lat: goalLat,
+      lng: goalLng,
+    });
 
     out.push({
       id: `chg-${i}`,
       title: `${area.name} ${theme.title}`,
-      description: `${area.name}を舞台にした${theme.title}。街歩きの蘊蓄を集めながらゴールを目指そう。`,
+      description: fill(story.premise),
       difficulty,
       minLevel: difficulty, // 難易度＝必要レベルの目安
       estMinutes: 20 + Math.floor(rand() * 6) * 10,
