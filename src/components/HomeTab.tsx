@@ -36,8 +36,8 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
 
   // フィルタごとの件数
   const FILTERS = [
-    { key: 'all', label: 'すべて', n: CHALLENGES.length },
-    { key: 'todo', label: '未達成', n: CHALLENGES.filter((c) => !progress.completed.includes(c.id)).length },
+    { key: 'all', label: 'すべて', n: null },
+    { key: 'todo', label: '未達成', n: null },
     { key: 'done', label: '達成', n: progress.completed.length },
     { key: 'joinable', label: '参加できる', n: CHALLENGES.filter((c) => userLevel >= c.minLevel && !progress.completed.includes(c.id)).length },
   ] as const;
@@ -97,7 +97,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
                   : 'bg-white text-gray-500 border-gray-200 hover:border-shrine-red/40'
               }`}
             >
-              {f.label} <span className={filter === f.key ? 'text-white/80' : 'text-gray-400'}>{f.n}</span>
+              {f.label}{f.n != null && <span className={filter === f.key ? 'text-white/80' : 'text-gray-400'}> {f.n}</span>}
             </button>
           ))}
         </div>
@@ -130,12 +130,14 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
                     ? 'bg-[#2563eb] border-[#2563eb] shadow-md'
                     : completed
                     ? 'bg-amber-50/40 border-gold/40'
+                    : !levelOk
+                    ? 'bg-gray-100 border-gray-200 opacity-60'
                     : 'bg-white border-black/5 shadow-sm'
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-3xl flex-shrink-0 ${active ? 'bg-white/20' : completed ? 'bg-gold/20' : 'bg-gradient-to-br from-blue-100 to-amber-100'}`}>
-                    {ch.badgeIcon}
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-3xl flex-shrink-0 ${active ? 'bg-white/20' : completed ? 'bg-gold/20' : !levelOk ? 'bg-gray-200 grayscale' : 'bg-gradient-to-br from-blue-100 to-amber-100'}`}>
+                    {!levelOk && !active && !completed ? '🔒' : ch.badgeIcon}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">

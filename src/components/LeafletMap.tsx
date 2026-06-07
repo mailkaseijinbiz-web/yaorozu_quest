@@ -212,7 +212,7 @@ export default function LeafletMap({
     if (goalLat == null || goalLng == null) return;
     const goalHtml = `
       <div style="position:relative;display:flex;flex-direction:column;align-items:center;">
-        <div style="background:#dc2626;color:#fff;font-weight:900;font-size:10px;white-space:nowrap;padding:2px 8px;border-radius:9999px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3);">🚩 ゴール</div>
+        <div style="background:#dc2626;color:#fff;font-weight:900;font-size:10px;white-space:nowrap;padding:2px 8px;border-radius:9999px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3);">🚩 目的地</div>
         <div style="width:8px;height:8px;background:#dc2626;transform:rotate(45deg);margin-top:-2px;border-right:2px solid #fff;border-bottom:2px solid #fff;"></div>
       </div>`;
     goalMarkerRef.current = L.marker([goalLat, goalLng], {
