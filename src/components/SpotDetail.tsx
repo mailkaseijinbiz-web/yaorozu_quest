@@ -509,9 +509,9 @@ export default function SpotDetail({
             <div ref={messagesEndRef} />
           </div>
           {messages.length <= 1 && !isLoading && (
-            <div className="flex gap-1.5 overflow-x-auto px-3 pb-2 scrollbar-none flex-shrink-0">
+            <div className="flex flex-wrap gap-1.5 px-3 pb-2 flex-shrink-0">
               {PRESETS.map((p, i) => (
-                <button key={i} onClick={() => handleSend(p)} className="whitespace-nowrap bg-white border border-gray-200 px-3 py-1.5 rounded-full text-[13px] text-gray-600 hover:border-gold hover:text-amber-700 transition-all cursor-pointer flex-shrink-0">{p}</button>
+                <button key={i} onClick={() => handleSend(p)} className="whitespace-nowrap bg-white border border-gray-200 px-3 py-1.5 rounded-full text-[13px] text-gray-600 hover:border-gold hover:text-amber-700 transition-all cursor-pointer">{p}</button>
               ))}
             </div>
           )}

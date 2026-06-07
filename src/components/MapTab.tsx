@@ -51,7 +51,6 @@ export default function MapTab({
   onSelectSpot,
   userLocation,
   setUserLocation,
-  creatorProfiles,
   onNavigateTab,
   onOpenDetail,
   activeChallenge,
@@ -143,7 +142,6 @@ export default function MapTab({
   const activeNear = activeDist <= 1.0;
   const activeToku = activeSpot ? db.getSpotToku(activeSpot.id) : 0;
   const activeGodEmoji = activeSpot ? (activeSpot.godEmoji || (activeSpot.category === '神社' ? '⛩️' : '🙏')) : '⛩️';
-  const activeCreator = activeSpot?.creatorId ? creatorProfiles[activeSpot.creatorId] : null;
 
   return (
     <div className="relative w-full h-full flex flex-col">
@@ -256,11 +254,6 @@ export default function MapTab({
               </div>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="text-[13px] font-black text-[#2563eb] bg-[#2563eb]/10 px-1.5 py-0.5 rounded-full">徳 {activeToku.toLocaleString()}</span>
-                <span className="text-[11px] text-gray-400">{activeSpot.category}</span>
-                <span className="text-gray-300 text-[11px]">•</span>
-                <span className="text-[11px] text-gray-500 truncate">
-                  {activeCreator ? `創世主: ${activeCreator.displayName.split('@')[0]}` : '創世主未決定'}
-                </span>
               </div>
             </div>
             <ChevronRight className="w-5 h-5 text-gray-300 flex-shrink-0" />
