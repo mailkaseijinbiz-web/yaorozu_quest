@@ -28,7 +28,7 @@ interface MapTabProps {
   onOpenDetail?: (spot: Spot) => void; // タップで寺の詳細ページを開く
   activeChallenge?: Challenge | null; // 今挑戦中のチャレンジ（上部バナー＋ゴール表示）
   onClearChallenge?: () => void;
-  onAdvanceChallenge?: (stepId: string) => void; // 次の目的地ステップを達成
+  onAdvanceChallenge?: (stepId: string, photo?: string | null) => void; // 次の目的地ステップを達成（証拠写真つき）
 }
 
 const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -90,7 +90,7 @@ export default function MapTab({
     // この達成で全ステップ完了になるか
     const doneNow = new Set(db.getChallengeProgress().done[activeChallenge.id] || []);
     const willComplete = doneNow.size + 1 >= activeChallenge.steps.length;
-    onAdvanceChallenge?.(proofStep.id);
+    onAdvanceChallenge?.(proofStep.id, proofPhoto);
     setCelebrate({
       title: willComplete ? `「${activeChallenge.badgeName}」獲得！` : `${proofStep.title} 達成！`,
       icon: willComplete ? activeChallenge.badgeIcon : '✅',

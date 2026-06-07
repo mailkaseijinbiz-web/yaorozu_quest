@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, MessageSquare, Heart } from 'lucide-react';
+import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, MessageSquare, Heart, Share2 } from 'lucide-react';
 import { db, Spot, Agent, User as UserType, UserContribution } from '../lib/db';
 import HomeTab from '../components/HomeTab';
 import MapTab from '../components/MapTab';
@@ -103,6 +103,33 @@ export default function HomePage() {
     if (activeSpot) {
       const refreshedSpot = db.getSpot(activeSpot.id);
       if (refreshedSpot) setActiveSpot(refreshedSpot);
+    }
+  };
+
+  // 達成クエストを写真とともに振り返りシェア（Web Share API、非対応時はクリップボード）
+  const shareQuest = async (title: string, badgeName: string, badgeIcon: string, photos: string[]) => {
+    const text = `${badgeIcon} YAOROZU QUEST「${title}」を制覇！「${badgeName}」バッジを獲得しました。 #ヤオロズクエスト`;
+    try {
+      let files: File[] = [];
+      if (photos.length && typeof File !== 'undefined') {
+        files = await Promise.all(
+          photos.slice(0, 4).map(async (p, i) => {
+            const blob = await (await fetch(p)).blob();
+            return new File([blob], `quest-${i + 1}.jpg`, { type: blob.type || 'image/jpeg' });
+          })
+        );
+      }
+      const navAny = navigator as Navigator & { canShare?: (d?: unknown) => boolean };
+      if (navAny.share && files.length && navAny.canShare?.({ files })) {
+        await navAny.share({ title: 'YAOROZU QUEST', text, files });
+      } else if (navAny.share) {
+        await navAny.share({ title: 'YAOROZU QUEST', text });
+      } else {
+        await navigator.clipboard.writeText(text);
+        alert('シェア文をコピーしました。SNSに貼り付けてください。');
+      }
+    } catch {
+      /* ユーザーがキャンセルした等は無視 */
     }
   };
 
@@ -211,10 +238,11 @@ export default function HomePage() {
                   onOpenDetail={setDetailSpot}
                   activeChallenge={activeChallengeId ? getChallenge(activeChallengeId) ?? null : null}
                   onClearChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
-                  onAdvanceChallenge={(stepId) => {
+                  onAdvanceChallenge={(stepId, photo) => {
                     if (!activeChallengeId || !currentUser) return;
                     const ch = getChallenge(activeChallengeId);
                     if (!ch) return;
+                    if (photo) db.saveChallengePhoto(activeChallengeId, stepId, photo);
                     db.completeChallengeStep(currentUser.id, activeChallengeId, stepId, ch.steps.length);
                     refreshDatabaseStates();
                   }}
@@ -387,17 +415,38 @@ export default function HomePage() {
                         <p className="text-sm text-gray-400">まだ達成したクエストがありません。<br />クエストを制覇してバッジを集めよう。</p>
                       </div>
                     ) : (
-                      <div className="space-y-2">
-                        {completedChallenges.map((ch) => (
-                          <div key={ch.id} className="flex items-center gap-3 bg-amber-50/50 rounded-2xl p-3 border border-gold/40">
-                            <div className="w-12 h-12 rounded-xl bg-gold/20 flex items-center justify-center text-3xl flex-shrink-0">{ch.badgeIcon}</div>
-                            <div className="flex-1 min-w-0">
-                              <h4 className="text-base font-black text-gray-900 truncate">{ch.title}</h4>
-                              <p className="text-[13px] text-amber-700 font-bold">🏆 「{ch.badgeName}」バッジ獲得</p>
+                      <div className="space-y-3">
+                        {completedChallenges.map((ch) => {
+                          const photoMap = db.getChallengePhotos(ch.id);
+                          const photos = ch.steps.map((s) => photoMap[s.id]).filter((p): p is string => !!p);
+                          return (
+                            <div key={ch.id} className="bg-amber-50/50 rounded-2xl p-3 border border-gold/40">
+                              <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-xl bg-gold/20 flex items-center justify-center text-3xl flex-shrink-0">{ch.badgeIcon}</div>
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="text-base font-black text-gray-900 truncate">{ch.title}</h4>
+                                  <p className="text-[13px] text-amber-700 font-bold">🏆 「{ch.badgeName}」バッジ獲得</p>
+                                </div>
+                                <span className="text-[11px] font-black text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full flex-shrink-0">制覇</span>
+                              </div>
+
+                              {photos.length > 0 && (
+                                <div className="flex gap-2 overflow-x-auto scrollbar-none mt-3">
+                                  {photos.map((p, i) => (
+                                    <img key={i} src={p} alt="振り返り写真" className="w-20 h-20 rounded-xl object-cover flex-shrink-0 border border-gold/30" />
+                                  ))}
+                                </div>
+                              )}
+
+                              <button
+                                onClick={() => shareQuest(ch.title, ch.badgeName, ch.badgeIcon, photos)}
+                                className="w-full mt-3 bg-shrine-red text-white text-[13px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer hover:opacity-90"
+                              >
+                                <Share2 className="w-4 h-4" />写真とシェアして振り返る
+                              </button>
                             </div>
-                            <span className="text-[11px] font-black text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full flex-shrink-0">制覇</span>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     );
                   })()}

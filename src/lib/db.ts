@@ -491,6 +491,7 @@ const KEYS = {
   AFFILIATE: 'yaorozu_affiliate',
   STATS: 'yaorozu_user_stats',
   CHALLENGE: 'yaorozu_challenge_progress',
+  CHALLENGE_PHOTOS: 'yaorozu_challenge_photos',
   TRIVIA: 'yaorozu_trivia',
 };
 
@@ -973,6 +974,18 @@ class MockDatabase {
     }
     this.save(KEYS.CHALLENGE, p);
     return p;
+  }
+
+  /** チャレンジの証拠写真（達成の振り返り用）。challengeId→stepId→dataURL */
+  getChallengePhotos(challengeId: string): { [stepId: string]: string } {
+    const all = this.load<{ [cid: string]: { [sid: string]: string } }>(KEYS.CHALLENGE_PHOTOS, {});
+    return all[challengeId] || {};
+  }
+
+  saveChallengePhoto(challengeId: string, stepId: string, dataUrl: string): void {
+    const all = this.load<{ [cid: string]: { [sid: string]: string } }>(KEYS.CHALLENGE_PHOTOS, {});
+    all[challengeId] = { ...(all[challengeId] || {}), [stepId]: dataUrl };
+    this.save(KEYS.CHALLENGE_PHOTOS, all);
   }
 
   // ────────────────────────────────────────────────
