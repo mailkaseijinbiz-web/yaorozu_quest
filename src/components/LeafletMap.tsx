@@ -157,7 +157,7 @@ export default function LeafletMap({
     const userHtml = `
       <div style="position:relative;width:44px;height:44px;">
         <div style="position:absolute;left:22px;top:22px;transform:translate(-50%,-50%) rotate(${heading}deg);transform-origin:center;">
-          <div style="width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:18px solid rgba(37,99,235,0.45);position:absolute;left:-8px;top:-28px;"></div>
+          <div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:11px solid #1d4ed8;position:absolute;left:-5px;top:-22px;"></div>
         </div>
         <div class="animate-ping" style="position:absolute;left:22px;top:22px;transform:translate(-50%,-50%);width:30px;height:30px;border-radius:9999px;border:1px solid #2563eb;opacity:.4;"></div>
         <div style="position:absolute;left:22px;top:22px;transform:translate(-50%,-50%);width:16px;height:16px;border-radius:9999px;background:#2563eb;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.35);"></div>
