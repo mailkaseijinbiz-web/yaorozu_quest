@@ -39,7 +39,6 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
     { key: 'all', label: 'すべて', n: null },
     { key: 'todo', label: '未達成', n: null },
     { key: 'done', label: '達成', n: progress.completed.length },
-    { key: 'joinable', label: '参加できる', n: CHALLENGES.filter((c) => userLevel >= c.minLevel && !progress.completed.includes(c.id)).length },
   ] as const;
 
   // フィルタ → 第1ソート＝参加できるもの、第2ソート＝距離の近い順
