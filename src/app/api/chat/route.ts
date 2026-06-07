@@ -1,0 +1,218 @@
+// Yaorozu God OS - Chat API Route with OpenAI & Rule-based Fallback
+import { NextResponse } from 'next/server';
+
+// Interface matching DB types inside API
+interface Agent {
+  name: string;
+  systemPrompt: string;
+  voiceTone: string;
+}
+
+interface UgcPost {
+  content: string;
+  userDisplayName: string;
+}
+
+interface AffiliateLink {
+  title: string;
+  category: string;
+  url: string;
+  priceRange: string;
+  rating: number;
+}
+
+// Local mock templates for when OpenAI API key is missing
+function getFallbackResponse(
+  message: string,
+  agent: Agent,
+  ugc: UgcPost[],
+  affiliates: AffiliateLink[],
+  userName: string
+): string {
+  const msg = message.toLowerCase();
+  
+  // 1. Identify intent
+  const wantsFood = msg.includes('飯') || msg.includes('食') || msg.includes('おいしい') || msg.includes('ランチ') || msg.includes('店') || msg.includes('ディナー');
+  const wantsHotel = msg.includes('宿') || msg.includes('泊') || msg.includes('ホテル') || msg.includes('旅館');
+  const wantsActivity = msg.includes('体験') || msg.includes('ツアー') || msg.includes('遊ぶ') || msg.includes('観光') || msg.includes('写真') || msg.includes('何する');
+  const wantsHistory = msg.includes('歴史') || msg.includes('由来') || msg.includes('起源') || msg.includes('豆知識') || msg.includes('知識');
+
+  // Find relevant affiliates
+  const restaurant = affiliates.find(a => a.category === 'restaurant');
+  const hotel = affiliates.find(a => a.category === 'hotel');
+  const activity = affiliates.find(a => a.category === 'activity');
+
+  // Grab a random UGC post for RAG simulation
+  const randomUgc = ugc.length > 0 ? ugc[Math.floor(Math.random() * ugc.length)] : null;
+
+  // 2. Generate persona-based replies
+  switch (agent.voiceTone) {
+    case '親しみやすい': // e.g. Sensoji Gold Dragon (べらんめえ調)
+      if (wantsFood && restaurant) {
+        return `おぅおぅ！浅草で食うなら「${restaurant.title}」が最高でぃ！美味い天ぷらが食えるぜ。ここからすぐだから行ってみな！ (${restaurant.url})`;
+      }
+      if (wantsHotel && hotel) {
+        return `宿を探してんのかい？それなら「${hotel.title}」がおすすめだぜぃ！スカイツリーがバッチリ見える絶景ホテルだ！ (${hotel.url})`;
+      }
+      if (wantsActivity && activity) {
+        return `おいおい、粋な街歩きなら「${activity.title}」で着物をレンタルしな！写真映え間違いなしでぃ！ (${activity.url})`;
+      }
+      if (wantsHistory && randomUgc) {
+        return `歴史の豆知識か？参拝者の${randomUgc.userDisplayName}が言ってたんだがな、「${randomUgc.content.substring(0, 70)}…」ってわけよ！ためになるだろぃ？`;
+      }
+      return `ようこそ浅草寺へ！オレはこの地を守る金龍さ。${userName}、何を聞きたいんでぃ？歴史でも美味しい店でも何でも聞いてきな！`;
+
+    case '高飛車': // e.g. Kohaku Fox (ツンデレ)
+      if (wantsFood && restaurant) {
+        return `…フン、お腹が空いたのですか？仕方ありませんね。「${restaurant.title}」とやらに行きなさい。私を満足させる味ではありませんが、人間にはお似合いです。 (${restaurant.url})`;
+      }
+      if (wantsHotel && hotel) {
+        return `宿？贅沢ですね。まあ「${hotel.title}」なら、少しは安眠できるのではないですか？さっさと予約しなさい。 (${hotel.url})`;
+      }
+      if (wantsActivity && activity) {
+        return `現地での体験ですか？「${activity.title}」にでも行って退屈を紛らわせると良いでしょう。フン、感謝しなさい。 (${activity.url})`;
+      }
+      if (wantsHistory && randomUgc) {
+        return `歴史ですか？${randomUgc.userDisplayName}とかいう者が知ったような顔をして「${randomUgc.content.substring(0, 60)}…」と書いていました。ふん、私の方が千倍詳しいですがね。`;
+      }
+      return `伏見稲荷の白狐、狐白（こはく）です。${userName}、何の用ですか？用もないのに私の前に立つなど、百年早いのです。…まあ、話くらいは聞いてあげますけど。`;
+
+    case '賢者': // e.g. Buddha (穏やか、スロー)
+      if (wantsFood && restaurant) {
+        return `ほう…お腹が空きましたか。心を満たした後は、体も満たさねばなりませんね。「${restaurant.title}」で美味しいお食事をいただくのが良いでしょう。旅の良き思い出になりますな。 (${restaurant.url})`;
+      }
+      if (wantsHotel && hotel) {
+        return `旅の疲れを癒やすのは大切なことですな。「${hotel.title}」にてゆっくりと身と心を休めることをお勧めしますぞ。 (${hotel.url})`;
+      }
+      if (wantsActivity && activity) {
+        return `この土地を深く知るには、「${activity.title}」などの体験をされるのが良いでしょう。新たな悟りが開けるかもしれません。 (${activity.url})`;
+      }
+      if (wantsHistory && randomUgc) {
+        return `この地の歴史は深く、${randomUgc.userDisplayName}殿が『${randomUgc.content.substring(0, 80)}』と語ってくれています。人々が紡ぐ歴史こそ、大いなる真理ですな。`;
+      }
+      return `ようこそ東大寺へ。私は盧舎那仏…大仏でございます。${userName}殿、慌ただしい日常を忘れ、ここでは静かに心を落ち着かせ、問いかけてくだされ。`;
+
+    case '神秘的': // e.g. Meiji Shrine Spirit (物静か)
+      if (wantsFood && restaurant) {
+        return `森の澄んだ空気を感じた後は、温かいお食事が心にしみます。「${restaurant.title}」で滋味深いお食事を召し上がってください。 (${restaurant.url})`;
+      }
+      if (wantsHotel && hotel) {
+        return `静かな夜を過ごすための宿をお探しですね。「${hotel.title}」なら、心地よい時間が流れていますよ。 (${hotel.url})`;
+      }
+      if (wantsActivity && activity) {
+        return `この地の魅力を肌で感じるために、「${activity.title}」を試してみてはいかがでしょうか。 (${activity.url})`;
+      }
+      if (wantsHistory && randomUgc) {
+        return `歴史のささやきが聞こえます。${randomUgc.userDisplayName}さんが残した言葉「${randomUgc.content.substring(0, 70)}…」に、大切な教えが隠されています。`;
+      }
+      return `明治の杜へようこそ。私はコダマ、この深い森の精霊です。${userName}さん、静寂に身を委ね、心の中にある問いをそっと私に教えてください。`;
+
+    case '厳格': // e.g. Itsukushima Goddess (古風、雅)
+      if (wantsFood && restaurant) {
+        return `空腹のままでは参拝もままなりませぬ。「${restaurant.title}」にて、この地の美味を頂くのが雅でおじゃる。いざ、立ち寄るが良い。 (${restaurant.url})`;
+      }
+      if (wantsHotel && hotel) {
+        return `良き旅には良き休息が必要でございます。「${hotel.title}」にて、波の音を聞きながら夜を明かされるのが宜しかろう。 (${hotel.url})`;
+      }
+      if (wantsActivity && activity) {
+        return `この神聖なる地を深く体験するため、「${activity.title}」に赴き、見聞を広めるのが宜しゅうございます。 (${activity.url})`;
+      }
+      if (wantsHistory && randomUgc) {
+        return `この厳島の歴史について、${randomUgc.userDisplayName}なる者が『${randomUgc.content.substring(0, 75)}…』と書き残しております。古きをたずねて新しきを知る、素晴らしい心がけでおじゃる。`;
+      }
+      return `厳島を司る海の女神、市杵島姫でございます。${userName}、ようこそ参られました。水清ければ魚棲むという。そなたの清らかな心で、私に問いを投げかけるが良い。`;
+
+    default:
+      return `私はこの土地を守る神です。そなたの問い「${message}」は心に届きました。より深く貢献（UGC投稿）を重ねることで、私の力も増すことでしょう。`;
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const { message, history, spotId, agent, ugc, affiliates, userName } = await request.json();
+
+    const apiKey = process.env.OPENAI_API_KEY;
+
+    if (!apiKey) {
+      // API Key is not set, use the robust rule-based fallback
+      const responseText = getFallbackResponse(message, agent, ugc, affiliates, userName || '巡礼者');
+      
+      // Simulate network latency (500ms)
+      await new Promise((resolve) => setTimeout(resolve, 600));
+
+      return NextResponse.json({ response: responseText, mode: 'fallback_mock' });
+    }
+
+    // OpenAI is available, let's call it!
+    // Construct local context (RAG)
+    const ugcContext = ugc.map((post: UgcPost, index: number) => 
+      `UGC Knowledge [${index + 1}] (by ${post.userDisplayName}): ${post.content}`
+    ).join('\n');
+
+    const affiliateContext = affiliates.map((aff: AffiliateLink, index: number) =>
+      `Offer [${index + 1}] (Category: ${aff.category}): Name: "${aff.title}", URL: "${aff.url}", Rating: ${aff.rating}, Price Range: ${aff.priceRange}`
+    ).join('\n');
+
+    const fullSystemPrompt = `${agent.systemPrompt}
+
+Below is the visitor-contributed local knowledge (UGC) for your spot. You must use this information to answer questions where appropriate:
+${ugcContext || 'No UGC posts yet.'}
+
+Below are relevant local affiliate recommendations. If the user asks about food, restaurants, hotels, accommodation, experiences, or activities in the area, naturally suggest ONE appropriate recommendation from this list in your persona:
+${affiliateContext || 'No affiliate offers available.'}
+
+User's display name: ${userName || '巡礼者'}
+
+Remember: Answer in character, be extremely concise (under 150 characters), and embed affiliate URLs naturally in your persona style.`;
+
+    const chatMessages = [
+      { role: 'system', content: fullSystemPrompt },
+      ...history.slice(-6).map((msg: { sender: 'user' | 'agent'; text: string }) => ({
+        role: msg.sender === 'user' ? 'user' : 'assistant',
+        content: msg.text,
+      })),
+      { role: 'user', content: message }
+    ];
+
+    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: chatMessages,
+        max_tokens: 150,
+        temperature: 0.7
+      })
+    });
+
+    if (!openaiResponse.ok) {
+      throw new Error(`OpenAI API responded with code ${openaiResponse.status}`);
+    }
+
+    const data = await openaiResponse.json();
+    const responseText = data.choices[0].message.content.trim();
+
+    return NextResponse.json({ response: responseText, mode: 'openai' });
+  } catch (error) {
+    console.error('Error in chat API:', error);
+    
+    // In case of error (e.g. invalid key, timeout), fallback gracefully
+    const body = await request.clone().json();
+    const responseText = getFallbackResponse(
+      body.message,
+      body.agent,
+      body.ugc,
+      body.affiliates,
+      body.userName || '巡礼者'
+    );
+    
+    return NextResponse.json({ 
+      response: responseText, 
+      mode: 'error_fallback', 
+      errorMessage: error instanceof Error ? error.message : String(error) 
+    });
+  }
+}
