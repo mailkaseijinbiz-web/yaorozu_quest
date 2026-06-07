@@ -174,7 +174,7 @@ export default function MapTab({
       {/*
         3a. チャレンジ参加中の下部オーバーレイ（次の目的地・次の案内）
       */}
-      {activeChallenge ? (
+      {activeChallenge && !celebrate ? (
         <div className="absolute bottom-3 left-3 right-3 z-[1000] bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-[#2563eb]/25 p-3">
           {chAllDone ? (
             <div className="flex items-center gap-3">
@@ -234,7 +234,7 @@ export default function MapTab({
             </>
           ) : null}
         </div>
-      ) : activeSpot && (
+      ) : !celebrate && activeSpot && (
         <div
           onClick={() => onOpenDetail?.(activeSpot)}
           className="absolute bottom-3 left-3 right-3 z-[1000] bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-[#2563eb]/15 p-3 cursor-pointer active:scale-[0.99] transition-all"

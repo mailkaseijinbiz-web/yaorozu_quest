@@ -185,11 +185,12 @@ export async function POST(request: Request) {
     const { message, history, spotId, agent, ugc, affiliates, userName, spot } = await request.json();
 
     const apiKey = process.env.OPENAI_API_KEY;
+    const geminiKey = process.env.GEMINI_API_KEY;
 
     // 個別Agentが無いスポット（合成エージェント）は spot 情報で応答する
     const isSynthetic = typeof agent?.id === 'string' && agent.id.startsWith('agent-synthetic-');
 
-    if (!apiKey) {
+    if (!apiKey && !geminiKey) {
       // API Key is not set, use the robust rule-based fallback
       const responseText = (isSynthetic && spot)
         ? getSpotFallbackResponse(message, spot, ugc, affiliates, agent?.name || spot.name)
@@ -222,6 +223,43 @@ ${affiliateContext || 'No affiliate offers available.'}
 User's display name: ${userName || '巡礼者'}
 
 Remember: Answer in character, be extremely concise (under 150 characters), and embed affiliate URLs naturally in your persona style.`;
+
+    // ── Gemini を優先（GEMINI_API_KEY がある場合）──
+    if (geminiKey) {
+      const contents = [
+        ...history.slice(-6).map((msg: { sender: 'user' | 'agent'; text: string }) => ({
+          role: msg.sender === 'user' ? 'user' : 'model',
+          parts: [{ text: msg.text }],
+        })),
+        { role: 'user', parts: [{ text: message }] },
+      ];
+
+      const geminiResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: fullSystemPrompt }] },
+            contents,
+            generationConfig: {
+              maxOutputTokens: 300,
+              temperature: 0.7,
+              thinkingConfig: { thinkingBudget: 0 }, // 思考トークンを無効化（応答を確実に返す）
+            },
+          }),
+        }
+      );
+
+      if (!geminiResponse.ok) {
+        throw new Error(`Gemini API responded with code ${geminiResponse.status}`);
+      }
+
+      const gData = await geminiResponse.json();
+      const gText = gData?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text || '').join('').trim();
+      if (!gText) throw new Error('Gemini returned empty response');
+      return NextResponse.json({ response: gText, mode: 'gemini' });
+    }
 
     const chatMessages = [
       { role: 'system', content: fullSystemPrompt },
