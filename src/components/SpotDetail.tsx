@@ -184,9 +184,13 @@ export default function SpotDetail({
   };
 
   // 訪問を記録（探訪バッジ・ランキング用）。スポットが変わるたびに1回。
+  // 画面遷移を妨げないよう、記録と親へのリフレッシュ通知は描画後に遅延実行する。
   useEffect(() => {
-    db.recordVisit(currentUser.id, spot.id);
-    onChanged?.();
+    const t = setTimeout(() => {
+      db.recordVisit(currentUser.id, spot.id);
+      onChanged?.();
+    }, 400);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spot.id]);
 
