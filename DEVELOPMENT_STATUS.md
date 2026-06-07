@@ -30,9 +30,10 @@
 - 実カメラ合成・3Dモデル表示は未実装。共有も "Simulated native share"。
 
 ### 3. スポットへの写真投稿（`src/components/SpotDetail.tsx`）
-- 「デモ用の投稿写真候補」＝ **Unsplash 固定5枚から選ぶだけ**。
-- 実際のカメラ撮影・アップロードは未実装。
-- ※チャレンジの「証拠写真」は端末カメラ/ファイルから取得する実装あり（こちらは実動。ただし保存先は localStorage）。
+- **端末カメラ／ファイルからの実写真取り込みを実装済み**（`capture="environment"`）。
+  選択画像は canvas で長辺1280pxに縮小し JPEG 圧縮して data URL 化（localStorage＋クラウド同期のサイズ対策）。
+- ※チャレンジの「証拠写真」も端末カメラ/ファイルから取得する実装あり。
+- **残課題**: 保存先が localStorage（snapshot 同期）のため、本番は Supabase Storage へ移行して URL 参照に置き換えるのが望ましい。
 
 ### 4. 3Dアバター
 - `avatar3dUrl` は **Placeholder**。実際は絵文字／イラストで代用。

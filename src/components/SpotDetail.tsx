@@ -23,14 +23,37 @@ interface SpotDetailProps {
   onStartChallenge?: (challengeId: string) => void; // クエストタブから挑戦開始
 }
 
-// デモ用の投稿写真候補（実アプリではカメラ/アップロード）
-const SAMPLE_PHOTOS = [
-  'https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=800&q=80',
-  'https://images.unsplash.com/photo-1545569341-9eb8b30979d9?w=800&q=80',
-  'https://images.unsplash.com/photo-1522383225653-ed111181a951?w=800&q=80',
-  'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800&q=80',
-  'https://images.unsplash.com/photo-1480796927426-f609979314bd?w=800&q=80',
-];
+// 端末カメラ/ファイルから選んだ画像を縮小して data URL 化する。
+// localStorage + クラウド同期に載せるため、長辺を抑え JPEG で圧縮してサイズを節約する。
+const MAX_PHOTO_DIM = 1280; // 長辺の最大ピクセル
+async function fileToCompressedDataUrl(file: File): Promise<string> {
+  const rawUrl: string = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+
+  // 画像として読み込めない場合（HEIC 等）は元データをそのまま返す
+  const img = document.createElement('img');
+  const loaded = await new Promise<boolean>((resolve) => {
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = rawUrl;
+  });
+  if (!loaded || !img.naturalWidth) return rawUrl;
+
+  const scale = Math.min(1, MAX_PHOTO_DIM / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.round(img.naturalWidth * scale);
+  const h = Math.round(img.naturalHeight * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return rawUrl;
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL('image/jpeg', 0.82);
+}
 
 // タスク達成時に「楽しみ方」へ追加されるテキスト（神がUGCで成長する）
 function enjoymentForTask(task: GodTask, place: string): string | null {
@@ -83,6 +106,9 @@ export default function SpotDetail({
   const [postingTask, setPostingTask] = useState<GodTask | null>(null); // 投稿モーダル
   const [postText, setPostText] = useState('');
 
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
   // チャット
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -102,14 +128,32 @@ export default function SpotDetail({
   };
 
   // ── 写真：投稿 / 却下 ──
+  // 端末カメラ/ファイルピッカーを開く（実際の取り込みは onPickPhoto）
   const handlePostPhoto = () => {
-    const used = new Set(photos);
-    const next = SAMPLE_PHOTOS.find((p) => !used.has(p)) || SAMPLE_PHOTOS[photos.length % SAMPLE_PHOTOS.length];
-    db.addSpotPhoto(currentUser.id, spot.id, next);
-    db.recordTaskDone(currentUser.id, 'photo', spot.id, 30);
-    setPhotos(db.getSpotPhotos(spot.id));
-    flashToast('📸 写真を奉納！ +30徳');
-    onChanged?.();
+    if (uploadingPhoto) return;
+    photoInputRef.current?.click();
+  };
+
+  // 選択された画像を縮小して奉納する
+  const onPickPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // 同じ画像を再選択しても onChange が発火するよう値をリセット
+    e.target.value = '';
+    if (!file) return;
+    setUploadingPhoto(true);
+    try {
+      const dataUrl = await fileToCompressedDataUrl(file);
+      db.addSpotPhoto(currentUser.id, spot.id, dataUrl);
+      db.recordTaskDone(currentUser.id, 'photo', spot.id, 30);
+      setPhotos(db.getSpotPhotos(spot.id));
+      setDoneTasks((prev) => ({ ...prev, photo: true }));
+      flashToast('📸 写真を奉納！ +30徳');
+      onChanged?.();
+    } catch {
+      flashToast('写真の読み込みに失敗しました');
+    } finally {
+      setUploadingPhoto(false);
+    }
   };
 
   const handleRejectPhoto = (url: string) => {
@@ -128,6 +172,7 @@ export default function SpotDetail({
 
     if (task.type === 'photo') {
       handlePostPhoto();
+      return; // 写真が実際に選択・奉納された時点で done にする（onPickPhoto）
     } else if (POST_TYPES.has(task.type)) {
       // 実際に投稿（口コミ・できごと・実食・買物）→ 入力モーダルを開く
       setPostingTask(task);
@@ -290,9 +335,9 @@ export default function SpotDetail({
                 <Camera className="w-4 h-4 text-rose-500" />
                 みんなの写真 ({photos.length})
               </h3>
-              <button onClick={handlePostPhoto} className="flex items-center gap-1 text-[13px] font-black text-white bg-rose-500 px-3 py-1.5 rounded-full hover:opacity-90 transition-all cursor-pointer">
-                <ImagePlus className="w-3.5 h-3.5" />
-                写真を投稿
+              <button onClick={handlePostPhoto} disabled={uploadingPhoto} className="flex items-center gap-1 text-[13px] font-black text-white bg-rose-500 px-3 py-1.5 rounded-full hover:opacity-90 transition-all cursor-pointer disabled:opacity-60">
+                <ImagePlus className={`w-3.5 h-3.5 ${uploadingPhoto ? 'animate-pulse' : ''}`} />
+                {uploadingPhoto ? '処理中…' : '写真を投稿'}
               </button>
             </div>
             {photos.length === 0 ? (
@@ -440,6 +485,16 @@ export default function SpotDetail({
           </div>
         </div>
       )}
+
+      {/* 写真投稿用の隠しファイル入力（端末カメラ優先） */}
+      <input
+        ref={photoInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={onPickPhoto}
+      />
 
       {/* トースト */}
       {toast && (
