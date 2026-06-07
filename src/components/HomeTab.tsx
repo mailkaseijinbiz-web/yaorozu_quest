@@ -143,10 +143,10 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
                       <h3 className={`text-base font-black truncate ${active ? 'text-white' : 'text-gray-900'}`}>{ch.title}</h3>
                     </div>
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                      <span className={`text-[13px] font-black px-1.5 py-0.5 rounded-full border ${active ? 'bg-white/15 text-white border-white/30' : diff.tone}`}>
+                      <span className={`text-[13px] font-black ${active ? 'text-white' : diff.text}`}>
                         {diff.stars} {diff.label}
                       </span>
-                      <span className={`text-[13px] font-black px-1.5 py-0.5 rounded-full border ${active ? 'bg-white/15 text-white border-white/30' : levelOk ? 'text-gray-500 bg-gray-50 border-gray-200' : 'text-rose-600 bg-rose-50 border-rose-200'}`}>
+                      <span className={`text-[13px] font-black ${active ? 'text-white' : levelOk ? 'text-gray-500' : 'text-rose-600'}`}>
                         {levelOk ? '' : '🔒 '}Lv.{ch.minLevel}〜
                       </span>
                       <span className={`text-[13px] flex items-center gap-0.5 ${active ? 'text-white/80' : 'text-gray-400'}`}>

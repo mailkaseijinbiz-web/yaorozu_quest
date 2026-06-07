@@ -42,10 +42,10 @@ export interface Challenge {
   steps: ChallengeStep[];
 }
 
-export function difficultyLabel(d: number): { label: string; stars: string; tone: string } {
-  if (d <= 1) return { label: 'やさしい', stars: '★☆☆', tone: 'text-emerald-600 bg-emerald-50 border-emerald-200' };
-  if (d === 2) return { label: 'ふつう', stars: '★★☆', tone: 'text-amber-600 bg-amber-50 border-amber-200' };
-  return { label: 'むずかしい', stars: '★★★', tone: 'text-rose-600 bg-rose-50 border-rose-200' };
+export function difficultyLabel(d: number): { label: string; stars: string; tone: string; text: string } {
+  if (d <= 1) return { label: 'やさしい', stars: '★☆☆', tone: 'text-emerald-600 bg-emerald-50 border-emerald-200', text: 'text-emerald-600' };
+  if (d === 2) return { label: 'ふつう', stars: '★★☆', tone: 'text-amber-600 bg-amber-50 border-amber-200', text: 'text-amber-600' };
+  return { label: 'むずかしい', stars: '★★★', tone: 'text-rose-600 bg-rose-50 border-rose-200', text: 'text-rose-600' };
 }
 
 export const TRIVIA_TONE: Record<TriviaCategory, string> = {

@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Navigation, RotateCw } from 'lucide-react';
+import { Navigation } from 'lucide-react';
 import { Spot, db } from '../lib/db';
 
 // 2点間の概算距離（度ベース・並べ替え用）
@@ -49,7 +49,6 @@ export default function LeafletMap({
 
   // 地図の移動に追従して再描画するためのバージョン
   const [mapVersion, setMapVersion] = useState(0);
-  const [moved, setMoved] = useState(false); // ドラッグ後「この場所で再検索」を表示
   const [deviceHeading, setDeviceHeading] = useState<number | null>(null); // 方位磁針
 
   // 1. Initialize Map
@@ -70,17 +69,14 @@ export default function LeafletMap({
 
     mapRef.current = map;
     const bump = () => setMapVersion((v) => v + 1);
-    const onDrag = () => setMoved(true);
     map.on('move', bump);
     map.on('zoomend', bump);
-    map.on('dragend', onDrag);
     setMapVersion((v) => v + 1);
 
     return () => {
       if (mapRef.current) {
         mapRef.current.off('move', bump);
         mapRef.current.off('zoomend', bump);
-        mapRef.current.off('dragend', onDrag);
         mapRef.current.remove();
         mapRef.current = null;
       }
@@ -120,20 +116,6 @@ export default function LeafletMap({
     return () => { window.removeEventListener('deviceorientationabsolute', handler as EventListener); window.removeEventListener('deviceorientation', handler as EventListener); };
   }, []);
 
-  // 「この場所で再検索」：地図中央に最も近いスポットを選択
-  const handleResearch = () => {
-    const map = mapRef.current;
-    if (!map) return;
-    const c = map.getCenter();
-    let best: Spot | null = null;
-    let bestD = Infinity;
-    spots.forEach((s) => {
-      const d = roughDist(c.lat, c.lng, s.latitude, s.longitude);
-      if (d < bestD) { bestD = d; best = s; }
-    });
-    if (best) onSelectSpot(best);
-    setMoved(false);
-  };
 
   // ビューポート内のスポットを中心からの近さ順に、ズーム連動の上限まで絞る
   const visibleSpots = useMemo(() => {
@@ -310,17 +292,6 @@ export default function LeafletMap({
   return (
     <div className="relative w-full h-full">
       <div ref={mapContainerRef} className="w-full h-full rounded-2xl overflow-hidden" />
-
-      {/* この場所で再検索（ドラッグ後に表示） */}
-      {moved && (
-        <button
-          onClick={handleResearch}
-          className="absolute top-14 left-1/2 -translate-x-1/2 z-[600] bg-white shadow-lg border border-[#2563eb]/20 text-[#2563eb] text-xs font-black px-4 py-2 rounded-full hover:bg-[#2563eb] hover:text-white transition-all cursor-pointer flex items-center gap-1.5"
-        >
-          <RotateCw className="w-3.5 h-3.5" />
-          この場所で再検索
-        </button>
-      )}
 
       {/* 現在地へ戻るボタン（下部オーバーレイと被らないよう上め） */}
       <button

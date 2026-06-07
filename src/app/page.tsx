@@ -28,6 +28,15 @@ export default function HomePage() {
   const [detailSpot, setDetailSpot] = useState<Spot | null>(null);
   const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
 
+  // 詳細ページをブラウザの「戻る」で閉じられるように履歴に積む
+  useEffect(() => {
+    if (!detailSpot) return;
+    window.history.pushState({ yaorozuDetail: true }, '');
+    const onPop = () => setDetailSpot(null);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [detailSpot]);
+
   // User state
   const [currentUser, setCurrentUser] = useState<UserType | null>(null);
   const [userStats, setUserStats] = useState<UserContribution | null>(null);
@@ -492,13 +501,13 @@ export default function HomePage() {
             spot={detailSpot}
             currentUser={currentUser || FALLBACK_CURRENT_USER}
             allSpots={spots}
-            onClose={() => setDetailSpot(null)}
+            onClose={() => window.history.back()}
             onOpenRelated={(s) => setDetailSpot(s)}
             onChanged={refreshDatabaseStates}
             onStartChallenge={(cid) => {
               db.setActiveChallenge(cid);
               setActiveChallengeId(cid);
-              setDetailSpot(null);
+              window.history.back();
               setActiveTab('quest');
             }}
             onMessageSent={() => {
