@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, MessageSquare, Heart, Share2 } from 'lucide-react';
 import { db, Spot, Agent, User as UserType, UserContribution } from '../lib/db';
+import { pullSnapshot } from '../lib/cloud-sync';
 import HomeTab from '../components/HomeTab';
 import MapTab from '../components/MapTab';
 import SpotDetail from '../components/SpotDetail';
@@ -81,6 +82,16 @@ export default function HomePage() {
       setHasChatted(localStorage.getItem('yaorozu_quest_chatted') === 'true');
       setHasTakenPhoto(localStorage.getItem('yaorozu_quest_photo') === 'true');
     }
+  }, []);
+
+  // クラウド永続化：起動時にスナップショットを復元（鍵未設定なら no-op）
+  useEffect(() => {
+    let cancelled = false;
+    pullSnapshot().then((applied) => {
+      if (applied && !cancelled) refreshDatabaseStates();
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 実際のGPS現在地を取得して反映

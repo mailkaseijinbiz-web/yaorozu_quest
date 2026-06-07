@@ -1,6 +1,7 @@
 // Yaorozu God OS - Mock Database & State Management
 import { generateTokyoSpots } from '../data/tokyo-spots';
 import { generateTrivia } from '../data/trivia-seed';
+import { schedulePush } from './cloud-sync';
 
 export interface User {
   id: string;
@@ -560,6 +561,8 @@ class MockDatabase {
   private save<T>(key: string, data: T): void {
     if (!this.isBrowser) return;
     localStorage.setItem(key, JSON.stringify(data));
+    // クラウド永続化（鍵が設定されていれば有効。未設定なら no-op）
+    schedulePush();
   }
 
   // Getters
