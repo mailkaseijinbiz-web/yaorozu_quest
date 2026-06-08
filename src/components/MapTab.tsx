@@ -7,7 +7,7 @@ import { Spot, User, db } from '../lib/db';
 import { uploadImage } from '../lib/upload';
 import { distanceKm, bearingDeg } from '../lib/geo';
 import { getHeartVoices } from '../data/god-tasks';
-import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON, CHALLENGES, TriviaCategory } from '../data/challenges';
+import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
 import { getLevelInfo } from '../data/levels';
 
 const LeafletMap = dynamic(() => import('./LeafletMap'), {
@@ -28,9 +28,10 @@ function composeGuideText(step: ChallengeStep, near = false): string {
     return '目的地はもう目の前。あたりをゆっくり見回して、心に残る一枚を写真におさめてみよう。';
   }
   const intro = step.trivia ? step.trivia : '';
-  const alreadyPhoto = /写真|一枚|撮|収め|おさめ/.test(step.action);
+  const action = step.action ?? '';
+  const alreadyPhoto = /写真|一枚|撮|収め|おさめ/.test(action);
   const photoLine = alreadyPhoto ? '' : 'そして、心に残った風景を一枚、写真におさめてみよう。';
-  return `${intro}${step.action}${photoLine}`;
+  return `${intro}${action}${photoLine}`;
 }
 
 // Web Speech API による読み上げ（端末内蔵の最良の日本語ボイスを選択）。
@@ -92,9 +93,9 @@ type GuideMsg = { role: 'spirit' | 'user'; text: string };
 // 現在のクエスト進捗から、精霊が語ってきた会話ログを再構成する（序章→現在の目的地まで）。
 function buildGuideLog(ch: Challenge, doneIds: Set<string>): GuideMsg[] {
   const msgs: GuideMsg[] = [{ role: 'spirit', text: ch.description }];
-  let cur = ch.steps.findIndex((s) => !doneIds.has(s.id));
-  if (cur === -1) cur = ch.steps.length - 1;
-  for (let i = 0; i <= cur; i++) msgs.push({ role: 'spirit', text: composeGuideText(ch.steps[i]) });
+  let cur = ch.tasks.findIndex((s) => !doneIds.has(s.id));
+  if (cur === -1) cur = ch.tasks.length - 1;
+  for (let i = 0; i <= cur; i++) msgs.push({ role: 'spirit', text: composeGuideText(ch.tasks[i]) });
   return msgs;
 }
 
@@ -227,7 +228,7 @@ export default function MapTab({
     if (!proofStep || !proofPhoto || !activeChallenge) return;
     // この達成で全ステップ完了になるか
     const doneNow = new Set(db.getChallengeProgress().done[activeChallenge.id] || []);
-    const willComplete = doneNow.size + 1 >= activeChallenge.steps.length;
+    const willComplete = doneNow.size + 1 >= activeChallenge.tasks.length;
     const cleared = proofStep;
     onAdvanceChallenge?.(cleared.id, proofPhoto);
     // 達成ビート：このステップで得た豆知識を“次の文章”として見せてから次へ進む
@@ -272,8 +273,8 @@ export default function MapTab({
   // ── チャレンジ参加中：次の目的地・次の案内 ──
   const chProgress = activeChallenge ? db.getChallengeProgress() : null;
   const chDone = activeChallenge && chProgress ? new Set(chProgress.done[activeChallenge.id] || []) : null;
-  const nextStep = activeChallenge && chDone ? activeChallenge.steps.find((s) => !chDone.has(s.id)) || null : null;
-  const chAllDone = activeChallenge && chDone ? chDone.size >= activeChallenge.steps.length : false;
+  const nextStep = activeChallenge && chDone ? activeChallenge.tasks.find((s) => !chDone.has(s.id)) || null : null;
+  const chAllDone = activeChallenge && chDone ? chDone.size >= activeChallenge.tasks.length : false;
   // 次の目的地までの距離（500m以内で達成可能。圏外は達成ボタンをグレイに）
   const nextDist =
     nextStep && nextStep.lat != null && nextStep.lng != null
@@ -296,7 +297,7 @@ export default function MapTab({
   // クエスト未参加時に下部へ出す「近くのクエスト」（未達成・解放優先・近い順）
   const userLevel = getLevelInfo(currentUser.totalToku).current.level;
   const completedChIds = db.getChallengeProgress().completed;
-  const nearChallenge = [...CHALLENGES]
+  const nearChallenge = db.getAllQuests()
     .filter((c) => !completedChIds.includes(c.id))
     .map((c) => ({ c, d: distanceKm(userLocation.lat, userLocation.lng, c.goalLat, c.goalLng), ok: userLevel >= c.minLevel }))
     .sort((a, b) => (a.ok !== b.ok ? (a.ok ? -1 : 1) : a.d - b.d))[0]?.c ?? null;
@@ -351,7 +352,7 @@ export default function MapTab({
   }, [introShowing, introStep, activeChallenge?.id]);
 
   // 複数ステップのクエストでは、上部の進捗ガイドをクエスト中ずっと表示する
-  const showGuide = !!activeChallenge && activeChallenge.steps.length > 1 && !introShowing && !celebrate && !chAllDone && !!nextStep;
+  const showGuide = !!activeChallenge && activeChallenge.tasks.length > 1 && !introShowing && !celebrate && !chAllDone && !!nextStep;
   useEffect(() => {
     if (!(showGuide && nextStep && activeChallenge)) { setBriefTyped(''); setGuideDone(false); return; }
     // 「次は『title』へ」ではなく、土地の紹介 → 現地で写真を撮ろう、という自然な語りにする。
@@ -523,7 +524,7 @@ export default function MapTab({
               >
                 <Flag className="w-6 h-6 text-[#2563eb] flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-[11px] font-black tracking-wider text-[#2563eb]/70">次の目的地 ({(chDone?.size ?? 0) + 1}/{activeChallenge.steps.length})</p>
+                  <p className="text-[11px] font-black tracking-wider text-[#2563eb]/70">次の目的地 ({(chDone?.size ?? 0) + 1}/{activeChallenge.tasks.length})</p>
                   <h4 className="text-sm font-black text-gray-900 truncate">{nextStep.title}{nextStep.photo ? ' 📸' : ''}</h4>
                 </div>
                 {nextStep.lat != null && (() => {
@@ -697,7 +698,7 @@ export default function MapTab({
                 <div className="flex items-center justify-center gap-3 mt-4 text-[13px] text-gray-500">
                   <span className={`font-black ${difficultyLabel(activeChallenge.difficulty).text}`}>{difficultyLabel(activeChallenge.difficulty).stars} {difficultyLabel(activeChallenge.difficulty).label}</span>
                   <span className="flex items-center gap-0.5"><Clock className="w-3.5 h-3.5" />約{activeChallenge.estMinutes}分</span>
-                  <span>全{activeChallenge.steps.length}ミッション</span>
+                  <span>全{activeChallenge.tasks.length}ミッション</span>
                 </div>
                 {/* ボタン無し・進捗バー無しで3秒後に自動で冒険開始 */}
                 <p className="text-[11px] font-bold text-gray-400 mt-5">まもなく冒険がはじまる…</p>

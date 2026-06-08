@@ -1,60 +1,156 @@
-// Yaorozu God OS - AI Quest Generator (OpenAI + Rule-based Fallback)
+// Yaorozu God OS - AI Quest Generator
+// 場の「価値(enjoyments)・課題(issues)・魂(soulMd)」から、3種のタスク
+// （情報収集 sense / 理解判断 understand / 操作 act）で構成されたクエストを生成する。
+// プロバイダ: Gemini 優先 → OpenAI → ルールベース fallback（いずれも raw fetch）。
 import { NextResponse } from 'next/server';
+import { TASK_CATALOG, kindOfType, type TaskType, type Task, type Quest } from '../../../data/tasks';
 
 interface SpotInput {
+  id?: string;
   name: string;
   category: string;
   description?: string;
   enjoyments?: string[];
+  issues?: string[];
+  soulMd?: string;
+  latitude?: number;
+  longitude?: number;
 }
 
-export interface GeneratedQuest {
-  title: string;
-  description: string;
-  reward: number;
-  targetSpotName: string;
+const KNOWN_TYPES = Object.keys(TASK_CATALOG) as TaskType[];
+
+// ── 1タスクを正規化（モデル出力は信用しない） ──
+function coerceTask(raw: unknown, i: number, spot: SpotInput): Task {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const type: TaskType = KNOWN_TYPES.includes(r.type as TaskType) ? (r.type as TaskType) : 'visit';
+  const c = TASK_CATALOG[type];
+  const reward = Math.min(100, Math.max(10, Math.round(Number(r.reward) || c.reward)));
+  const title = String(r.title || c.title).slice(0, 40);
+  const action = r.action ? String(r.action).slice(0, 120) : undefined;
+  const task: Task = {
+    id: `s${i}`,
+    type,
+    kind: kindOfType(type),
+    icon: c.icon,
+    label: c.label,
+    title,
+    reward,
+    action,
+    spotId: spot.id,
+  };
+  // 位置が要るタスクには場の座標を入れる（ジオフェンス・写真ミッション）
+  if ((type === 'visit' || type === 'photo') && spot.latitude != null && spot.longitude != null) {
+    task.lat = spot.latitude;
+    task.lng = spot.longitude;
+  }
+  // 課題タスクは spot.issues に紐づける
+  if (type === 'resolveIssue' && spot.issues && spot.issues.length) {
+    const idx = Math.min(Number(r.issueIndex) || 0, spot.issues.length - 1);
+    task.issueRef = { issueIndex: idx, issueText: spot.issues[idx] };
+    task.title = `課題を動かす：${spot.issues[idx]}`.slice(0, 40);
+  }
+  return task;
 }
 
-const REWARD_TIERS = [20, 30, 50, 80];
+// ── モデルが返した quest を Quest=Task[] へ正規化 ──
+function coerceQuest(raw: unknown, n: number, spot: SpotInput, ts: number): Quest | null {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const rawTasks = Array.isArray(r.tasks) ? r.tasks : [];
+  if (rawTasks.length === 0) return null;
+  const tasks = rawTasks.slice(0, 8).map((t, i) => coerceTask(t, i, spot));
+  const difficulty = ([1, 2, 3].includes(Number(r.difficulty)) ? Number(r.difficulty) : 1) as 1 | 2 | 3;
+  return {
+    id: `uq-${spot.id || 'spot'}-${ts}-${n}`,
+    spotId: spot.id,
+    title: String(r.title || `${spot.name}のクエスト`).slice(0, 40),
+    description: String(r.description || '').slice(0, 160),
+    difficulty,
+    minLevel: difficulty,
+    estMinutes: Math.min(120, Math.max(5, Math.round(Number(r.estMinutes) || 20))),
+    badgeIcon: String(r.badgeIcon || '🏮').slice(0, 4),
+    badgeName: String(r.badgeName || `${spot.name}の巡礼者`).slice(0, 30),
+    goalName: spot.name,
+    goalLat: spot.latitude ?? 0,
+    goalLng: spot.longitude ?? 0,
+    tasks,
+    source: 'generated',
+  };
+}
 
-// ── ルールベースのフォールバック生成（OpenAIキーが無いとき） ──
-function fallbackQuests(spot: SpotInput, count: number): GeneratedQuest[] {
+// ── ルールベース fallback（価値→sense / 課題→act / 投稿→understand を必ず混ぜる） ──
+function buildFallbackQuest(spot: SpotInput, count: number, ts: number): Quest[] {
   const enjoy = spot.enjoyments ?? [];
-  const templates: { title: (s: string) => string; description: (s: string, e?: string) => string }[] = [
-    {
-      title: (s) => `${s}の語り部`,
-      description: (s) => `${s}を訪れ、心に残った風景や発見を口コミ（UGC）として投稿しよう。`,
-    },
-    {
-      title: (s) => `${s}で神霊と対話`,
-      description: (s) => `${s}に宿る神様（AIエージェント）に話しかけ、この土地の物語を聴こう。`,
-    },
-    {
-      title: (s) => `${s}の一枚`,
-      description: (s, e) => `${s}で${e ? `「${e}」を` : 'お気に入りの構図を'}AR召喚し、写真に収めよう。`,
-    },
-    {
-      title: (s) => `${s}巡礼`,
-      description: (s) => `${s}の周辺1km以内に近づき、参拝の証を立てよう（ワープ可）。`,
-    },
-    {
-      title: (s) => `${s}の徳を積む`,
-      description: (s) => `${s}で徳を積み、創世主ランキング上位を目指そう。`,
-    },
-  ];
+  const issues = spot.issues ?? [];
+  const at = (lat?: number, lng?: number) => ({ lat: spot.latitude ?? lat, lng: spot.longitude ?? lng });
+  const mk = (type: TaskType, i: number, over: Partial<Task> = {}): Task => {
+    const c = TASK_CATALOG[type];
+    return { id: `s${i}`, type, kind: c.kind, icon: c.icon, label: c.label, title: c.title, reward: c.reward, spotId: spot.id, ...over };
+  };
 
-  const quests: GeneratedQuest[] = [];
-  for (let i = 0; i < count; i++) {
-    const t = templates[i % templates.length];
-    const e = enjoy[i % Math.max(1, enjoy.length)];
+  const quests: Quest[] = [];
+  for (let n = 0; n < count; n++) {
+    const enjoyment = enjoy.length ? enjoy[n % enjoy.length] : '';
+    const issue = issues.length ? issues[n % issues.length] : '';
+    const tasks: Task[] = [
+      mk('visit', 0, { title: `${spot.name}に立つ`, action: `${spot.name}へ足を運び、この地の気を感じよう。`, ...at() }),
+      mk('photo', 1, { title: enjoyment ? `「${enjoyment}」を一枚に` : '佳き一枚を奉納', action: `${enjoyment || 'この場の魅力'}を写真に収めよう。`, ...at() }),
+      mk('review', 2, { action: `${spot.name}で感じた価値を、後の巡礼者へ言伝てよう。` }),
+      issue
+        ? mk('resolveIssue', 3, { title: `課題を動かす：${issue}`.slice(0, 40), action: `${spot.name}の課題「${issue}」を、あなたの手で少し動かそう。`, issueRef: { issueIndex: n % issues.length, issueText: issue } })
+        : mk('sns', 3, { action: `${spot.name}の名を、外の世界にも広めよう。` }),
+    ];
     quests.push({
-      title: t.title(spot.name),
-      description: t.description(spot.name, e),
-      reward: REWARD_TIERS[i % REWARD_TIERS.length],
-      targetSpotName: spot.name,
+      id: `uq-${spot.id || 'spot'}-${ts}-${n}`,
+      spotId: spot.id,
+      title: enjoyment ? `${spot.name}・${enjoyment}の巡礼` : `${spot.name}の巡礼`,
+      description: `${spot.name}を訪れ、価値を見出し、課題を動かす街歩き。`,
+      difficulty: 1,
+      minLevel: 1,
+      estMinutes: 20,
+      badgeIcon: spot.category === '神社' ? '⛩️' : '🏮',
+      badgeName: `${spot.name}の巡礼者`,
+      goalName: spot.name,
+      goalLat: spot.latitude ?? 0,
+      goalLng: spot.longitude ?? 0,
+      tasks,
+      source: 'generated',
     });
   }
   return quests;
+}
+
+function buildPrompt(spot: SpotInput, count: number, rules: string): string {
+  const soul = spot.soulMd ? `\n神の魂（口調・人格・世界観。これに沿った語り口で）:\n${spot.soulMd.slice(0, 1200)}` : '';
+  const policy = rules.trim() ? `【生成ルール（最優先で厳守）】\n${rules.trim().slice(0, 2500)}\n\n` : '';
+  return `${policy}あなたは位置情報巡礼ゲーム「八百万クエスト」のクエストデザイナーです。
+以下の「場」を題材に、街歩き型のクエストを${count}個、日本語で考えてください。
+
+クエストは「タスクの集まり」です。各タスクは神の3つの働きのいずれかに属します:
+- 情報収集(sense): visit(来訪), photo(写真), context(今の様子), event(できごと), cleaning(清掃確認)
+- 理解判断(understand): review(口コミ), eat(実食の声), evaluate(写真を評価), judge(投稿をジャッジ)
+- 操作(act): resolveIssue(課題解決), buy(買物報告), sns(SNS拡散)
+
+各クエストには「情報収集・理解判断・操作」を最低1つずつ含め、3〜5タスクで構成してください。
+価値は「楽しみ方」から、操作タスクは「課題」から作ってください（課題があれば必ず resolveIssue を入れ、issueIndex で何番目の課題かを示す）。
+
+場の名前: ${spot.name}
+カテゴリ: ${spot.category}
+説明: ${spot.description ?? ''}
+価値（楽しみ方）: ${(spot.enjoyments ?? []).join(' / ') || '（未収集）'}
+課題: ${(spot.issues ?? []).map((s, i) => `[${i}] ${s}`).join(' / ') || '（なし）'}${soul}
+
+必ず次のJSONだけを出力してください（前後に文章を付けない）:
+{"quests":[{"title":"クエスト名","description":"100字以内の導入","difficulty":1,"estMinutes":20,"badgeIcon":"絵文字","badgeName":"バッジ名","tasks":[{"type":"visit","title":"タスク名","action":"行動指示","reward":20,"issueIndex":0}]}]}`;
+}
+
+function extractJson(text: string): unknown {
+  const obj = text.match(/\{[\s\S]*\}/);
+  if (!obj) return null;
+  try {
+    return JSON.parse(obj[0]);
+  } catch {
+    return null;
+  }
 }
 
 export async function POST(request: Request) {
@@ -62,59 +158,83 @@ export async function POST(request: Request) {
     const body = await request.json();
     const spot: SpotInput = body.spot;
     const count: number = Math.min(5, Math.max(1, Number(body.count) || 3));
+    const ts: number = Number(body.ts) || 0;
+    const rules: string = typeof body.rules === 'string' ? body.rules : '';
 
     if (!spot?.name) {
       return NextResponse.json({ error: 'spot.name is required' }, { status: 400 });
     }
 
-    const apiKey = process.env.OPENAI_API_KEY;
+    const geminiKey = process.env.GEMINI_API_KEY;
+    const openaiKey = process.env.OPENAI_API_KEY;
+    const prompt = buildPrompt(spot, count, rules);
 
-    // キーが無ければルールベースで生成
-    if (!apiKey) {
-      return NextResponse.json({ quests: fallbackQuests(spot, count), source: 'fallback' });
+    const finalize = (parsed: unknown) => {
+      const arr = (parsed as { quests?: unknown[] })?.quests;
+      if (!Array.isArray(arr)) return null;
+      const quests = arr
+        .slice(0, count)
+        .map((q, n) => coerceQuest(q, n, spot, ts))
+        .filter((q): q is Quest => q !== null);
+      return quests.length ? quests : null;
+    };
+
+    // ── Gemini 優先 ──
+    if (geminiKey) {
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: [{ text: prompt }] }],
+              generationConfig: {
+                temperature: 0.9,
+                maxOutputTokens: 2048,
+                responseMimeType: 'application/json',
+                thinkingConfig: { thinkingBudget: 0 },
+              },
+            }),
+          }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const text: string = data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text || '').join('') ?? '';
+          const quests = finalize(extractJson(text));
+          if (quests) return NextResponse.json({ quests, source: 'gemini' });
+        }
+      } catch {
+        /* fall through */
+      }
     }
 
-    const prompt = `あなたは位置情報巡礼ゲーム「八百万クエスト」のクエストデザイナーです。
-以下のスポットを訪れたくなる、街歩き型のクエストを${count}個、日本語で考えてください。
-
-スポット名: ${spot.name}
-カテゴリ: ${spot.category}
-説明: ${spot.description ?? ''}
-楽しみ方: ${(spot.enjoyments ?? []).join(' / ')}
-
-各クエストは現地で実際に行動できる内容にし、必ず次のJSON配列だけを出力してください（前後に文章を付けない）:
-[{"title":"短いクエスト名","description":"100字以内の行動指示","reward":報酬徳(10〜100の整数),"targetSpotName":"${spot.name}"}]`;
-
-    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.9,
-      }),
-    });
-
-    if (!openaiResponse.ok) {
-      return NextResponse.json({ quests: fallbackQuests(spot, count), source: 'fallback' });
+    // ── OpenAI ──
+    if (openaiKey) {
+      try {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openaiKey}` },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.9,
+            response_format: { type: 'json_object' },
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const text: string = data.choices?.[0]?.message?.content ?? '';
+          const quests = finalize(extractJson(text));
+          if (quests) return NextResponse.json({ quests, source: 'openai' });
+        }
+      } catch {
+        /* fall through */
+      }
     }
 
-    const data = await openaiResponse.json();
-    const text: string = data.choices?.[0]?.message?.content ?? '';
-    const match = text.match(/\[[\s\S]*\]/);
-    if (!match) {
-      return NextResponse.json({ quests: fallbackQuests(spot, count), source: 'fallback' });
-    }
-
-    const parsed = JSON.parse(match[0]) as GeneratedQuest[];
-    const quests = parsed.slice(0, count).map((q) => ({
-      title: String(q.title).slice(0, 30),
-      description: String(q.description).slice(0, 100),
-      reward: Math.min(100, Math.max(10, Math.round(Number(q.reward) || 30))),
-      targetSpotName: spot.name,
-    }));
-
-    return NextResponse.json({ quests, source: 'openai' });
+    // ── ルールベース fallback ──
+    return NextResponse.json({ quests: buildFallbackQuest(spot, count, ts), source: 'fallback' });
   } catch {
     return NextResponse.json({ error: 'generation failed' }, { status: 500 });
   }

@@ -18,7 +18,7 @@ export function UsersManager({ users, spots, onChange }: { users: User[]; spots:
 
   return (
     <div>
-      <Toolbar onAdd={() => setEditing(emptyUser())} search={search} setSearch={setSearch} addLabel="ユーザー追加" />
+      <Toolbar onAdd={() => setEditing(emptyUser())} search={search} setSearch={setSearch} addLabel="人間を追加" />
       <div className="grid gap-2">
         {filtered.map(u => (
           <Card key={u.id}>
@@ -39,11 +39,11 @@ export function UsersManager({ users, spots, onChange }: { users: User[]; spots:
             </div>
           </Card>
         ))}
-        {filtered.length === 0 && <p className="text-center text-xs text-gray-400 py-8">ユーザーがいません。</p>}
+        {filtered.length === 0 && <p className="text-center text-xs text-gray-400 py-8">人間がいません。</p>}
       </div>
 
       {editing && (
-        <Modal title={users.some(u => u.id === editing.id) ? 'ユーザー編集' : 'ユーザー追加'} onClose={() => setEditing(null)}>
+        <Modal title={users.some(u => u.id === editing.id) ? '人間の編集' : '人間を追加'} onClose={() => setEditing(null)}>
           <div className="grid sm:grid-cols-2 gap-3">
             <Field label="表示名" full><input className={inputCls} value={editing.displayName} onChange={e => setEditing({ ...editing, displayName: e.target.value })} /></Field>
             <Field label="称号"><input className={inputCls} value={editing.currentTitle} onChange={e => setEditing({ ...editing, currentTitle: e.target.value })} /></Field>

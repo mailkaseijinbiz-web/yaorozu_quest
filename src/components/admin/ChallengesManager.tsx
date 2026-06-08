@@ -4,6 +4,8 @@ import React, { useState } from 'react';
 import { Search } from 'lucide-react';
 import { Card, PER_PAGE, Pager } from './ui';
 import { CHALLENGES, difficultyLabel } from '../../data/challenges';
+import { db, DEFAULT_QUEST_RULES } from '../../lib/db';
+import { RulesPanel } from './RulesPanel';
 
 // ════════════════════════════════════════════════
 // Challenges Manager（どんなチャレンジがあるか管理・閲覧）
@@ -11,11 +13,24 @@ import { CHALLENGES, difficultyLabel } from '../../data/challenges';
 export function ChallengesManager() {
   const [q, setQ] = useState('');
   const [page, setPage] = useState(0);
+  const [rules, setRules] = useState(() => db.getQuestRules());
+  const [saved, setSaved] = useState(false);
   const all = CHALLENGES.filter(c => c.title.includes(q) || c.goalName.includes(q) || c.badgeName.includes(q));
   const list = all.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE);
   return (
     <div className="space-y-3">
-      <p className="text-xs text-gray-500">登録済みのチャレンジ（ミニチャレンジ）一覧。現在 <span className="font-black text-blue-600">{CHALLENGES.length}</span> 件。難易度・ステップ・蘊蓄・ゴールを確認できます。</p>
+      {/* クエスト生成ルール（生成方針） */}
+      <RulesPanel
+        title="クエスト生成ルール（生成方針）"
+        description={<>ここに書いたルールは、<b>新しくクエストを生成する際の方針</b>として使われます。クエストはタスクから構成され、タスクは<b className="text-emerald-600">場の価値を増幅</b>し<b className="text-rose-600">場の課題を解決</b>します。タスクの3種と例も下記の md 本文に含まれます。生成AIでの一括更新は「God (System)」タブの Update から。</>}
+        value={rules}
+        onChange={(v) => { setRules(v); setSaved(false); }}
+        onSave={() => { db.saveQuestRules(rules); setSaved(true); }}
+        onReset={() => { setRules(DEFAULT_QUEST_RULES); setSaved(false); }}
+        saved={saved}
+      />
+
+      <p className="text-xs text-gray-500">登録済みのクエスト（街歩きミッション）一覧。現在 <span className="font-black text-blue-600">{CHALLENGES.length}</span> 件。難易度・ステップ・蘊蓄・ゴールを確認できます。</p>
       <div className="relative max-w-xs">
         <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
         <input value={q} onChange={e => { setQ(e.target.value); setPage(0); }} className="w-full bg-white border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-xs text-gray-900 focus:outline-none focus:border-blue-500" placeholder="検索…" />
@@ -33,9 +48,9 @@ export function ChallengesManager() {
                   <span className="text-[10px] text-gray-500">バッジ: {ch.badgeName}</span>
                 </div>
                 <p className="text-[11px] text-gray-500 mt-1">{ch.description}</p>
-                <p className="text-[10px] text-gray-400 mt-1">🚩 ゴール: {ch.goalName} ・ {ch.steps.length}ステップ</p>
+                <p className="text-[10px] text-gray-400 mt-1">🚩 ゴール: {ch.goalName} ・ {ch.tasks.length}ステップ</p>
                 <div className="mt-2 space-y-1">
-                  {ch.steps.map((st, i) => (
+                  {ch.tasks.map((st, i) => (
                     <div key={st.id} className="text-[11px] text-gray-600 flex items-start gap-1.5">
                       <span className="font-black text-blue-600">{i + 1}.</span>
                       <span>{st.title}{st.photo ? '（📸写真）' : ''}{st.triviaCategory ? ` ［${st.triviaCategory}の蘊蓄］` : ''}</span>

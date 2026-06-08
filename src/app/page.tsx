@@ -10,7 +10,7 @@ import MapTab from '../components/MapTab';
 import SpotDetail from '../components/SpotDetail';
 import { getLevelInfo } from '../data/levels';
 import { getBadgeStates, godAvatarEmoji } from '../data/badges';
-import { getChallenge, Challenge } from '../data/challenges';
+import { Challenge } from '../data/challenges';
 
 type TabType = 'home' | 'quest' | 'mypage';
 
@@ -299,14 +299,14 @@ export default function HomePage() {
                   onOpenDetail={setDetailSpot}
                   currentUser={currentUser || FALLBACK_CURRENT_USER}
                   onStartChallenge={(cid) => { db.setActiveChallenge(cid); setActiveChallengeId(cid); }}
-                  activeChallenge={activeChallengeId ? getChallenge(activeChallengeId) ?? null : null}
+                  activeChallenge={activeChallengeId ? db.getQuest(activeChallengeId) ?? null : null}
                   onClearChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
                   onAdvanceChallenge={(stepId, photo) => {
                     if (!activeChallengeId || !currentUser) return;
-                    const ch = getChallenge(activeChallengeId);
+                    const ch = db.getQuest(activeChallengeId);
                     if (!ch) return;
                     if (photo) db.saveChallengePhoto(activeChallengeId, stepId, photo);
-                    db.completeChallengeStep(currentUser.id, activeChallengeId, stepId, ch.steps.length);
+                    db.completeChallengeStep(currentUser.id, activeChallengeId, stepId, ch.tasks.length);
                     refreshDatabaseStates();
                   }}
                 />
@@ -513,7 +513,7 @@ export default function HomePage() {
                   {/* 達成したクエスト */}
                   {mypageTab === 'quests' && (() => {
                     const completedIds = db.getChallengeProgress().completed;
-                    const completedChallenges = completedIds.map((id) => getChallenge(id)).filter((c): c is NonNullable<typeof c> => !!c);
+                    const completedChallenges = completedIds.map((id) => db.getQuest(id)).filter((c): c is NonNullable<typeof c> => !!c);
                     return completedChallenges.length === 0 ? (
                       <div className="text-center py-12">
                         <Flag className="w-8 h-8 text-gray-300 mx-auto mb-2" />
@@ -523,7 +523,7 @@ export default function HomePage() {
                       <div className="space-y-3">
                         {completedChallenges.map((ch) => {
                           const photoMap = db.getChallengePhotos(ch.id);
-                          const photos = ch.steps.map((s) => photoMap[s.id]).filter((p): p is string => !!p);
+                          const photos = ch.tasks.map((s) => photoMap[s.id]).filter((p): p is string => !!p);
                           return (
                             <div key={ch.id} className="bg-amber-50/50 rounded-2xl p-3 border border-gold/40">
                               <div className="flex items-center gap-3">
@@ -619,7 +619,7 @@ export default function HomePage() {
         {reviewQuest && (() => {
           const ch = reviewQuest;
           const photoMap = db.getChallengePhotos(ch.id);
-          const photos = ch.steps.map((s) => photoMap[s.id]).filter((p): p is string => !!p);
+          const photos = ch.tasks.map((s) => photoMap[s.id]).filter((p): p is string => !!p);
           return (
             <div className="absolute inset-0 z-[4000] bg-black/50 flex items-end sm:items-center justify-center" onClick={() => setReviewQuest(null)}>
               <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl max-h-[88vh] overflow-y-auto animate-in" onClick={(e) => e.stopPropagation()}>
@@ -643,7 +643,7 @@ export default function HomePage() {
                   {/* 物語の振り返り（ステップ＋豆知識） */}
                   <div className="mt-4 space-y-2">
                     <h4 className="text-xs font-black text-gray-500">この旅でたどった道</h4>
-                    {ch.steps.map((s, i) => (
+                    {ch.tasks.map((s, i) => (
                       <div key={s.id} className="flex items-start gap-2 bg-gray-50 rounded-xl px-3 py-2">
                         <span className="w-5 h-5 rounded-full bg-shrine-red text-white text-[11px] font-black flex items-center justify-center flex-shrink-0 mt-0.5">{i + 1}</span>
                         <div className="flex-1 min-w-0">

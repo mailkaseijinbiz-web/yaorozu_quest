@@ -84,7 +84,31 @@ export default function LeafletMap({
     map.on('zoomend', bump);
     setMapVersion((v) => v + 1);
 
+    // コンテナの実寸が確定/変化したら投影をやり直す。
+    // PWA（standalone）ではセーフエリアやビューポート高がブラウザと異なり、
+    // 初期化時のサイズが未確定だと現在地マーカーが地図上でずれる。invalidateSize で補正する。
+    const refresh = () => map.invalidateSize();
+    const raf = requestAnimationFrame(refresh);
+    const t1 = setTimeout(refresh, 300);
+    const onVisible = () => { if (!document.hidden) refresh(); };
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => map.invalidateSize());
+      ro.observe(mapContainerRef.current);
+    }
+    window.addEventListener('resize', refresh);
+    window.addEventListener('orientationchange', refresh);
+    window.addEventListener('pageshow', refresh); // PWA 復帰
+    document.addEventListener('visibilitychange', onVisible);
+
     return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(t1);
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', refresh);
+      window.removeEventListener('orientationchange', refresh);
+      window.removeEventListener('pageshow', refresh);
+      document.removeEventListener('visibilitychange', onVisible);
       if (mapRef.current) {
         mapRef.current.off('move', bump);
         mapRef.current.off('zoomend', bump);
