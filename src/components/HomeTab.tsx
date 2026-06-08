@@ -23,6 +23,9 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
   // フィルタ：すべて / 未達成のみ / 達成したもの / 参加できるもの
   const [filter, setFilter] = useState<'all' | 'todo' | 'done' | 'joinable'>('todo');
   const [confirmCh, setConfirmCh] = useState<Challenge | null>(null); // 参加確認モーダル
+  // 最初は5個。「もっと見る」で +5
+  const [visibleCount, setVisibleCount] = useState(5);
+  useEffect(() => { setVisibleCount(5); }, [filter]);
 
   const progress = db.getChallengeProgress();
   const userLevel = getLevelInfo(currentUser.totalToku).current.level;
@@ -54,6 +57,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
     })
     .slice(0, 20)
     .map((x) => x.ch);
+  const visibleChallenges = nearChallenges.slice(0, visibleCount);
 
   return (
     <div className="flex flex-col h-full overflow-y-auto bg-[#f5f7fa]">
@@ -86,7 +90,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
                   : 'bg-white text-gray-500 border-gray-200 hover:border-shrine-red/40'
               }`}
             >
-              {f.label}{f.n != null && <span className={filter === f.key ? 'text-white/80' : 'text-gray-400'}> {f.n}</span>}
+              {f.label}{mounted && f.n != null && <span className={filter === f.key ? 'text-white/80' : 'text-gray-400'}> {f.n}</span>}
             </button>
           ))}
         </div>
@@ -99,7 +103,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
           </div>
         ) : (
         <div className="flex flex-col gap-3">
-          {nearChallenges.map((ch) => {
+          {visibleChallenges.map((ch) => {
             const diff = difficultyLabel(ch.difficulty);
             const completed = progress.completed.includes(ch.id);
             const active = progress.activeId === ch.id; // 現在挑戦中
@@ -116,14 +120,14 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
                 key={ch.id}
                 onClick={() => setConfirmCh(ch)}
                 aria-label={`クエスト「${ch.title}」を開く`}
-                className={`w-full text-left rounded-2xl border overflow-hidden transition-all cursor-pointer active:scale-[0.99] ${
+                className={`w-full text-left rounded-2xl overflow-hidden transition-all cursor-pointer active:scale-[0.99] ${
                   active
-                    ? 'bg-[#2563eb] border-[#2563eb] shadow-md'
+                    ? 'bg-[#2563eb] shadow-md'
                     : completed
-                    ? 'bg-gold/10 border-gold shadow-sm'
+                    ? 'bg-gold/10 shadow-sm'
                     : !levelOk
-                    ? 'bg-gray-100 border-gray-200 opacity-60'
-                    : 'bg-white border-black/5 shadow-sm'
+                    ? 'bg-gray-100 opacity-60'
+                    : 'bg-white shadow-sm'
                 }`}
               >
                 <div className="flex items-stretch gap-3">
@@ -172,6 +176,14 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
               </button>
             );
           })}
+          {visibleCount < nearChallenges.length && (
+            <button
+              onClick={() => setVisibleCount((c) => c + 5)}
+              className="w-full mt-1 py-3 rounded-full bg-white border border-shrine-red/30 text-shrine-red text-sm font-black hover:bg-shrine-red/5 active:scale-[0.99] transition-all cursor-pointer"
+            >
+              もっと見る（残り{nearChallenges.length - visibleCount}件）
+            </button>
+          )}
         </div>
         )}
       </div>

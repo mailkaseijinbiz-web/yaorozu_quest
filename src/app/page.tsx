@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, MessageSquare, Heart, Share2 } from 'lucide-react';
+import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, MessageSquare, Heart, Share2, X } from 'lucide-react';
 import { db, Spot, Agent, User as UserType, UserContribution } from '../lib/db';
 import { pullSnapshot } from '../lib/cloud-sync';
 import { distanceKm } from '../lib/geo';
@@ -10,9 +10,14 @@ import MapTab from '../components/MapTab';
 import SpotDetail from '../components/SpotDetail';
 import { getLevelInfo } from '../data/levels';
 import { getBadgeStates, godAvatarEmoji } from '../data/badges';
-import { getChallenge } from '../data/challenges';
+import { getChallenge, Challenge } from '../data/challenges';
 
 type TabType = 'home' | 'quest' | 'mypage';
+
+// マイページ・ヒーローの装飾シェイプ（正十角形メダリオン枠 / XPシールド）
+const MEDALLION_FRAME =
+  'polygon(50% 0%, 79.4% 9.5%, 97.6% 34.5%, 97.6% 65.5%, 79.4% 90.5%, 50% 100%, 20.6% 90.5%, 2.4% 65.5%, 2.4% 34.5%, 20.6% 9.5%)';
+const XP_SHIELD = 'polygon(0% 0%, 100% 0%, 100% 58%, 50% 100%, 0% 58%)';
 
 const FALLBACK_CURRENT_USER: UserType = {
   id: 'user-self',
@@ -52,6 +57,8 @@ export default function HomePage() {
   const [userLocation, setUserLocation] = useState({ lat: 35.6580, lng: 139.7514 });
   // GPS 取得状態（失敗時にユーザーへ明示する）
   const [geoStatus, setGeoStatus] = useState<'locating' | 'ok' | 'denied' | 'error'>('locating');
+  // GPS バナーをタップで薄く（透明度10%）して地図を見やすくする
+  const [bannerDimmed, setBannerDimmed] = useState(false);
 
   // Quest states
   const [claimedQuests, setClaimedQuests] = useState<string[]>([]);
@@ -65,6 +72,8 @@ export default function HomePage() {
   const [profileSaved, setProfileSaved] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [mypageTab, setMypageTab] = useState<'posts' | 'badges' | 'quests'>('posts');
+  // 達成クエストの振り返り modal
+  const [reviewQuest, setReviewQuest] = useState<Challenge | null>(null);
 
   // Initial load
   useEffect(() => {
@@ -148,7 +157,7 @@ export default function HomePage() {
 
   // 達成クエストを写真とともに振り返りシェア（Web Share API、非対応時はクリップボード）
   const shareQuest = async (title: string, badgeName: string, badgeIcon: string, photos: string[]) => {
-    const text = `${badgeIcon} YAOROZU QUEST「${title}」を制覇！「${badgeName}」バッジを獲得しました。 #ヤオロズクエスト`;
+    const text = `${badgeIcon} YAOROZU QUEST「${title}」を制覇！「${badgeName}」バッジを獲得しました。 #YAOROZUQUEST #ヤオロズクエスト`;
     try {
       let files: File[] = [];
       if (photos.length && typeof File !== 'undefined') {
@@ -238,24 +247,6 @@ export default function HomePage() {
         {/* Viewport */}
         <div className="flex-1 relative overflow-hidden bg-[#f5f7fa] flex flex-col">
 
-          {/* ── GPS 取得失敗の明示 + 再取得 ── */}
-          {(geoStatus === 'denied' || geoStatus === 'error') && (
-            <div className="absolute top-2 left-2 right-2 z-[1500] bg-amber-50 border border-amber-300 rounded-xl px-3 py-2 flex items-center gap-2 shadow-sm">
-              <MapPin className="w-4 h-4 text-amber-600 flex-shrink-0" />
-              <p className="flex-1 text-[12px] text-amber-800 leading-snug">
-                {geoStatus === 'denied'
-                  ? '位置情報が許可されていません。東京中心を仮の現在地として表示中です。'
-                  : '現在地を取得できませんでした。東京中心を仮の現在地として表示中です。'}
-              </p>
-              <button
-                onClick={requestLocation}
-                className="flex-shrink-0 text-[12px] font-black text-white bg-amber-600 px-3 py-1.5 rounded-full hover:opacity-90 active:scale-95 transition-all cursor-pointer"
-              >
-                再取得
-              </button>
-            </div>
-          )}
-
           {/* Tab content */}
           <div className={`flex-1 h-full overflow-hidden relative z-0 ${activeTab === 'home' ? '' : 'overflow-y-auto'}`}>
 
@@ -277,14 +268,37 @@ export default function HomePage() {
             {/* ── マップ ── */}
             {activeTab === 'quest' && (
               <div className="relative h-full w-full">
+                {/* GPS 取得失敗の明示（マップ内・上下中央・タップで薄く） */}
+                {(geoStatus === 'denied' || geoStatus === 'error') && (
+                  <div
+                    onClick={() => setBannerDimmed((v) => !v)}
+                    title={bannerDimmed ? 'タップで戻す' : 'タップで薄くする'}
+                    className={`absolute top-1/2 -translate-y-1/2 left-3 right-3 z-[1500] bg-amber-50 border border-amber-300 rounded-2xl px-4 py-3.5 flex items-center gap-2.5 shadow-xl cursor-pointer transition-opacity duration-300 ${bannerDimmed ? 'opacity-10' : 'opacity-100'}`}
+                  >
+                    <MapPin className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                    <p className="flex-1 text-[12px] text-amber-800 leading-snug">
+                      {geoStatus === 'denied'
+                        ? '位置情報が許可されていません。東京中心を仮の現在地として表示中です。'
+                        : '現在地を取得できませんでした。東京中心を仮の現在地として表示中です。'}
+                    </p>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); requestLocation(); }}
+                      className="flex-shrink-0 text-[12px] font-black text-white bg-amber-600 px-3 py-1.5 rounded-full hover:opacity-90 active:scale-95 transition-all cursor-pointer"
+                    >
+                      再取得
+                    </button>
+                  </div>
+                )}
                 <MapTab
                   spots={spots}
                   activeSpot={activeSpot}
-                  onSelectSpot={setActiveSpot}
+                  onSelectSpot={(s) => { setActiveSpot(s); setDetailSpot(s); }}
                   userLocation={userLocation}
                   setUserLocation={setUserLocation}
                   creatorProfiles={creatorProfiles}
                   onOpenDetail={setDetailSpot}
+                  currentUser={currentUser || FALLBACK_CURRENT_USER}
+                  onStartChallenge={(cid) => { db.setActiveChallenge(cid); setActiveChallengeId(cid); }}
                   activeChallenge={activeChallengeId ? getChallenge(activeChallengeId) ?? null : null}
                   onClearChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
                   onAdvanceChallenge={(stepId, photo) => {
@@ -302,88 +316,130 @@ export default function HomePage() {
 
             {/* ── マイページ ── */}
             {activeTab === 'mypage' && currentUser && (
-              <div className="overflow-y-auto h-full bg-white">
-                {/* ヘッダ：アイコン＋名前（編集はコンパクト） */}
-                <div className="px-5 pt-8 pb-5 flex flex-col items-center text-center border-b border-black/5">
-                  <div
-                    className="w-20 h-20 rounded-full border-4 shadow-lg bg-gradient-to-br from-blue-100 via-white to-amber-100 flex items-center justify-center text-4xl"
-                    style={{ borderColor: currentUser.avatarFrameColor || '#93c5fd' }}
-                  >
-                    {godAvatarEmoji(currentUser.id)}
-                  </div>
+              <div className="overflow-y-auto h-full bg-gradient-to-b from-sky-50 via-white to-amber-50/50">
+                {/* ── 巡礼者プロフィール（ヒーロー） ── */}
+                <div className="relative px-5 pt-12 pb-7 border-b border-black/5 overflow-hidden">
+                  {/* 背景グロー */}
+                  <div className="absolute inset-0 bg-gradient-to-b from-sky-50/80 via-white to-white pointer-events-none" />
+                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 w-60 h-60 bg-shrine-red/[0.06] blur-3xl rounded-full pointer-events-none" />
 
-                  {/* 名前＋コンパクト編集 */}
-                  {editingProfile ? (
-                    <div className="flex items-center gap-1.5 mt-2.5">
-                      <input
-                        type="text"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        maxLength={12}
-                        className="bg-white border border-gray-200 rounded-lg px-2.5 py-1 text-sm text-gray-800 focus:outline-none focus:border-shrine-red w-40 text-center"
-                        placeholder="名前"
-                      />
-                      <button
-                        onClick={() => { handleSaveProfile(); setEditingProfile(false); }}
-                        disabled={!editName.trim()}
-                        className="w-7 h-7 rounded-lg bg-shrine-red text-white flex items-center justify-center disabled:opacity-40 cursor-pointer"
-                      >
-                        <Check className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5 mt-2.5">
-                      <h2 className="text-lg font-black text-gray-900">{currentUser.displayName}</h2>
-                      <button
-                        onClick={() => { setEditName(currentUser.displayName); setEditingProfile(true); }}
-                        className="w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-400 hover:text-shrine-red transition-all cursor-pointer"
-                        title="名前を編集"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* レベル（目立つ大きな表示）＆経験値バー */}
-                  {(() => {
-                    const lvInfo = getLevelInfo(currentUser.totalToku);
-                    const pct = Math.round(lvInfo.progress * 100);
-                    return (
-                      <div className="w-full mt-3 bg-gray-50 rounded-2xl px-4 py-3.5">
-                        <div className="flex items-center gap-3 mb-2.5">
-                          {/* 大きなLvバッジ */}
-                          <div className="flex flex-col items-center justify-center bg-gradient-to-br from-shrine-red to-sky-400 text-white rounded-2xl px-3 py-1.5 shadow-sm flex-shrink-0">
-                            <span className="text-[11px] font-black leading-none opacity-80">LEVEL</span>
-                            <span className="text-2xl font-black leading-none">{lvInfo.current.level}</span>
-                          </div>
-                          <div className="flex-1 min-w-0 text-left">
-                            <div className="text-sm font-black text-gray-900 truncate">{lvInfo.current.title}</div>
-                            <div className="text-[13px] text-gray-500">
-                              <span className="text-gold font-black">{currentUser.totalToku}</span> 徳
+                  <div className="relative flex flex-col items-center text-center">
+                    {(() => {
+                      const lvInfo = getLevelInfo(currentUser.totalToku);
+                      const pct = Math.round(lvInfo.progress * 100);
+                      const nextMin = lvInfo.next ? lvInfo.next.minToku : currentUser.totalToku;
+                      return (
+                        <>
+                          {/* メダリオン（アバター＋装飾フレーム＋PILGRIMリボン） */}
+                          <div className="relative w-36 h-36 mt-5">
+                            {/* 回転ハロー */}
+                            <div
+                              className="absolute -inset-1 rounded-full opacity-40 blur-md animate-halo-rotate"
+                              style={{ background: 'conic-gradient(from 0deg, #e60012, #f5c542, #2563eb, #60a5fa, #e60012)' }}
+                            />
+                            {/* 多角形グラデーション枠 */}
+                            <div
+                              className="absolute inset-0 drop-shadow-sm"
+                              style={{ clipPath: MEDALLION_FRAME, background: 'conic-gradient(from 210deg, #e60012, #ff7a00, #f5c542, #60a5fa, #2563eb, #60a5fa, #e60012)' }}
+                            />
+                            <div className="absolute inset-[5px] bg-white" style={{ clipPath: MEDALLION_FRAME }} />
+                            {/* アバター本体 */}
+                            <div className="absolute inset-[12px] rounded-full bg-gradient-to-br from-sky-50 via-white to-amber-50 flex items-center justify-center shadow-inner overflow-hidden">
+                              <span className="text-[64px] leading-none drop-shadow-sm">{godAvatarEmoji(currentUser.id)}</span>
+                            </div>
+                            {/* PILGRIM リボン（レベルは XP シールドに集約・重複表示を削除） */}
+                            <div className="absolute -bottom-2.5 left-1/2 -translate-x-1/2 flex items-center bg-gradient-to-r from-sky-500 to-blue-600 text-white px-4 py-1.5 rounded-full shadow-md border-2 border-white">
+                              <span className="text-[11px] font-black tracking-[0.2em]">PILGRIM</span>
                             </div>
                           </div>
-                        </div>
-                        <div className="relative pt-3">
-                          <div className="absolute top-0 -translate-x-1/2 flex flex-col items-center transition-all duration-500" style={{ left: `${pct}%` }}>
-                            <Flag className="w-3 h-3 text-shrine-red fill-shrine-red" />
+
+                          {/* 名前＋コンパクト編集 */}
+                          {editingProfile ? (
+                            <div className="flex items-center gap-1.5 mt-6">
+                              <input
+                                type="text"
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                maxLength={12}
+                                className="bg-white border border-gray-200 rounded-lg px-2.5 py-1 text-base text-gray-800 focus:outline-none focus:border-shrine-red w-40 text-center"
+                                placeholder="名前"
+                              />
+                              <button
+                                onClick={() => { handleSaveProfile(); setEditingProfile(false); }}
+                                disabled={!editName.trim()}
+                                className="w-8 h-8 rounded-lg bg-shrine-red text-white flex items-center justify-center disabled:opacity-40 cursor-pointer"
+                              >
+                                <Check className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5 mt-6">
+                              <span className="text-[13px] font-black text-white bg-gradient-to-br from-sky-500 to-blue-600 px-2 py-0.5 rounded-full leading-none">Lv.{lvInfo.current.level}</span>
+                              <h2 className="text-xl font-black text-gray-900">{currentUser.displayName}</h2>
+                              <button
+                                onClick={() => { setEditName(currentUser.displayName); setEditingProfile(true); }}
+                                className="w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-400 hover:text-shrine-red transition-all cursor-pointer"
+                                title="名前を編集"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+                          <p className="text-[13px] font-bold text-gray-500 mt-0.5">{lvInfo.current.title}</p>
+
+                          {/* XPシールド＋徳バー */}
+                          <div className="w-full mt-5 flex items-center gap-3">
+                            {/* XPシールドバッジ */}
+                            <div className="relative flex-shrink-0 w-14 h-16">
+                              <div className="absolute inset-0 drop-shadow-sm" style={{ clipPath: XP_SHIELD, background: 'linear-gradient(150deg, #fcd34d, #f59e0b)' }} />
+                              <div className="absolute inset-[2px]" style={{ clipPath: XP_SHIELD, background: 'linear-gradient(150deg, #fde68a, #f59e0b)' }} />
+                              <div className="absolute inset-0 flex flex-col items-center justify-center text-white leading-none pb-2">
+                                <span className="text-[15px] font-black tracking-wider" style={{ textShadow: '0 1px 1px rgba(0,0,0,0.2)' }}>XP</span>
+                                <span className="text-[7px] font-black opacity-90 mt-0.5">LEVEL</span>
+                                <span className="text-lg font-black leading-none" style={{ textShadow: '0 1px 1px rgba(0,0,0,0.2)' }}>{lvInfo.current.level}</span>
+                              </div>
+                            </div>
+
+                            {/* 徳プログレスバー */}
+                            <div className="flex-1 min-w-0 text-left">
+                              <div className="flex items-baseline gap-1">
+                                <span className="text-2xl font-black text-gray-900 tabular-nums leading-none">{currentUser.totalToku}</span>
+                                <span className="text-sm font-black text-gold">徳</span>
+                              </div>
+                              <div className="relative mt-1.5">
+                                <div className="h-5 rounded-full bg-slate-200 overflow-hidden border border-slate-300/60">
+                                  <div
+                                    className="h-full rounded-full bg-gradient-to-r from-sky-400 via-blue-500 to-blue-600 relative transition-all duration-700"
+                                    style={{ width: `${Math.max(pct, 6)}%` }}
+                                  >
+                                  </div>
+                                </div>
+                                {lvInfo.next && (
+                                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                    <span className="text-[10px] font-black text-white tabular-nums" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.45)' }}>
+                                      {currentUser.totalToku} / {nextMin} 徳
+                                    </span>
+                                  </div>
+                                )}
+                                {/* ゴール旗 */}
+                                <Flag className="absolute -right-1 -top-1.5 w-3.5 h-3.5 text-shrine-red fill-shrine-red drop-shadow-sm" />
+                              </div>
+                              <div className="flex items-center justify-between mt-1.5">
+                                {lvInfo.next ? (
+                                  <>
+                                    <span className="text-[11px] text-gray-500">あと <span className="font-black text-shrine-red">{lvInfo.tokuToNext}</span> 徳</span>
+                                    <span className="text-[11px] text-gray-400 truncate ml-2">次の称号：<span className="font-bold text-gray-600">{lvInfo.next.title}</span></span>
+                                  </>
+                                ) : (
+                                  <span className="text-[11px] text-gold font-black">最高位に到達！</span>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                          <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden border border-gray-200/60">
-                            <div className="h-full rounded-full bg-gradient-to-r from-amber-300 to-gold transition-all duration-500" style={{ width: `${pct}%` }} />
-                          </div>
-                          <div className="flex items-center justify-between mt-1.5">
-                            {lvInfo.next ? (
-                              <>
-                                <span className="text-[11px] text-gray-400">次のレベルまで <span className="font-black text-gray-600">あと {lvInfo.tokuToNext} 徳</span></span>
-                                <span className="text-[11px] text-gray-400">次：{lvInfo.next.title}</span>
-                              </>
-                            ) : (
-                              <span className="text-[11px] text-gold font-black">最高位に到達！</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
+                        </>
+                      );
+                    })()}
+                  </div>
                 </div>
 
                 {/* タブ */}
@@ -488,8 +544,8 @@ export default function HomePage() {
                               )}
 
                               <button
-                                onClick={() => shareQuest(ch.title, ch.badgeName, ch.badgeIcon, photos)}
-                                className="w-full mt-3 bg-shrine-red text-white text-[13px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer hover:opacity-90"
+                                onClick={() => setReviewQuest(ch)}
+                                className="w-full mt-3 bg-shrine-red text-white text-[13px] font-black py-2.5 rounded-full flex items-center justify-center gap-1.5 cursor-pointer hover:opacity-90"
                               >
                                 <Share2 className="w-4 h-4" />写真とシェアして振り返る
                               </button>
@@ -558,6 +614,61 @@ export default function HomePage() {
             }}
           />
         )}
+
+        {/* ── 達成クエストの振り返り modal（写真・物語を振り返り、#YAOROZUQUEST でシェア） ── */}
+        {reviewQuest && (() => {
+          const ch = reviewQuest;
+          const photoMap = db.getChallengePhotos(ch.id);
+          const photos = ch.steps.map((s) => photoMap[s.id]).filter((p): p is string => !!p);
+          return (
+            <div className="absolute inset-0 z-[4000] bg-black/50 flex items-end sm:items-center justify-center" onClick={() => setReviewQuest(null)}>
+              <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl max-h-[88vh] overflow-y-auto animate-in" onClick={(e) => e.stopPropagation()}>
+                {/* ヘッダー */}
+                <div className="relative bg-gradient-to-br from-gold/30 to-amber-200/40 px-5 pt-6 pb-5 text-center">
+                  <button onClick={() => setReviewQuest(null)} aria-label="閉じる" className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/10 hover:bg-black/20 flex items-center justify-center text-gray-700 cursor-pointer"><X className="w-4 h-4" /></button>
+                  <div className="w-16 h-16 mx-auto rounded-2xl bg-white/70 flex items-center justify-center text-4xl shadow-sm">{ch.badgeIcon}</div>
+                  <p className="text-[11px] font-black tracking-[0.2em] text-amber-700 mt-3">CHALLENGE COMPLETE</p>
+                  <h3 className="text-lg font-black text-gray-900 mt-0.5">{ch.title}</h3>
+                  <p className="text-[13px] text-amber-700 font-bold mt-0.5">🏆 「{ch.badgeName}」バッジ獲得</p>
+                </div>
+                <div className="px-5 py-4">
+                  {photos.length > 0 && (
+                    <div className="grid grid-cols-3 gap-2">
+                      {photos.map((p, i) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={i} src={p} alt="振り返り写真" className="w-full aspect-square rounded-xl object-cover border border-gold/30" />
+                      ))}
+                    </div>
+                  )}
+                  {/* 物語の振り返り（ステップ＋豆知識） */}
+                  <div className="mt-4 space-y-2">
+                    <h4 className="text-xs font-black text-gray-500">この旅でたどった道</h4>
+                    {ch.steps.map((s, i) => (
+                      <div key={s.id} className="flex items-start gap-2 bg-gray-50 rounded-xl px-3 py-2">
+                        <span className="w-5 h-5 rounded-full bg-shrine-red text-white text-[11px] font-black flex items-center justify-center flex-shrink-0 mt-0.5">{i + 1}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-black text-gray-900">{s.title}</p>
+                          {s.trivia && <p className="text-[13px] text-gray-600 leading-snug mt-0.5">{s.triviaCategory ? `${s.triviaCategory}｜` : ''}{s.trivia}</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* ハッシュタグ＋シェア */}
+                  <div className="mt-4 bg-shrine-red/5 border border-shrine-red/20 rounded-2xl p-3.5 text-center">
+                    <p className="text-base font-black text-shrine-red tracking-wide">#YAOROZUQUEST</p>
+                    <p className="text-[12px] text-gray-500 mt-0.5">この旅をハッシュタグつきでシェアしよう</p>
+                    <button
+                      onClick={() => shareQuest(ch.title, ch.badgeName, ch.badgeIcon, photos)}
+                      className="w-full mt-3 bg-shrine-red text-white text-[15px] font-black py-3 rounded-full flex items-center justify-center gap-2 cursor-pointer hover:opacity-90 active:scale-[0.99] transition-all"
+                    >
+                      <Share2 className="w-4 h-4" />写真つきでシェアする
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

@@ -23,3 +23,17 @@ export function roughDistance(aLat: number, aLng: number, bLat: number, bLng: nu
   const dLng = (aLng - bLng) * Math.cos((aLat * Math.PI) / 180);
   return Math.sqrt(dLat * dLat + dLng * dLng);
 }
+
+/**
+ * A から B への方位角（度・北を0として時計回り）。
+ * 北向きの矢印を rotate(この値)deg すると、北上マップ上で目的地の方向を指す。
+ */
+export function bearingDeg(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLng = toRad(bLng - aLng);
+  const y = Math.sin(dLng) * Math.cos(toRad(bLat));
+  const x =
+    Math.cos(toRad(aLat)) * Math.sin(toRad(bLat)) -
+    Math.sin(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.cos(dLng);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}

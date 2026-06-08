@@ -4,8 +4,9 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Navigation } from 'lucide-react';
-import { Spot, db, isVerifiedSpot } from '../lib/db';
+import { Spot, isVerifiedSpot } from '../lib/db';
 import { roughDistance } from '../lib/geo';
+import { getHeartVoices } from '../data/god-tasks';
 
 // 1画面の表示数をズームに応じて制御（広域では少なく、拡大で増やす）
 function maxMarkersForZoom(zoom: number): number {
@@ -24,6 +25,9 @@ interface LeafletMapProps {
   setUserLocation: (loc: { lat: number; lng: number }) => void;
   ugcCounts: { [spotId: string]: number };
   goal?: { lat: number; lng: number; name: string } | null; // チャレンジのゴール
+  controlsBottom?: number; // 現在地ボタンの下端からの位置（下部オーバーレイの上端+余白）
+  focusGoalToken?: number; // 値が変わると目的地を地図中央へ寄せる
+  hideControls?: boolean; // 導入表示中は現在地ボタンを隠し、解除時にふわっと出す
 }
 
 export default function LeafletMap({
@@ -34,12 +38,18 @@ export default function LeafletMap({
   setUserLocation,
   ugcCounts,
   goal,
+  controlsBottom = 210,
+  focusGoalToken,
+  hideControls = false,
 }: LeafletMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const userMarkerRef = useRef<L.Marker | null>(null);
   const markersRef = useRef<{ [spotId: string]: L.Marker }>({});
   const goalMarkerRef = useRef<L.Marker | null>(null);
+  // 最新の現在地を参照（再生成を避けつつ、ゴール演出で使う）
+  const userLocationRef = useRef(userLocation);
+  userLocationRef.current = userLocation;
 
   // 地図の移動に追従して再描画するためのバージョン
   const [mapVersion, setMapVersion] = useState(0);
@@ -181,22 +191,43 @@ export default function LeafletMap({
   //     ※ goalオブジェクトは毎レンダリング新規生成されるため、依存はプリミティブにする）
   const goalLat = goal && typeof goal.lat === 'number' && !isNaN(goal.lat) ? goal.lat : null;
   const goalLng = goal && typeof goal.lng === 'number' && !isNaN(goal.lng) ? goal.lng : null;
+  const goalName = goal?.name ?? '';
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     if (goalMarkerRef.current) { goalMarkerRef.current.remove(); goalMarkerRef.current = null; }
     if (goalLat == null || goalLng == null) return;
+    // 青のフキダシ：目的地での行動（写真撮影）を促す
     const goalHtml = `
-      <div style="position:relative;display:flex;flex-direction:column;align-items:center;">
-        <div style="background:#dc2626;color:#fff;font-weight:900;font-size:10px;white-space:nowrap;padding:2px 8px;border-radius:9999px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3);">🚩 目的地</div>
-        <div style="width:8px;height:8px;background:#dc2626;transform:rotate(45deg);margin-top:-2px;border-right:2px solid #fff;border-bottom:2px solid #fff;"></div>
+      <div style="position:relative;display:flex;flex-direction:column;align-items:center;padding-bottom:4px;">
+        <div style="background:#2563eb;color:#fff;font-weight:900;font-size:11px;white-space:nowrap;padding:3px 11px;border-radius:9999px;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);">📸 ここで写真を撮る！</div>
+        <div style="width:10px;height:10px;background:#2563eb;transform:rotate(45deg);margin-top:-4px;border-right:2px solid #fff;border-bottom:2px solid #fff;"></div>
       </div>`;
     goalMarkerRef.current = L.marker([goalLat, goalLng], {
-      icon: L.divIcon({ html: goalHtml, className: 'custom-goal-icon', iconSize: [80, 28], iconAnchor: [40, 28] }),
+      icon: L.divIcon({ html: goalHtml, className: 'custom-goal-icon', iconSize: [180, 44], iconAnchor: [90, 40] }),
       zIndexOffset: 1500,
     }).addTo(map);
-    // ゴールへ自動でパン/ズームしない（ユーザー操作を尊重）
-  }, [goalLat, goalLng]);
+
+    // 道案内演出：まず目的地を見せ、少し待ってから現在地へ戻る
+    const targetZoom = Math.max(map.getZoom(), 15);
+    map.flyTo([goalLat, goalLng], targetZoom, { duration: 0.9 });
+    const t = setTimeout(() => {
+      const u = userLocationRef.current;
+      map.flyTo([u.lat, u.lng], targetZoom, { duration: 0.9 });
+    }, 1700);
+    return () => clearTimeout(t);
+  }, [goalLat, goalLng, goalName]);
+
+  // 「次の目的地」タップ：目的地を地図中央へ寄せる（初回トークンは無視）
+  const focusInitRef = useRef(true);
+  useEffect(() => {
+    if (focusInitRef.current) { focusInitRef.current = false; return; }
+    const map = mapRef.current;
+    if (map && goalLat != null && goalLng != null) {
+      map.flyTo([goalLat, goalLng], Math.max(map.getZoom(), 16), { duration: 0.7 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusGoalToken]);
 
   // 3. Manage Spot Markers (Sauna-ikitai style tag bubble pins)
   useEffect(() => {
@@ -215,29 +246,35 @@ export default function LeafletMap({
       if (d < nearestD) { nearestD = d; nearestId = s.id; }
     });
 
+    // クエストモード（目的地あり）では青のフキダシを出さず、赤い目的地に集中させる
+    const questMode = goalLat != null && goalLng != null;
+
     visibleSpots.forEach((spot) => {
       const isActive = activeSpot?.id === spot.id;
       const iconEmoji = spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏');
-      const spotToku = db.getSpotToku(spot.id);
-      // 最も近い神（と選択中）だけフキダシを表示。他は小さなピン＋地名のみ。
-      const showBubble = spot.id === nearestId || isActive;
+      // 最も近い神（と選択中）だけフキダシを表示。クエスト中は青のフキダシを出さない。
+      const showBubble = !questMode && (spot.id === nearestId || isActive);
       // 未検証スポットは淡く表示して信頼性を区別
       const dim = isVerifiedSpot(spot) ? '' : 'opacity:0.5;';
+      // フキダシの中身は「ここの神のつぶやき（心の声）」。スポット毎に変化させる
+      let voice = '';
+      if (showBubble) {
+        const voices = getHeartVoices(spot);
+        const idx = voices.length ? spot.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % voices.length : 0;
+        const voiceRaw = voices[idx] || `${spot.godName || spot.name}が見守っておる。`;
+        voice = voiceRaw.length > 30 ? voiceRaw.slice(0, 29) + '…' : voiceRaw;
+      }
+      const borderCls = isActive ? 'border-[#2563eb]' : 'border-[#2563eb]/40';
 
       const spotHtml = showBubble
         ? `
         <div class="relative flex flex-col items-center" style="${dim}">
           <div class="god-ripple ${isActive ? 'god-ripple-active' : ''}"></div>
-          <div class="relative flex items-center ${
-            isActive
-              ? 'bg-white text-[#2563eb] border-2 border-[#2563eb] scale-110 shadow-lg'
-              : 'bg-[#2563eb] text-white border-2 border-white shadow-md hover:scale-105'
-          } rounded-full px-2.5 py-1 transition-all duration-150">
-            <span class="text-[11px] font-black leading-none whitespace-nowrap">徳 ${spotToku.toLocaleString()}</span>
+          <div class="relative flex items-start gap-1.5 bg-white ${isActive ? 'border-2' : 'border'} ${borderCls} rounded-2xl px-2.5 py-1.5 shadow-lg" style="max-width:190px;">
+            <span style="font-size:15px;line-height:1.15;flex-shrink:0;">${iconEmoji}</span>
+            <span class="text-[11px] font-bold leading-snug text-gray-800" style="word-break:break-word;">${voice}</span>
           </div>
-          <div class="w-2 h-2 ${
-            isActive ? 'bg-white border-[#2563eb]' : 'bg-[#2563eb] border-white'
-          } rotate-45 -mt-1 border-r border-b"></div>
+          <div class="w-2.5 h-2.5 bg-white rotate-45 -mt-1.5 border-r-2 border-b-2 ${borderCls}"></div>
           <span class="map-spot-name ${isActive ? 'map-spot-name-active' : ''}">${spot.name}</span>
         </div>
       `
@@ -250,8 +287,8 @@ export default function LeafletMap({
       const spotIcon = L.divIcon({
         html: spotHtml,
         className: 'custom-spot-icon',
-        iconSize: [120, 30],
-        iconAnchor: [60, showBubble ? 30 : 6],
+        iconSize: showBubble ? [210, 90] : [120, 30],
+        iconAnchor: showBubble ? [105, 50] : [60, 6],
       });
 
       const marker = L.marker([spot.latitude, spot.longitude], {
@@ -264,7 +301,7 @@ export default function LeafletMap({
 
       markersRef.current[spot.id] = marker;
     });
-  }, [visibleSpots, activeSpot, onSelectSpot, ugcCounts, userLocation]);
+  }, [visibleSpots, activeSpot, onSelectSpot, ugcCounts, userLocation, goalLat, goalLng]);
 
   // 4. 選択スポットを地図の中央へ（ズームは維持）
   useEffect(() => {
@@ -289,13 +326,20 @@ export default function LeafletMap({
     <div className="relative w-full h-full">
       <div ref={mapContainerRef} className="w-full h-full rounded-2xl overflow-hidden" />
 
-      {/* 現在地へ戻るボタン（下部オーバーレイと被らないよう上め） */}
+      {/* 現在地へ戻るボタン（下部オーバーレイの上端 +10px に追従・開始時にふわっと） */}
       <button
         onClick={() => mapRef.current?.setView([userLocation.lat, userLocation.lng], 15, { animate: true })}
-        className="absolute bottom-[210px] right-3 z-[600] w-11 h-11 rounded-full bg-white shadow-lg border border-[#2563eb]/20 flex items-center justify-center text-[#2563eb] hover:bg-[#2563eb] hover:text-white transition-all cursor-pointer"
+        style={{
+          bottom: controlsBottom,
+          opacity: hideControls ? 0 : 1,
+          transform: hideControls ? 'scale(0.7)' : 'scale(1)',
+          pointerEvents: hideControls ? 'none' : 'auto',
+          transition: 'opacity 0.4s ease 0.45s, transform 0.4s cubic-bezier(0.2,1.4,0.4,1) 0.45s, bottom 0.25s ease',
+        }}
+        className="absolute right-3 z-[600] w-11 h-11 rounded-full bg-white shadow-lg border border-[#2563eb]/20 flex items-center justify-center text-[#2563eb] hover:bg-[#2563eb] hover:text-white cursor-pointer"
         title="現在地へ"
       >
-        <Navigation className="w-5 h-5" />
+        <Navigation className="w-5 h-5 fill-current" />
       </button>
     </div>
   );

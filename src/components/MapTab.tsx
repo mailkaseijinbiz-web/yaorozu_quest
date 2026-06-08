@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
-import { Compass, ChevronRight, Flag, X, Camera, Check } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { Compass, ChevronRight, Flag, X, Camera, Check, MapPin, Clock, Navigation2 } from 'lucide-react';
 import dynamic from 'next/dynamic';
-import { Spot, User, db, isVerifiedSpot } from '../lib/db';
+import { Spot, User, db } from '../lib/db';
 import { uploadImage } from '../lib/upload';
-import { distanceKm } from '../lib/geo';
+import { distanceKm, bearingDeg } from '../lib/geo';
 import { getHeartVoices } from '../data/god-tasks';
-import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON } from '../data/challenges';
+import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON, CHALLENGES, TriviaCategory } from '../data/challenges';
+import { getLevelInfo } from '../data/levels';
 
 const LeafletMap = dynamic(() => import('./LeafletMap'), {
   ssr: false,
@@ -31,6 +32,8 @@ interface MapTabProps {
   activeChallenge?: Challenge | null; // 今挑戦中のチャレンジ（上部バナー＋ゴール表示）
   onClearChallenge?: () => void;
   onAdvanceChallenge?: (stepId: string, photo?: string | null) => void; // 次の目的地ステップを達成（証拠写真つき）
+  currentUser: User; // 近くのクエストカード表示・レベル判定用
+  onStartChallenge?: (challengeId: string) => void; // 未参加時のカードから挑戦開始
 }
 
 
@@ -45,13 +48,10 @@ export default function MapTab({
   activeChallenge,
   onClearChallenge,
   onAdvanceChallenge,
+  currentUser,
+  onStartChallenge,
 }: MapTabProps) {
-  // 検証済みスポットのみ表示するフィルタ
-  const [verifiedOnly, setVerifiedOnly] = useState(false);
-  const displaySpots = useMemo(
-    () => (verifiedOnly ? spots.filter(isVerifiedSpot) : spots),
-    [spots, verifiedOnly]
-  );
+  const displaySpots = spots;
 
   // Compute UGC counts per spot
   const allUgc = db.getUgc();
@@ -69,7 +69,19 @@ export default function MapTab({
   const [proofStep, setProofStep] = useState<ChallengeStep | null>(null);
   const [proofPhoto, setProofPhoto] = useState<string | null>(null);
   const [uploadingProof, setUploadingProof] = useState(false);
-  const [celebrate, setCelebrate] = useState<{ title: string; icon: string; complete: boolean } | null>(null);
+  // 達成ビート（豆知識つき・手動で次へ）
+  const [celebrate, setCelebrate] = useState<
+    { title: string; icon: string; complete: boolean; trivia?: string; triviaCategory?: TriviaCategory } | null
+  >(null);
+  // 導入（プロローグ）を見せたチャレンジID
+  const [introSeenId, setIntroSeenId] = useState<string | null>(null);
+  // 導入の段階：0=精霊のセリフ（フキダシ）→ 1=ミッション情報（PROLOGUE）。同時には出さない
+  const [introStep, setIntroStep] = useState(0);
+  useEffect(() => { setIntroStep(0); }, [activeChallenge?.id]);
+  // 精霊のセリフを一文字ずつ表示
+  const [introTyped, setIntroTyped] = useState('');
+  // 複数ステップのクエスト：上部に進捗ガイドのフキダシを常時表示し、次のすべきことを案内する
+  const [briefTyped, setBriefTyped] = useState('');
 
   const onPickProof = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -92,15 +104,19 @@ export default function MapTab({
     // この達成で全ステップ完了になるか
     const doneNow = new Set(db.getChallengeProgress().done[activeChallenge.id] || []);
     const willComplete = doneNow.size + 1 >= activeChallenge.steps.length;
-    onAdvanceChallenge?.(proofStep.id, proofPhoto);
+    const cleared = proofStep;
+    onAdvanceChallenge?.(cleared.id, proofPhoto);
+    // 達成ビート：このステップで得た豆知識を“次の文章”として見せてから次へ進む
     setCelebrate({
-      title: willComplete ? `「${activeChallenge.badgeName}」獲得！` : `${proofStep.title} 達成！`,
+      title: willComplete ? `「${activeChallenge.badgeName}」獲得！` : `${cleared.title} 達成！`,
       icon: willComplete ? activeChallenge.badgeIcon : '✅',
       complete: willComplete,
+      trivia: cleared.trivia,
+      triviaCategory: cleared.triviaCategory,
     });
     setProofStep(null);
     setProofPhoto(null);
-    setTimeout(() => setCelebrate(null), 2600);
+    // 自動で閉じない（豆知識を読んでから手動で次へ）
   };
 
   // activeSpot の心の声（SNS/ウェブ情報を模した時々の話題＋依頼）
@@ -146,6 +162,79 @@ export default function MapTab({
   const activeToku = activeSpot ? db.getSpotToku(activeSpot.id) : 0;
   const activeGodEmoji = activeSpot ? (activeSpot.godEmoji || (activeSpot.category === '神社' ? '⛩️' : '🙏')) : '⛩️';
 
+  // クエスト未参加時に下部へ出す「近くのクエスト」（未達成・解放優先・近い順）
+  const userLevel = getLevelInfo(currentUser.totalToku).current.level;
+  const completedChIds = db.getChallengeProgress().completed;
+  const nearChallenge = [...CHALLENGES]
+    .filter((c) => !completedChIds.includes(c.id))
+    .map((c) => ({ c, d: distanceKm(userLocation.lat, userLocation.lng, c.goalLat, c.goalLng), ok: userLevel >= c.minLevel }))
+    .sort((a, b) => (a.ok !== b.ok ? (a.ok ? -1 : 1) : a.d - b.d))[0]?.c ?? null;
+
+  // 下部オーバーレイの高さを測り、現在地ボタンをその上端 +10px に置く
+  const overlayElRef = useRef<HTMLElement | null>(null);
+  const [overlayH, setOverlayH] = useState(196);
+  useEffect(() => {
+    const el = overlayElRef.current;
+    if (!el) { setOverlayH(0); return; }
+    const update = () => setOverlayH(el.offsetHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [activeChallenge?.id, nextStep?.id, !!nearChallenge, !!celebrate, chAllDone]);
+  // bottom-3(12px) + オーバーレイ高さ + 余白10px
+  const controlsBottom = overlayH > 0 ? overlayH + 12 + 10 : 210;
+
+  // 「次の目的地」タップで地図を目的地中央へ寄せるためのトークン
+  const [focusGoalToken, setFocusGoalToken] = useState(0);
+
+  // 導入（プロローグ）表示中か。表示中はヘッダー/下部オーバーレイ/現在地ボタンを隠し、
+  // 冒険開始時にそれぞれふわっと登場させる。
+  const introShowing = !!activeChallenge && !celebrate && (chDone?.size ?? 0) === 0 && introSeenId !== activeChallenge.id;
+
+  // 精霊のセリフを一文字ずつタイプ表示（フェーズ0）→ 読み終えたら自動でフェーズ1へ
+  // チャレンジ開始直後にいきなり喋り出すと速すぎるので、少し溜めてから語り始める
+  useEffect(() => {
+    if (!(introShowing && introStep === 0 && activeChallenge)) { setIntroTyped(''); return; }
+    const full = activeChallenge.description;
+    setIntroTyped('');
+    let i = 0;
+    let typer: ReturnType<typeof setInterval> | null = null;
+    let advance: ReturnType<typeof setTimeout> | null = null;
+    const start = setTimeout(() => {
+      typer = setInterval(() => {
+        i += 1;
+        setIntroTyped(full.slice(0, i));
+        if (i >= full.length) { if (typer) clearInterval(typer); advance = setTimeout(() => setIntroStep(1), 1500); }
+      }, 38);
+    }, 800);
+    return () => { clearTimeout(start); if (typer) clearInterval(typer); if (advance) clearTimeout(advance); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChallenge?.id, introStep, introShowing]);
+
+  // フェーズ1（PROLOGUE）：ボタンを押さなくても3秒で自動的に冒険開始
+  useEffect(() => {
+    if (!(introShowing && introStep === 1 && activeChallenge)) return;
+    const id = setTimeout(() => setIntroSeenId(activeChallenge.id), 3000);
+    return () => clearTimeout(id);
+  }, [introShowing, introStep, activeChallenge?.id]);
+
+  // 複数ステップのクエストでは、上部の進捗ガイドをクエスト中ずっと表示する
+  const showGuide = !!activeChallenge && activeChallenge.steps.length > 1 && !introShowing && !celebrate && !chAllDone && !!nextStep;
+  useEffect(() => {
+    if (!(showGuide && nextStep && activeChallenge)) { setBriefTyped(''); return; }
+    const full = `次は「${nextStep.title}」へ。${nextStep.action}`;
+    setBriefTyped('');
+    let i = 0;
+    const id = setInterval(() => {
+      i += 1;
+      setBriefTyped(full.slice(0, i));
+      if (i >= full.length) clearInterval(id);
+    }, 30);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showGuide, nextStep?.id]);
+
   return (
     <div className="relative w-full h-full flex flex-col">
       
@@ -159,32 +248,43 @@ export default function MapTab({
           setUserLocation={setUserLocation}
           ugcCounts={ugcCounts}
           goal={challengeGoal}
+          controlsBottom={controlsBottom}
+          focusGoalToken={focusGoalToken}
+          hideControls={introShowing}
         />
       </div>
 
-      {/* 検証済みのみフィルタ（右上チップ） */}
-      <button
-        onClick={() => setVerifiedOnly((v) => !v)}
-        className={`absolute right-3 z-[1100] text-[12px] font-black px-3 py-1.5 rounded-full shadow-md transition-all active:scale-95 cursor-pointer ${activeChallenge ? 'top-14' : 'top-3'} ${verifiedOnly ? 'bg-emerald-500 text-white' : 'bg-white/95 text-gray-600 border border-black/5'}`}
-      >
-        {verifiedOnly ? '✓ 検証済みのみ' : '検証済みのみ'}
-      </button>
-
-      {/* 今挑戦中のチャレンジ（上部バナー） */}
-      {activeChallenge && (
-        <div className="absolute top-3 left-3 right-3 z-[1100] bg-[#2563eb] text-white rounded-full shadow-lg pl-4 pr-2 py-2 flex items-center gap-2">
-          <h4 className="flex-1 min-w-0 text-[13px] font-black truncate">{activeChallenge.title}</h4>
+      {/* 今挑戦中のチャレンジ（上部バナー・左右端まで・開始時に上からふわっと） */}
+      {activeChallenge && !introShowing && (
+        <div className="quest-header-in absolute top-0 left-0 right-0 z-[1100] bg-[#2563eb] text-white shadow-lg px-4 py-3 flex items-center gap-2">
+          <span className="inline-flex items-center gap-1 text-[10px] font-black bg-white/25 px-2 py-0.5 rounded-full flex-shrink-0">
+            <Flag className="w-2.5 h-2.5" />挑戦中
+          </span>
+          <h4 className="flex-1 min-w-0 text-sm font-black truncate">{activeChallenge.title}</h4>
           <button onClick={onClearChallenge} aria-label="チャレンジを終了" className="w-7 h-7 rounded-full hover:bg-white/20 flex items-center justify-center flex-shrink-0 cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
+      {/* 進捗ガイド（複数ステップ：上部に精霊のフキダシを常時表示し、次のすべきことを案内） */}
+      {activeChallenge && showGuide && nextStep && (
+        <div className="absolute top-0 left-0 right-0 z-[1200] px-4 pt-[68px] flex justify-center pointer-events-none">
+          <div className="w-full max-w-sm flex items-start gap-2">
+            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-100 to-orange-50 border-2 border-white shadow-lg flex items-center justify-center text-2xl flex-shrink-0">🦊</div>
+            <div className="relative flex-1 bg-white rounded-2xl rounded-tl-sm shadow-xl px-4 py-3">
+              <p className="text-[11px] font-black tracking-wider text-amber-600">道案内の精霊</p>
+              <p className="text-sm text-gray-800 leading-relaxed mt-0.5 min-h-[3em]">{briefTyped}<span className="animate-pulse text-amber-500">▌</span></p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/*
         3a. チャレンジ参加中の下部オーバーレイ（次の目的地・次の案内）
       */}
-      {activeChallenge && !celebrate ? (
-        <div className="absolute bottom-3 left-3 right-3 z-[1000] bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-[#2563eb]/25 p-3">
+      {activeChallenge && !celebrate && !introShowing ? (
+        <div ref={(el) => { overlayElRef.current = el; }} className="quest-overlay-in absolute bottom-3 left-3 right-3 z-[1000] bg-white/97 backdrop-blur-md rounded-3xl shadow-xl p-3">
           {chAllDone ? (
             <div className="flex items-center gap-3">
               <span className="text-3xl">{activeChallenge.badgeIcon}</span>
@@ -196,99 +296,79 @@ export default function MapTab({
             </div>
           ) : nextStep ? (
             <>
-              {/* 次の目的地 */}
-              <div className="flex items-center gap-2">
-                <div className="w-10 h-10 rounded-xl bg-[#2563eb]/10 flex items-center justify-center flex-shrink-0">
-                  <Flag className="w-5 h-5 text-[#2563eb]" />
-                </div>
+              {/* 次の目的地（タップで地図を目的地中央へ） */}
+              <div
+                onClick={() => setFocusGoalToken((t) => t + 1)}
+                title="タップで目的地を地図の中央へ"
+                className="flex items-center gap-2 cursor-pointer active:scale-[0.99] transition-transform"
+              >
+                <Flag className="w-6 h-6 text-[#2563eb] flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-[11px] font-black tracking-wider text-[#2563eb]/70">次の目的地 ({(chDone?.size ?? 0) + 1}/{activeChallenge.steps.length})</p>
                   <h4 className="text-sm font-black text-gray-900 truncate">{nextStep.title}{nextStep.photo ? ' 📸' : ''}</h4>
                 </div>
-                {nextStep.lat != null && (
-                  <span className="text-[13px] font-mono text-gray-500 flex-shrink-0">
-                    {distanceKm(userLocation.lat, userLocation.lng, nextStep.lat, nextStep.lng!).toFixed(1)}km
-                  </span>
-                )}
+                {nextStep.lat != null && (() => {
+                  const d = distanceKm(userLocation.lat, userLocation.lng, nextStep.lat, nextStep.lng!);
+                  const val = d < 1 ? `${Math.round(d * 1000)}` : d.toFixed(1);
+                  const unit = d < 1 ? 'm' : 'km';
+                  const brg = bearingDeg(userLocation.lat, userLocation.lng, nextStep.lat, nextStep.lng!);
+                  // 近づくほど色が変わる：~50m以内=緑、~300m以内=橙、遠い=青
+                  const color = d <= 0.05 ? 'text-emerald-500' : d <= 0.3 ? 'text-amber-500' : 'text-[#2563eb]';
+                  return (
+                    <span className={`font-black flex items-baseline gap-1 flex-shrink-0 ${color}`} style={{ transition: 'color 0.3s' }}>
+                      <Navigation2 className="w-5 h-5 fill-current self-center" style={{ transform: `rotate(${brg}deg)`, transition: 'transform 0.3s ease-out' }} />
+                      <span className="tabular-nums text-3xl leading-none">{val}</span>
+                      <span className="text-sm font-bold">{unit}</span>
+                    </span>
+                  );
+                })()}
               </div>
-              {/* 次の案内・蘊蓄（左右スワイプで切替） */}
-              <div className="mt-2 flex gap-2 overflow-x-auto snap-x snap-mandatory scrollbar-none">
-                <div className="snap-center shrink-0 w-full flex items-start gap-2 bg-[#2563eb]/5 border border-[#2563eb]/15 rounded-xl px-3 py-2">
-                  <Compass className="w-4 h-4 text-[#2563eb] mt-0.5 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-[13px] font-black text-[#2563eb]/70 block">次の案内</span>
-                    <p className="text-[13px] text-gray-800 leading-snug">{nextStep.action}</p>
-                  </div>
-                </div>
-                {nextStep.trivia && nextStep.triviaCategory && (
-                  <div className={`snap-center shrink-0 w-full text-[13px] rounded-xl border px-3 py-2 ${TRIVIA_TONE[nextStep.triviaCategory]}`}>
-                    <span className="font-black">{TRIVIA_ICON[nextStep.triviaCategory]} {nextStep.triviaCategory}の蘊蓄</span>
-                    <p className="mt-0.5 leading-relaxed">{nextStep.trivia}</p>
-                  </div>
-                )}
-              </div>
-              {nextStep.trivia && (
-                <p className="text-[13px] text-gray-400 text-center mt-1">← スワイプで案内／蘊蓄 →</p>
-              )}
-              {/* アクション（達成には証拠写真が必要） */}
-              <div className="flex items-center gap-2 mt-2">
+              {/* アクション（達成には証拠写真が必要）。次の案内は上部の進捗ガイドに集約 */}
+              <div className="mt-3">
                 <button
                   onClick={() => { setProofStep(nextStep); setProofPhoto(null); }}
-                  className="flex-1 bg-[#2563eb] text-white text-xs font-black py-2 rounded-xl hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  className="w-full bg-[#2563eb] text-white text-[15px] font-black py-3 rounded-full hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer flex items-center justify-center gap-2"
                 >
-                  <Camera className="w-3.5 h-3.5" />証拠写真を撮って達成
+                  <Camera className="w-4 h-4 flex-shrink-0" /><span className="truncate">{nextStep.title}</span>
                 </button>
-                <button onClick={onClearChallenge} className="text-[13px] font-black text-gray-400 px-2 py-2 cursor-pointer">中断</button>
               </div>
             </>
           ) : null}
         </div>
-      ) : !celebrate && activeSpot && (
-        <div
-          onClick={() => onOpenDetail?.(activeSpot)}
-          className="absolute bottom-3 left-3 right-3 z-[1000] bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-[#2563eb]/15 p-3 cursor-pointer active:scale-[0.99] transition-all"
-        >
-          {/* 上段：写真（無ければNO IMAGE）＋名称＋徳＋距離 */}
-          <div className="flex items-center gap-3">
-            <div className="w-14 h-14 rounded-xl flex-shrink-0 border border-black/5 bg-gray-100 flex items-center justify-center relative overflow-hidden">
-              {activeSpot.imageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={activeSpot.imageUrl} alt={activeSpot.name} className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-[11px] font-black text-gray-400 tracking-wider">NO IMAGE</span>
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-2">
-                <h4 className="font-black text-sm text-[#1e2024] truncate">{activeSpot.name}</h4>
-                <span className="text-[13px] font-mono text-gray-500 whitespace-nowrap">{activeDist.toFixed(1)} km</span>
+      ) : !activeChallenge && !celebrate && nearChallenge ? (() => {
+        const ch = nearChallenge;
+        const diff = difficultyLabel(ch.difficulty);
+        const d = distanceKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng);
+        const distVal = d < 1 ? `${Math.round(d * 1000)}` : d.toFixed(1);
+        const distUnit = d < 1 ? 'm' : 'km';
+        const levelOk = userLevel >= ch.minLevel;
+        return (
+          <button
+            ref={(el) => { overlayElRef.current = el; }}
+            onClick={() => onStartChallenge?.(ch.id)}
+            className="absolute bottom-3 left-3 right-3 z-[1000] text-left bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-black/5 overflow-hidden cursor-pointer active:scale-[0.99] transition-all"
+          >
+            <div className="flex items-stretch gap-3">
+              <div className={`w-20 self-stretch rounded-l-2xl flex items-center justify-center text-4xl flex-shrink-0 ${!levelOk ? 'bg-gray-200 grayscale' : 'bg-gradient-to-br from-blue-100 to-amber-100'}`}>
+                {!levelOk ? '🔒' : ch.badgeIcon}
               </div>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className="text-[13px] font-black text-[#2563eb] bg-[#2563eb]/10 px-1.5 py-0.5 rounded-full">徳 {activeToku.toLocaleString()}</span>
+              <div className="flex-1 min-w-0 py-3">
+                <span className="text-[10px] font-black tracking-wider text-[#2563eb]/70">近くのクエスト</span>
+                <h4 className="text-sm font-black text-gray-900 truncate">{ch.title}</h4>
+                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                  <span className={`text-[13px] font-black ${diff.text}`}>{diff.stars} {diff.label}</span>
+                  <span className={`text-[13px] font-black ${levelOk ? 'text-gray-500' : 'text-rose-600'}`}>{levelOk ? '' : '🔒 '}Lv.{ch.minLevel}〜</span>
+                  <span className="text-[13px] flex items-center gap-0.5 text-gray-400"><Clock className="w-3 h-3" />約{ch.estMinutes}分</span>
+                  <span className="text-[13px] font-black flex items-center gap-0.5 text-[#2563eb]">
+                    <MapPin className="w-3 h-3" /><span className="tabular-nums">{distVal}</span><span className="text-[11px]">{distUnit}</span>
+                  </span>
+                </div>
               </div>
+              <div className="self-center pr-3 flex-shrink-0 text-[#2563eb]"><ChevronRight className="w-5 h-5" /></div>
             </div>
-            <ChevronRight className="w-5 h-5 text-gray-300 flex-shrink-0" />
-          </div>
-
-          {/* 心の声（神のつぶやき・一文字ずつ） */}
-          <div className="mt-2.5 flex items-start gap-2 bg-[#2563eb]/5 border border-[#2563eb]/15 rounded-xl px-3 py-2">
-            <span className="text-base leading-none mt-0.5">{activeGodEmoji}</span>
-            <div className="flex-1 min-w-0">
-              <span className="text-[11px] font-black tracking-[0.15em] text-[#2563eb]/70 block">― 心の声 ―</span>
-              {/* 常に2行分の高さを確保（1行⇔2行でぶれない） */}
-              <p className="text-[13px] text-gray-800 italic leading-snug h-[2.9em] overflow-hidden">
-                {typed}<span className="animate-pulse">▌</span>
-              </p>
-            </div>
-          </div>
-
-          {activeNear && (
-            <div className="flex items-center mt-2">
-              <span className="bg-emerald-500/10 text-emerald-600 text-[13px] font-black px-2.5 py-1 rounded-lg">接近中 (AR可)</span>
-            </div>
-          )}
-        </div>
-      )}
+          </button>
+        );
+      })() : null}
 
       {/* 証拠写真モーダル（この目的地を達成するには写真が必要） */}
       {proofStep && (
@@ -324,18 +404,80 @@ export default function MapTab({
         </div>
       )}
 
-      {/* 達成演出 */}
+      {/* 達成ビート（案内役の精霊がコメント＋豆知識をフキダシで語る） */}
       {celebrate && (
-        <div className="absolute inset-0 z-[2100] flex items-center justify-center pointer-events-none">
-          <div className="absolute inset-0 bg-black/30 celebrate-fade" />
-          <div className="relative flex flex-col items-center celebrate-pop">
-            <div className={`text-7xl mb-3 ${celebrate.complete ? 'animate-bounce' : ''}`}>{celebrate.icon}</div>
-            <div className="bg-white rounded-2xl px-6 py-3 shadow-2xl text-center">
-              <p className="text-[11px] font-black tracking-[0.2em] text-[#2563eb]">{celebrate.complete ? 'CHALLENGE COMPLETE' : 'STEP CLEAR'}</p>
-              <p className="text-lg font-black text-gray-900 mt-0.5">{celebrate.title}</p>
+        <div className="absolute inset-0 z-[2100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/45 celebrate-fade" onClick={() => { if (celebrate.complete) onClearChallenge?.(); setCelebrate(null); }} />
+          <div className="relative celebrate-pop w-full max-w-sm">
+            {/* 達成エンブレム */}
+            <div className="text-center">
+              <div className={`text-6xl ${celebrate.complete ? 'animate-bounce' : ''}`}>{celebrate.icon}</div>
+              <p className="text-[11px] font-black tracking-[0.2em] text-white drop-shadow mt-1">{celebrate.complete ? 'CHALLENGE COMPLETE' : 'STEP CLEAR'}</p>
             </div>
+            {/* 案内役の精霊＋フキダシ（コメント＋豆知識） */}
+            <div className="flex items-end gap-2 mt-3">
+              <div className="w-14 h-14 rounded-full bg-gradient-to-br from-amber-100 to-orange-50 border-2 border-white shadow-lg flex items-center justify-center text-3xl flex-shrink-0">🦊</div>
+              <div className="relative flex-1 bg-white rounded-2xl rounded-bl-sm shadow-xl px-4 py-3">
+                <p className="text-sm font-black text-gray-900">{celebrate.title}</p>
+                {celebrate.trivia && celebrate.triviaCategory ? (
+                  <div className={`mt-2 text-left rounded-xl px-3 py-2 ${TRIVIA_TONE[celebrate.triviaCategory]}`}>
+                    <span className="inline-flex items-center gap-1.5 text-[13px] font-black">
+                      <span className="text-lg leading-none">{TRIVIA_ICON[celebrate.triviaCategory]}</span>
+                      {celebrate.triviaCategory}の豆知識
+                    </span>
+                    <p className="mt-1 text-[13px] leading-relaxed">{celebrate.trivia}</p>
+                  </div>
+                ) : (
+                  <p className="text-[13px] text-gray-600 mt-0.5">{celebrate.complete ? 'みごと制覇じゃ。よく歩いたのう！' : 'よくやった。次へ進もうぞ。'}</p>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={() => { if (celebrate.complete) onClearChallenge?.(); setCelebrate(null); }}
+              className="w-full mt-4 bg-[#2563eb] text-white text-[15px] font-black py-3 rounded-full hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer"
+            >
+              {celebrate.complete ? 'クエストを終える' : '次の目的地へ →'}
+            </button>
             {celebrate.complete && (
-              <div className="mt-2 text-2xl celebrate-confetti">🎉 ✨ 🎊</div>
+              <div className="mt-2 text-2xl celebrate-confetti text-center">🎉 ✨ 🎊</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 導入（プロローグ）：案内役の精霊がフキダシで物語を語ってから冒険へ */}
+      {activeChallenge && !celebrate && (chDone?.size ?? 0) === 0 && introSeenId !== activeChallenge.id && (
+        <div className="absolute inset-0 z-[2050] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/55" onClick={() => setIntroSeenId(activeChallenge.id)} />
+          <div className="relative w-full max-w-sm celebrate-pop">
+            {introStep === 0 ? (
+              /* フェーズ0：案内役の精霊がフキダシでシナリオを一文字ずつ語る（中央センタリング・カードは出さない） */
+              <div className="flex flex-col items-center text-center">
+                {/* アイコン（中央） */}
+                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-amber-100 to-orange-50 border-2 border-white shadow-lg flex items-center justify-center text-5xl">🦊</div>
+                {/* フキダシ（上向きの尾・一文字ずつ・本文は左寄せ） */}
+                <div className="relative mt-3 w-full bg-white rounded-3xl shadow-xl px-5 py-4 text-left">
+                  <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white rotate-45"></div>
+                  <p className="text-[11px] font-black tracking-wider text-amber-600">道案内の精霊</p>
+                  <p className="text-sm text-gray-800 leading-relaxed mt-1 min-h-[4.5em]">{introTyped}<span className="animate-pulse text-amber-500">▌</span></p>
+                </div>
+              </div>
+            ) : (
+              /* フェーズ1：ミッション情報（精霊のセリフは出さない・中央寄せ） */
+              <div className="bg-white rounded-3xl shadow-xl p-5 text-center">
+                <p className="text-[11px] font-black tracking-[0.2em] text-[#2563eb]/70">序章 — PROLOGUE</p>
+                <h3 className="text-xl font-black text-gray-900 mt-1 leading-tight">{activeChallenge.title}</h3>
+                <div className="flex items-center justify-center gap-3 mt-4 text-[13px] text-gray-500">
+                  <span className={`font-black ${difficultyLabel(activeChallenge.difficulty).text}`}>{difficultyLabel(activeChallenge.difficulty).stars} {difficultyLabel(activeChallenge.difficulty).label}</span>
+                  <span className="flex items-center gap-0.5"><Clock className="w-3.5 h-3.5" />約{activeChallenge.estMinutes}分</span>
+                  <span>全{activeChallenge.steps.length}ミッション</span>
+                </div>
+                {/* ボタン無しで3秒後に自動で冒険開始（進捗バー） */}
+                <div className="mt-5 h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-[#2563eb] rounded-full" style={{ animation: 'intro-auto 3s linear forwards' }} />
+                </div>
+                <p className="text-[11px] font-bold text-gray-400 mt-2">まもなく冒険がはじまる…</p>
+              </div>
             )}
           </div>
         </div>

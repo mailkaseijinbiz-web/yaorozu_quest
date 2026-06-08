@@ -100,6 +100,14 @@
 .celebrate-confetti { animation: celebrate-confetti 1.2s ease-in-out infinite; }
 @keyframes celebrate-confetti { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
 
+/* クエスト開始時のふわっと登場（ヘッダーは上から・下部オーバーレイは下から） */
+.quest-header-in { animation: quest-header-in 0.45s cubic-bezier(0.2, 0.9, 0.2, 1) both; }
+@keyframes quest-header-in { from { transform: translateY(-110%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.quest-overlay-in { animation: quest-overlay-in 0.5s cubic-bezier(0.2, 0.9, 0.2, 1) 0.08s both; }
+@keyframes quest-overlay-in { from { transform: translateY(130%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+/* 導入PROLOGUEの自動進行（3秒）プログレスバー */
+@keyframes intro-auto { from { width: 0%; } to { width: 100%; } }
+
 /* スポット名（フキダシ外の縁取り文字・Google Map ラベル風） */
 .map-spot-name {
   margin-top: 2px;
