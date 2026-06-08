@@ -32,6 +32,15 @@ export interface Spot {
   godRequests: string[]; // 神がフキダシで出す要望リスト (ローテーション表示)
   taskTypes?: string[]; // 神が依頼できるタスク種別 (未設定ならカテゴリ標準。管理画面で設定)
   photos?: string[]; // ユーザー投稿写真 (初期は空。投稿でセット、不適切は却下で削除)
+  verified?: boolean; // 実在を手作業で検証済みか（生成スポットは false 相当）
+}
+
+/**
+ * スポットが「検証済み（実在・座標確認済み）」かを返す。
+ * 明示フラグがあればそれを、無ければ id 接頭辞で判定（生成スポットは 'tk-'）。
+ */
+export function isVerifiedSpot(spot: Spot): boolean {
+  return spot.verified ?? !spot.id.startsWith('tk-');
 }
 
 export interface SpotPhoto {
@@ -74,6 +83,12 @@ export interface AffiliateLink {
   priceRange: string;
   rating: number;
   imageUrl: string;
+}
+
+/** 本物のアフィリエイトURLか（example.com 等のプレースホルダは除外）。 */
+export function isRealAffiliateUrl(url: string): boolean {
+  if (!url) return false;
+  return !/(^|\/\/)([^/]*\.)?example\.(com|org|net)\b/i.test(url);
 }
 
 // Initial Mock Data
@@ -606,8 +621,10 @@ class MockDatabase {
   }
 
   getAffiliatesBySpot(spotName: string): AffiliateLink[] {
-    // Basic keyword match
-    return this.getAffiliates().filter(aff => spotName.includes(aff.targetArea) || aff.targetArea.includes(spotName));
+    // Basic keyword match。ダミー(example.com)の偽リンクは本物URLが入るまで表示しない。
+    return this.getAffiliates()
+      .filter(aff => spotName.includes(aff.targetArea) || aff.targetArea.includes(spotName))
+      .filter(aff => isRealAffiliateUrl(aff.url));
   }
 
   // Write operations

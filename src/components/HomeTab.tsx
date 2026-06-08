@@ -5,6 +5,7 @@ import { MapPin, Trophy, Flag, Clock, X, Check } from 'lucide-react';
 import { User, db } from '../lib/db';
 import { CHALLENGES, difficultyLabel, Challenge } from '../data/challenges';
 import { getLevelInfo } from '../data/levels';
+import { distanceKm } from '../lib/geo';
 
 interface HomeTabProps {
   currentUser: User;
@@ -12,14 +13,6 @@ interface HomeTabProps {
   onStartChallenge: (challengeId: string) => void;
   onEndChallenge?: () => void;
   onChanged?: () => void;
-}
-
-function distKm(aLat: number, aLng: number, bLat: number, bLng: number) {
-  const R = 6371;
-  const dLat = ((bLat - aLat) * Math.PI) / 180;
-  const dLng = ((bLng - aLng) * Math.PI) / 180;
-  const x = Math.sin(dLat / 2) ** 2 + Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
 export default function HomeTab({ currentUser, userLocation, onStartChallenge, onEndChallenge }: HomeTabProps) {
@@ -52,7 +45,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
     })
     .map((ch) => ({
       ch,
-      d: distKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng),
+      d: distanceKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng),
       ok: userLevel >= ch.minLevel,
     }))
     .sort((a, b) => {
@@ -110,7 +103,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
             const diff = difficultyLabel(ch.difficulty);
             const completed = progress.completed.includes(ch.id);
             const active = progress.activeId === ch.id; // 現在挑戦中
-            const distToGoal = distKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng);
+            const distToGoal = distanceKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng);
             const distValue = distToGoal < 1 ? `${Math.round(distToGoal * 1000)}` : `${distToGoal.toFixed(1)}`;
             const distUnit = distToGoal < 1 ? 'm' : 'km';
             const levelOk = userLevel >= ch.minLevel; // 必須レベルを満たすか
@@ -122,7 +115,8 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
               <button
                 key={ch.id}
                 onClick={() => setConfirmCh(ch)}
-                className={`w-full text-left rounded-2xl border p-3.5 transition-all cursor-pointer active:scale-[0.99] ${
+                aria-label={`クエスト「${ch.title}」を開く`}
+                className={`w-full text-left rounded-2xl border overflow-hidden transition-all cursor-pointer active:scale-[0.99] ${
                   active
                     ? 'bg-[#2563eb] border-[#2563eb] shadow-md'
                     : completed
@@ -132,11 +126,11 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
                     : 'bg-white border-black/5 shadow-sm'
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-3xl flex-shrink-0 ${active ? 'bg-white/20' : completed ? 'bg-gold/20' : !levelOk ? 'bg-gray-200 grayscale' : 'bg-gradient-to-br from-blue-100 to-amber-100'}`}>
+                <div className="flex items-stretch gap-3">
+                  <div className={`w-20 self-stretch rounded-l-2xl flex items-center justify-center text-4xl flex-shrink-0 ${active ? 'bg-white/20' : completed ? 'bg-gold/20' : !levelOk ? 'bg-gray-200 grayscale' : 'bg-gradient-to-br from-blue-100 to-amber-100'}`}>
                     {!levelOk && !active && !completed ? '🔒' : ch.badgeIcon}
                   </div>
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 py-3.5 pr-3.5">
                     <div className="flex items-center gap-1.5">
                       {active && <span className="text-[13px] font-black bg-white/25 text-white px-1.5 py-0.5 rounded-full flex-shrink-0">挑戦中</span>}
                       {completed && !active && <span className="text-[11px] font-black bg-gold text-white px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5"><Check className="w-3 h-3" />達成済み</span>}
@@ -173,7 +167,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
                       <span className={`text-[13px] font-black ml-1 ${active ? 'text-white' : 'text-gray-500'}`}>{doneN}/{total}</span>
                     </div>
                   </div>
-                  {completed && <Trophy className={`w-6 h-6 flex-shrink-0 ${active ? 'text-white' : 'text-gold'}`} />}
+                  {completed && <Trophy className={`w-6 h-6 flex-shrink-0 self-center mr-3.5 ${active ? 'text-white' : 'text-gold'}`} />}
                 </div>
               </button>
             );

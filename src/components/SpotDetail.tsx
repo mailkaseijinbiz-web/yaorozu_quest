@@ -2,14 +2,16 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag } from 'lucide-react';
-import { Spot, Agent, User, db } from '../lib/db';
+import { Spot, Agent, User, db, isVerifiedSpot } from '../lib/db';
 import { getGodTasks, GodTask, TASK_TONE } from '../data/god-tasks';
+import { uploadImage } from '../lib/upload';
 
 interface Message {
   id: string;
   sender: 'user' | 'agent';
   text: string;
   createdAt: string;
+  mode?: string; // 'gemini' | 'openai' | 'fallback_mock' | 'error_fallback'
 }
 
 interface SpotDetailProps {
@@ -22,15 +24,6 @@ interface SpotDetailProps {
   onMessageSent?: () => void;
   onStartChallenge?: (challengeId: string) => void; // クエストタブから挑戦開始
 }
-
-// デモ用の投稿写真候補（実アプリではカメラ/アップロード）
-const SAMPLE_PHOTOS = [
-  'https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=800&q=80',
-  'https://images.unsplash.com/photo-1545569341-9eb8b30979d9?w=800&q=80',
-  'https://images.unsplash.com/photo-1522383225653-ed111181a951?w=800&q=80',
-  'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800&q=80',
-  'https://images.unsplash.com/photo-1480796927426-f609979314bd?w=800&q=80',
-];
 
 // タスク達成時に「楽しみ方」へ追加されるテキスト（神がUGCで成長する）
 function enjoymentForTask(task: GodTask, place: string): string | null {
@@ -82,6 +75,8 @@ export default function SpotDetail({
   const [ugcTick, setUgcTick] = useState(0); // 口コミいいね後の再読込
   const [postingTask, setPostingTask] = useState<GodTask | null>(null); // 投稿モーダル
   const [postText, setPostText] = useState('');
+  const [uploading, setUploading] = useState(false); // 写真アップロード中
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   // チャット
   const [messages, setMessages] = useState<Message[]>([]);
@@ -102,14 +97,31 @@ export default function SpotDetail({
   };
 
   // ── 写真：投稿 / 却下 ──
+  // ファイル選択ダイアログ（端末カメラ/ライブラリ）を開く
   const handlePostPhoto = () => {
-    const used = new Set(photos);
-    const next = SAMPLE_PHOTOS.find((p) => !used.has(p)) || SAMPLE_PHOTOS[photos.length % SAMPLE_PHOTOS.length];
-    db.addSpotPhoto(currentUser.id, spot.id, next);
-    db.recordTaskDone(currentUser.id, 'photo', spot.id, 30);
-    setPhotos(db.getSpotPhotos(spot.id));
-    flashToast('📸 写真を奉納！ +30徳');
-    onChanged?.();
+    if (uploading) return;
+    photoInputRef.current?.click();
+  };
+
+  // 写真が選ばれたら圧縮→アップロード→奉納
+  const onPickPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // 同じ画像の再選択でも発火させる
+    if (!file) return;
+    setUploading(true);
+    try {
+      const url = await uploadImage(file, `spot-${spot.id}`);
+      db.addSpotPhoto(currentUser.id, spot.id, url);
+      db.recordTaskDone(currentUser.id, 'photo', spot.id, 30);
+      setPhotos(db.getSpotPhotos(spot.id));
+      setDoneTasks((prev) => ({ ...prev, photo: true }));
+      flashToast('📸 写真を奉納！ +30徳');
+      onChanged?.();
+    } catch {
+      flashToast('写真の投稿に失敗しました');
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleRejectPhoto = (url: string) => {
@@ -127,7 +139,8 @@ export default function SpotDetail({
     if (doneTasks[task.type]) return;
 
     if (task.type === 'photo') {
-      handlePostPhoto();
+      handlePostPhoto(); // アップロード成功時に done にする
+      return;
     } else if (POST_TYPES.has(task.type)) {
       // 実際に投稿（口コミ・できごと・実食・買物）→ 入力モーダルを開く
       setPostingTask(task);
@@ -213,7 +226,7 @@ export default function SpotDetail({
       });
       if (!res.ok) throw new Error('failed');
       const data = await res.json();
-      setMessages((prev) => [...prev, { id: `a-${Date.now()}`, sender: 'agent', text: data.response, createdAt: new Date().toISOString() }]);
+      setMessages((prev) => [...prev, { id: `a-${Date.now()}`, sender: 'agent', text: data.response, createdAt: new Date().toISOString(), mode: data.mode }]);
     } catch {
       setMessages((prev) => [...prev, { id: `err-${Date.now()}`, sender: 'agent', text: '神聖なる通信に乱れが生じた。しばし時をおいて、再び問いかけてくれ。', createdAt: new Date().toISOString() }]);
     } finally {
@@ -252,6 +265,7 @@ export default function SpotDetail({
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-black/30 pointer-events-none" />
         <button
           onClick={onClose}
+          aria-label="閉じる"
           style={{ top: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
           className="absolute left-4 z-[20] w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white hover:bg-black/70 active:scale-95 transition-all cursor-pointer"
         >
@@ -259,6 +273,11 @@ export default function SpotDetail({
         </button>
         <div className="absolute bottom-3 left-4 right-4 text-white">
           <span className="text-[13px] font-bold bg-white/20 backdrop-blur-md px-2 py-0.5 rounded-full">{spot.category}</span>
+          {isVerifiedSpot(spot) ? (
+            <span className="ml-1.5 text-[12px] font-bold bg-emerald-500/80 backdrop-blur-md px-2 py-0.5 rounded-full">✓ 検証済み</span>
+          ) : (
+            <span className="ml-1.5 text-[12px] font-bold bg-gray-500/70 backdrop-blur-md px-2 py-0.5 rounded-full">未検証</span>
+          )}
           <h1 className="text-2xl font-black mt-1.5 leading-tight drop-shadow-lg">{spot.name}</h1>
           <div className="flex items-center gap-1 mt-0.5 text-white/90">
             <MapPin className="w-3 h-3" />
@@ -290,10 +309,11 @@ export default function SpotDetail({
                 <Camera className="w-4 h-4 text-rose-500" />
                 みんなの写真 ({photos.length})
               </h3>
-              <button onClick={handlePostPhoto} className="flex items-center gap-1 text-[13px] font-black text-white bg-rose-500 px-3 py-1.5 rounded-full hover:opacity-90 transition-all cursor-pointer">
+              <button onClick={handlePostPhoto} disabled={uploading} className="flex items-center gap-1 text-[13px] font-black text-white bg-rose-500 px-3 py-1.5 rounded-full hover:opacity-90 transition-all cursor-pointer disabled:opacity-50">
                 <ImagePlus className="w-3.5 h-3.5" />
-                写真を投稿
+                {uploading ? '投稿中…' : '写真を投稿'}
               </button>
+              <input ref={photoInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickPhoto} />
             </div>
             {photos.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-center">
@@ -372,7 +392,12 @@ export default function SpotDetail({
                     {isAgent ? godEmoji : '🧑‍🚀'}
                   </div>
                   <div className="flex flex-col max-w-[78%]">
-                    <span className={`text-[11px] text-gray-400 mb-0.5 ${isAgent ? 'text-left' : 'text-right'}`}>{isAgent ? agent.name : currentUser.displayName}</span>
+                    <span className={`text-[11px] text-gray-400 mb-0.5 flex items-center gap-1 ${isAgent ? 'text-left' : 'text-right flex-row-reverse'}`}>
+                      {isAgent ? agent.name : currentUser.displayName}
+                      {isAgent && (msg.mode === 'fallback_mock' || msg.mode === 'error_fallback') && (
+                        <span className="text-[9px] font-bold text-gray-400 bg-gray-100 border border-gray-200 px-1 py-px rounded-full">定型応答</span>
+                      )}
+                    </span>
                     <div className={`px-3 py-2 rounded-2xl text-[13px] leading-relaxed whitespace-pre-wrap ${isAgent ? 'bg-amber-50 border border-amber-200/50 text-gray-800 rounded-tl-none' : 'bg-sky-50 border border-sky-200/60 text-gray-800 rounded-tr-none'}`}>
                       {formatText(msg.text)}
                     </div>
@@ -401,7 +426,7 @@ export default function SpotDetail({
           )}
           <form onSubmit={(e) => { e.preventDefault(); handleSend(inputText); }} className="flex gap-2 p-3 border-t border-black/5 bg-white flex-shrink-0">
             <input type="text" value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder={`${agent.name} に話しかける...`} disabled={isLoading} className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:border-gold transition-all disabled:opacity-50" />
-            <button type="submit" disabled={!inputText.trim() || isLoading} className="bg-shrine-red hover:opacity-90 text-white disabled:opacity-40 px-4 rounded-xl font-bold flex items-center justify-center transition-all cursor-pointer active:scale-95">
+            <button type="submit" aria-label="メッセージを送信" disabled={!inputText.trim() || isLoading} className="bg-shrine-red hover:opacity-90 text-white disabled:opacity-40 px-4 rounded-xl font-bold flex items-center justify-center transition-all cursor-pointer active:scale-95">
               <Send className="w-4 h-4" />
             </button>
           </form>

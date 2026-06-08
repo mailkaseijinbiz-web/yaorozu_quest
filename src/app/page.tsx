@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, MessageSquare, Heart, Share2 } from 'lucide-react';
 import { db, Spot, Agent, User as UserType, UserContribution } from '../lib/db';
 import { pullSnapshot } from '../lib/cloud-sync';
+import { distanceKm } from '../lib/geo';
 import HomeTab from '../components/HomeTab';
 import MapTab from '../components/MapTab';
 import SpotDetail from '../components/SpotDetail';
@@ -49,6 +50,8 @@ export default function HomePage() {
   const [userStats, setUserStats] = useState<UserContribution | null>(null);
   const [creatorProfiles, setCreatorProfiles] = useState<{ [userId: string]: UserType }>({});
   const [userLocation, setUserLocation] = useState({ lat: 35.6580, lng: 139.7514 });
+  // GPS 取得状態（失敗時にユーザーへ明示する）
+  const [geoStatus, setGeoStatus] = useState<'locating' | 'ok' | 'denied' | 'error'>('locating');
 
   // Quest states
   const [claimedQuests, setClaimedQuests] = useState<string[]>([]);
@@ -101,15 +104,26 @@ export default function HomePage() {
   }, []);
 
   // 実際のGPS現在地を取得して反映
-  useEffect(() => {
-    if (typeof navigator !== 'undefined' && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => { /* 取得失敗時は既定の現在地を維持 */ },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
-      );
+  const requestLocation = useCallback(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGeoStatus('error');
+      return;
     }
+    setGeoStatus('locating');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setGeoStatus('ok');
+      },
+      (err) => {
+        // 取得失敗時は既定の現在地（東京中心）を維持しつつ、状態を明示
+        setGeoStatus(err.code === err.PERMISSION_DENIED ? 'denied' : 'error');
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+    );
   }, []);
+
+  useEffect(() => { requestLocation(); }, [requestLocation]);
 
   useEffect(() => {
     if (activeSpot) {
@@ -195,16 +209,7 @@ export default function HomePage() {
     }
   };
 
-  const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-    const R = 6371;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  };
-
-  const activeSpotDistance = activeSpot ? getDistance(userLocation.lat, userLocation.lng, activeSpot.latitude, activeSpot.longitude) : 999;
-  const isNearAnySpot = spots.some(s => getDistance(userLocation.lat, userLocation.lng, s.latitude, s.longitude) <= 1.0);
+  const activeSpotDistance = activeSpot ? distanceKm(userLocation.lat, userLocation.lng, activeSpot.latitude, activeSpot.longitude) : 999;
 
   const userTokuAtSpot = (currentUser && activeSpot) ? db.getTokuAtSpot(currentUser.id, activeSpot.id) : 0;
   const currentCreatorToku = (activeSpot && activeSpot.creatorId) ? db.getTokuAtSpot(activeSpot.creatorId, activeSpot.id) : 0;
@@ -232,6 +237,24 @@ export default function HomePage() {
 
         {/* Viewport */}
         <div className="flex-1 relative overflow-hidden bg-[#f5f7fa] flex flex-col">
+
+          {/* ── GPS 取得失敗の明示 + 再取得 ── */}
+          {(geoStatus === 'denied' || geoStatus === 'error') && (
+            <div className="absolute top-2 left-2 right-2 z-[1500] bg-amber-50 border border-amber-300 rounded-xl px-3 py-2 flex items-center gap-2 shadow-sm">
+              <MapPin className="w-4 h-4 text-amber-600 flex-shrink-0" />
+              <p className="flex-1 text-[12px] text-amber-800 leading-snug">
+                {geoStatus === 'denied'
+                  ? '位置情報が許可されていません。東京中心を仮の現在地として表示中です。'
+                  : '現在地を取得できませんでした。東京中心を仮の現在地として表示中です。'}
+              </p>
+              <button
+                onClick={requestLocation}
+                className="flex-shrink-0 text-[12px] font-black text-white bg-amber-600 px-3 py-1.5 rounded-full hover:opacity-90 active:scale-95 transition-all cursor-pointer"
+              >
+                再取得
+              </button>
+            </div>
+          )}
 
           {/* Tab content */}
           <div className={`flex-1 h-full overflow-hidden relative z-0 ${activeTab === 'home' ? '' : 'overflow-y-auto'}`}>

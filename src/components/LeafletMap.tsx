@@ -4,14 +4,8 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Navigation } from 'lucide-react';
-import { Spot, db } from '../lib/db';
-
-// 2点間の概算距離（度ベース・並べ替え用）
-function roughDist(aLat: number, aLng: number, bLat: number, bLng: number) {
-  const dLat = aLat - bLat;
-  const dLng = (aLng - bLng) * Math.cos((aLat * Math.PI) / 180);
-  return Math.sqrt(dLat * dLat + dLng * dLng);
-}
+import { Spot, db, isVerifiedSpot } from '../lib/db';
+import { roughDistance } from '../lib/geo';
 
 // 1画面の表示数をズームに応じて制御（広域では少なく、拡大で増やす）
 function maxMarkersForZoom(zoom: number): number {
@@ -125,7 +119,7 @@ export default function LeafletMap({
     const b = map.getBounds().pad(0.15);
     const c = map.getCenter();
     const inView = spots.filter((s) => b.contains([s.latitude, s.longitude]));
-    inView.sort((a, z) => roughDist(c.lat, c.lng, a.latitude, a.longitude) - roughDist(c.lat, c.lng, z.latitude, z.longitude));
+    inView.sort((a, z) => roughDistance(c.lat, c.lng, a.latitude, a.longitude) - roughDistance(c.lat, c.lng, z.latitude, z.longitude));
     const head = inView.slice(0, cap);
     // アクティブスポットは必ず含める
     if (activeSpot && !head.some((s) => s.id === activeSpot.id) && spots.some((s) => s.id === activeSpot.id)) {
@@ -217,7 +211,7 @@ export default function LeafletMap({
     let nearestId: string | null = null;
     let nearestD = Infinity;
     visibleSpots.forEach((s) => {
-      const d = roughDist(userLocation.lat, userLocation.lng, s.latitude, s.longitude);
+      const d = roughDistance(userLocation.lat, userLocation.lng, s.latitude, s.longitude);
       if (d < nearestD) { nearestD = d; nearestId = s.id; }
     });
 
@@ -227,10 +221,12 @@ export default function LeafletMap({
       const spotToku = db.getSpotToku(spot.id);
       // 最も近い神（と選択中）だけフキダシを表示。他は小さなピン＋地名のみ。
       const showBubble = spot.id === nearestId || isActive;
+      // 未検証スポットは淡く表示して信頼性を区別
+      const dim = isVerifiedSpot(spot) ? '' : 'opacity:0.5;';
 
       const spotHtml = showBubble
         ? `
-        <div class="relative flex flex-col items-center">
+        <div class="relative flex flex-col items-center" style="${dim}">
           <div class="god-ripple ${isActive ? 'god-ripple-active' : ''}"></div>
           <div class="relative flex items-center ${
             isActive
@@ -246,7 +242,7 @@ export default function LeafletMap({
         </div>
       `
         : `
-        <div class="relative flex flex-col items-center">
+        <div class="relative flex flex-col items-center" style="${dim}">
           <div class="w-3 h-3 rounded-full bg-[#2563eb]/70 border-2 border-white shadow-sm"></div>
         </div>
       `;

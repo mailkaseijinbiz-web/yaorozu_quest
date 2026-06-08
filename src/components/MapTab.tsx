@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Compass, ChevronRight, Flag, X, Camera, Check } from 'lucide-react';
 import dynamic from 'next/dynamic';
-import { Spot, User, db } from '../lib/db';
+import { Spot, User, db, isVerifiedSpot } from '../lib/db';
+import { uploadImage } from '../lib/upload';
+import { distanceKm } from '../lib/geo';
 import { getHeartVoices } from '../data/god-tasks';
 import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON } from '../data/challenges';
 
@@ -31,19 +33,6 @@ interface MapTabProps {
   onAdvanceChallenge?: (stepId: string, photo?: string | null) => void; // 次の目的地ステップを達成（証拠写真つき）
 }
 
-const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-};
 
 export default function MapTab({
   spots,
@@ -57,7 +46,12 @@ export default function MapTab({
   onClearChallenge,
   onAdvanceChallenge,
 }: MapTabProps) {
-  const displaySpots = spots;
+  // 検証済みスポットのみ表示するフィルタ
+  const [verifiedOnly, setVerifiedOnly] = useState(false);
+  const displaySpots = useMemo(
+    () => (verifiedOnly ? spots.filter(isVerifiedSpot) : spots),
+    [spots, verifiedOnly]
+  );
 
   // Compute UGC counts per spot
   const allUgc = db.getUgc();
@@ -74,16 +68,23 @@ export default function MapTab({
   // チャレンジ：証拠写真モーダル & 達成演出
   const [proofStep, setProofStep] = useState<ChallengeStep | null>(null);
   const [proofPhoto, setProofPhoto] = useState<string | null>(null);
+  const [uploadingProof, setUploadingProof] = useState(false);
   const [celebrate, setCelebrate] = useState<{ title: string; icon: string; complete: boolean } | null>(null);
 
-  const onPickProof = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onPickProof = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     // 同じ画像を再選択しても onChange が発火するよう値をリセット（2回目が達成できない不具合の対策）
     e.target.value = '';
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => setProofPhoto(typeof reader.result === 'string' ? reader.result : null);
-    reader.readAsDataURL(f);
+    setUploadingProof(true);
+    try {
+      const url = await uploadImage(f, `challenge-${activeChallenge?.id ?? 'x'}`);
+      setProofPhoto(url);
+    } catch {
+      setProofPhoto(null);
+    } finally {
+      setUploadingProof(false);
+    }
   };
 
   const confirmProof = () => {
@@ -140,7 +141,7 @@ export default function MapTab({
       : { lat: activeChallenge.goalLat, lng: activeChallenge.goalLng, name: activeChallenge.goalName }
     : null;
 
-  const activeDist = activeSpot ? getDistance(userLocation.lat, userLocation.lng, activeSpot.latitude, activeSpot.longitude) : 0;
+  const activeDist = activeSpot ? distanceKm(userLocation.lat, userLocation.lng, activeSpot.latitude, activeSpot.longitude) : 0;
   const activeNear = activeDist <= 1.0;
   const activeToku = activeSpot ? db.getSpotToku(activeSpot.id) : 0;
   const activeGodEmoji = activeSpot ? (activeSpot.godEmoji || (activeSpot.category === '神社' ? '⛩️' : '🙏')) : '⛩️';
@@ -161,11 +162,19 @@ export default function MapTab({
         />
       </div>
 
+      {/* 検証済みのみフィルタ（右上チップ） */}
+      <button
+        onClick={() => setVerifiedOnly((v) => !v)}
+        className={`absolute right-3 z-[1100] text-[12px] font-black px-3 py-1.5 rounded-full shadow-md transition-all active:scale-95 cursor-pointer ${activeChallenge ? 'top-14' : 'top-3'} ${verifiedOnly ? 'bg-emerald-500 text-white' : 'bg-white/95 text-gray-600 border border-black/5'}`}
+      >
+        {verifiedOnly ? '✓ 検証済みのみ' : '検証済みのみ'}
+      </button>
+
       {/* 今挑戦中のチャレンジ（上部バナー） */}
       {activeChallenge && (
         <div className="absolute top-3 left-3 right-3 z-[1100] bg-[#2563eb] text-white rounded-full shadow-lg pl-4 pr-2 py-2 flex items-center gap-2">
           <h4 className="flex-1 min-w-0 text-[13px] font-black truncate">{activeChallenge.title}</h4>
-          <button onClick={onClearChallenge} className="w-7 h-7 rounded-full hover:bg-white/20 flex items-center justify-center flex-shrink-0 cursor-pointer">
+          <button onClick={onClearChallenge} aria-label="チャレンジを終了" className="w-7 h-7 rounded-full hover:bg-white/20 flex items-center justify-center flex-shrink-0 cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -198,7 +207,7 @@ export default function MapTab({
                 </div>
                 {nextStep.lat != null && (
                   <span className="text-[13px] font-mono text-gray-500 flex-shrink-0">
-                    {getDistance(userLocation.lat, userLocation.lng, nextStep.lat, nextStep.lng!).toFixed(1)}km
+                    {distanceKm(userLocation.lat, userLocation.lng, nextStep.lat, nextStep.lng!).toFixed(1)}km
                   </span>
                 )}
               </div>
@@ -290,7 +299,9 @@ export default function MapTab({
             <p className="text-[13px] text-gray-500 mt-1">「{proofStep.title}」を達成するには、現地で証拠となる写真を撮影してください。</p>
 
             <div className="mt-3 rounded-2xl overflow-hidden border border-gray-200 bg-gray-100 aspect-video flex items-center justify-center">
-              {proofPhoto ? (
+              {uploadingProof ? (
+                <span className="text-[13px] text-gray-400 animate-pulse">アップロード中…</span>
+              ) : proofPhoto ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={proofPhoto} alt="証拠写真" className="w-full h-full object-cover" />
               ) : (
@@ -298,9 +309,9 @@ export default function MapTab({
               )}
             </div>
 
-            <label className="mt-3 w-full flex items-center justify-center gap-1.5 bg-gray-100 text-gray-700 text-sm font-black py-2.5 rounded-xl cursor-pointer hover:bg-gray-200 transition-all">
+            <label className={`mt-3 w-full flex items-center justify-center gap-1.5 bg-gray-100 text-gray-700 text-sm font-black py-2.5 rounded-xl transition-all ${uploadingProof ? 'opacity-50 pointer-events-none' : 'cursor-pointer hover:bg-gray-200'}`}>
               <Camera className="w-4 h-4" />{proofPhoto ? '撮り直す' : '写真を撮影 / 選択'}
-              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickProof} />
+              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickProof} disabled={uploadingProof} />
             </label>
 
             <div className="flex gap-2 mt-2">
