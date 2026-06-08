@@ -30,6 +30,7 @@ interface LeafletMapProps {
   setUserLocation: (loc: { lat: number; lng: number }) => void;
   ugcCounts: { [spotId: string]: number };
   goal?: { lat: number; lng: number; name: string } | null; // チャレンジのゴール
+  recenterBottom?: number; // 現在地ボタンの下端オフセット(px)。下部オーバーレイの高さに合わせる
 }
 
 export default function LeafletMap({
@@ -40,6 +41,7 @@ export default function LeafletMap({
   setUserLocation,
   ugcCounts,
   goal,
+  recenterBottom = 210,
 }: LeafletMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -241,7 +243,7 @@ export default function LeafletMap({
           </div>
           <div class="w-2 h-2 ${
             isActive ? 'bg-white border-[#2563eb]' : 'bg-[#2563eb] border-white'
-          } rotate-45 -mt-1 border-r border-b"></div>
+          } rotate-45 -mt-[5px] border-r-2 border-b-2"></div>
           <span class="map-spot-name ${isActive ? 'map-spot-name-active' : ''}">${spot.name}</span>
         </div>
       `
@@ -293,10 +295,11 @@ export default function LeafletMap({
     <div className="relative w-full h-full">
       <div ref={mapContainerRef} className="w-full h-full rounded-2xl overflow-hidden" />
 
-      {/* 現在地へ戻るボタン（下部オーバーレイと被らないよう上め） */}
+      {/* 現在地へ戻るボタン（下部オーバーレイパネルの直上に配置） */}
       <button
         onClick={() => mapRef.current?.setView([userLocation.lat, userLocation.lng], 15, { animate: true })}
-        className="absolute bottom-[210px] right-3 z-[600] w-11 h-11 rounded-full bg-white shadow-lg border border-[#2563eb]/20 flex items-center justify-center text-[#2563eb] hover:bg-[#2563eb] hover:text-white transition-all cursor-pointer"
+        style={{ bottom: recenterBottom }}
+        className="absolute right-3 z-[600] w-11 h-11 rounded-full bg-white shadow-lg border border-[#2563eb]/20 flex items-center justify-center text-[#2563eb] hover:bg-[#2563eb] hover:text-white transition-all cursor-pointer"
         title="現在地へ"
       >
         <Navigation className="w-5 h-5" />

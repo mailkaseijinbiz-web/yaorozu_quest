@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Compass, ChevronRight, Flag, X, Camera, Check } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { Spot, User, db } from '../lib/db';
@@ -70,6 +70,10 @@ export default function MapTab({
   // ── 心の声（神のつぶやき）を下部オーバーレイで：一文字ずつ・タスク交互 ──
   const [typed, setTyped] = useState('');
   const [msgIdx, setMsgIdx] = useState(0);
+
+  // 下部オーバーレイパネルの高さ（現在地ボタンをこの上に置くため計測）
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [panelH, setPanelH] = useState(0);
 
   // チャレンジ：証拠写真モーダル & 達成演出
   const [proofStep, setProofStep] = useState<ChallengeStep | null>(null);
@@ -145,6 +149,21 @@ export default function MapTab({
   const activeToku = activeSpot ? db.getSpotToku(activeSpot.id) : 0;
   const activeGodEmoji = activeSpot ? (activeSpot.godEmoji || (activeSpot.category === '神社' ? '⛩️' : '🙏')) : '⛩️';
 
+  // 下部パネルの表示有無・種別が変わるたびに高さを計測（ResizeObserverで追従）
+  const overlayShown = !celebrate && (activeChallenge ? true : !!activeSpot);
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) { setPanelH(0); return; }
+    const update = () => setPanelH(el.offsetHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [overlayShown, activeChallenge?.id, activeSpot?.id, chAllDone, nextStep?.id]);
+
+  // 現在地ボタンの下端：パネルの直上（パネル高 + bottom-3(12px) + 余白10px）
+  const recenterBottom = overlayShown && panelH > 0 ? panelH + 12 + 10 : 24;
+
   return (
     <div className="relative w-full h-full flex flex-col">
       
@@ -158,6 +177,7 @@ export default function MapTab({
           setUserLocation={setUserLocation}
           ugcCounts={ugcCounts}
           goal={challengeGoal}
+          recenterBottom={recenterBottom}
         />
       </div>
 
@@ -175,7 +195,7 @@ export default function MapTab({
         3a. チャレンジ参加中の下部オーバーレイ（次の目的地・次の案内）
       */}
       {activeChallenge && !celebrate ? (
-        <div className="absolute bottom-3 left-3 right-3 z-[1000] bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-[#2563eb]/25 p-3">
+        <div ref={panelRef} className="absolute bottom-3 left-3 right-3 z-[1000] bg-white/97 backdrop-blur-md rounded-2xl shadow-xl p-3">
           {chAllDone ? (
             <div className="flex items-center gap-3">
               <span className="text-3xl">{activeChallenge.badgeIcon}</span>
@@ -236,8 +256,9 @@ export default function MapTab({
         </div>
       ) : !celebrate && activeSpot && (
         <div
+          ref={panelRef}
           onClick={() => onOpenDetail?.(activeSpot)}
-          className="absolute bottom-3 left-3 right-3 z-[1000] bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-[#2563eb]/15 p-3 cursor-pointer active:scale-[0.99] transition-all"
+          className="absolute bottom-3 left-3 right-3 z-[1000] bg-white/97 backdrop-blur-md rounded-2xl shadow-xl p-3 cursor-pointer active:scale-[0.99] transition-all"
         >
           {/* 上段：写真（無ければNO IMAGE）＋名称＋徳＋距離 */}
           <div className="flex items-center gap-3">

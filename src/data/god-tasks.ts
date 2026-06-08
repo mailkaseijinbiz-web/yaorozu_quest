@@ -144,26 +144,81 @@ export function getGodTasks(spot: Pick<Spot, 'name' | 'category' | 'taskTypes'>)
     .sort((a, b) => b.reward - a.reward);
 }
 
+// 文字列から安定したシード値を作る（スポットごとに台詞のバリエーションを固定するため）
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+function pick<T>(arr: T[], seed: number): T {
+  return arr[seed % arr.length];
+}
+
+const TOD_VARIANTS: Record<string, string[]> = {
+  未明: ['まだ眠りの中にある', '夜明け前の静寂に包まれておる', '人影もまばら、神気だけが漂う刻じゃ'],
+  朝: ['清々しい朝の気が満ちておる', '朝陽が辺りを照らし始めた', '一日の始まりの活気が芽吹く頃じゃ'],
+  昼: ['今、賑わいを見せておるようじゃ', '陽は高く、人の往来も盛んじゃ', '昼下がりの穏やかな時が流れておる'],
+  夕暮れ: ['黄金色に染まる頃合いじゃ', '茜空がこの地を包んでおる', '一日の名残を惜しむ刻じゃ'],
+  夜: ['静寂に神気が宿る刻', '灯りがともり、夜の帳が下りた', '星々がこの地を見守っておる'],
+};
+
+const SEASON_LINES: Record<string, string[]> = {
+  春: ['桜の気配が、そこかしこに漂う頃じゃ…', '芽吹きの季節、新たな縁が動く頃合いよ。'],
+  夏: ['蝉の声が遠くに響くようじゃ…', '夏の陽気が、この地に満ちておる。'],
+  秋: ['紅葉の便りが聞こえてくる頃じゃ…', '実りの秋、感謝の念が深まる頃よ。'],
+  冬: ['冷たい風が、身を清めるようじゃ…', '澄んだ空気に、神気が研ぎ澄まされる。'],
+};
+
+const CATEGORY_LINES: Record<string, string[]> = {
+  神社: ['鳥居の向こうに、古き約束が眠っておる。', '手水で心身を清めてから参られよ。'],
+  寺院: ['鐘の音が、そなたの迷いを払うであろう。', '線香の煙に、静かに祈りを託すがよい。'],
+  商店街: ['店主らの心意気が、この通りを生かしておる。', '掘り出し物は、己の足で探すものじゃ。'],
+  飲食店: ['湯気の向こうに、職人の技が宿っておる。', '空腹は最高の調味料、というでな。'],
+  公園: ['木々のざわめきこそ、わしの声じゃ。', '四季の移ろいを、ここで感じるがよい。'],
+  商業施設: ['人の欲と縁が交わる、面白き場よ。', '思わぬ出会いも、すべてはご縁じゃ。'],
+};
+const CATEGORY_FALLBACK = ['この地には、人知れぬ物語が積もっておる。', 'そなたが来るのを、ずっと待っておったぞ。'];
+
+function seasonOf(month: number): string {
+  if (month === 12 || month <= 2) return '冬';
+  if (month <= 5) return '春';
+  if (month <= 8) return '夏';
+  return '秋';
+}
+
 /**
  * 場所の「心の声」を返す。
  * 本来は SNS／ウェブの情報から“そのとき最も相応しい”話題を選ぶ想定。
- * デモでは時間帯コンテキスト＋話題シミュレーション＋依頼を合成する。
+ * デモでは「時間帯 × 季節 × カテゴリ × 噂 × 依頼」を合成して、場所ごとに表情の違う独白を作る。
+ * スポット名から安定シードを引くため、同じ場所・同じ時間帯では台詞が固定され、
+ * タイプライター表示中に文面が入れ替わらない。
  */
 export function getHeartVoices(spot: Pick<Spot, 'name' | 'category' | 'taskTypes'>): string[] {
-  const h = new Date().getHours();
+  const now = new Date();
+  const h = now.getHours();
   const tod = h < 5 ? '未明' : h < 10 ? '朝' : h < 15 ? '昼' : h < 19 ? '夕暮れ' : '夜';
-  const ctxMap: Record<string, string> = {
-    未明: 'まだ眠りの中にある',
-    朝: '清々しい朝の気が満ちておる',
-    昼: '今、賑わいを見せておるようじゃ',
-    夕暮れ: '黄金色に染まる頃合いじゃ',
-    夜: '静寂に神気が宿る刻',
-  };
-  return [
-    `${tod}の${spot.name}…${ctxMap[tod]}。`,
+  const season = seasonOf(now.getMonth() + 1);
+  const seed = hashStr(spot.name) ^ (h << 3); // 場所＋時間帯で安定
+
+  const rumorVariants = [
     `巷では今、${spot.name}が話題のようじゃ…`,
+    `${spot.name}を訪れる者が、近頃増えておるとか…`,
+    `風の噂で、${spot.name}の名をよう聞くようになった…`,
+    `${spot.name}に、新たな縁が芽吹いておるらしい…`,
+  ];
+  const catLines = CATEGORY_LINES[spot.category] ?? CATEGORY_FALLBACK;
+
+  const lines = [
+    `${tod}の${spot.name}…${pick(TOD_VARIANTS[tod], seed)}。`,
+    pick(SEASON_LINES[season], seed >> 2),
+    pick(catLines, seed >> 3),
+    pick(rumorVariants, seed >> 4),
     ...getGodTasks(spot).map((t) => t.murmur),
   ];
+  return lines.filter(Boolean);
 }
 
 /** タスク種別ごとのテーマ色（Tailwind 用） */
