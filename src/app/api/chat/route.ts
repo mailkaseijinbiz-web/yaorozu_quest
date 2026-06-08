@@ -29,6 +29,25 @@ interface SpotContext {
   godName?: string;
 }
 
+interface GodTaskCtx {
+  type?: string;
+  icon?: string;
+  label?: string;
+  title?: string;
+  reward?: number;
+  call?: string; // 場所名を織り込んだ依頼セリフ（クライアントで生成済み）
+}
+
+// ユーザーが「依頼・頼み・できること」を尋ねたら、神の依頼を1つ提示する（フォールバック用）
+function pickTaskReply(message: string, tasks: GodTaskCtx[] | undefined): string | null {
+  if (!tasks || tasks.length === 0) return null;
+  const m = (message || '').toLowerCase();
+  const asks = ['依頼', '頼み', 'たのみ', '手伝', 'できること', 'クエスト', 'やること', 'お願い', 'task', 'なにかある', '何かある', '何がある'].some((k) => m.includes(k));
+  if (!asks) return null;
+  const t = tasks[Math.floor(Math.random() * tasks.length)];
+  return `${t.icon || '⛩️'} うむ、そなたに頼みがある。${t.call ?? t.title ?? ''} 成し遂げれば徳を ${t.reward ?? 0} 授けよう。「依頼」の札から請け負えるぞ。`;
+}
+
 // spot 情報に基づく動的フォールバック（個別Agent未登録のスポット用）
 function getSpotFallbackResponse(
   message: string,
@@ -182,7 +201,7 @@ function getFallbackResponse(
 
 export async function POST(request: Request) {
   try {
-    const { message, history, spotId, agent, ugc, affiliates, userName, spot } = await request.json();
+    const { message, history, spotId, agent, ugc, affiliates, userName, spot, tasks } = await request.json();
 
     const apiKey = process.env.OPENAI_API_KEY;
     const geminiKey = process.env.GEMINI_API_KEY;
@@ -192,9 +211,12 @@ export async function POST(request: Request) {
 
     if (!apiKey && !geminiKey) {
       // API Key is not set, use the robust rule-based fallback
-      const responseText = (isSynthetic && spot)
-        ? getSpotFallbackResponse(message, spot, ugc, affiliates, agent?.name || spot.name)
-        : getFallbackResponse(message, agent, ugc, affiliates, userName || '巡礼者');
+      // 依頼について尋ねられたら、まず神の依頼を提示する
+      const taskReply = pickTaskReply(message, tasks);
+      const responseText = taskReply
+        ?? ((isSynthetic && spot)
+          ? getSpotFallbackResponse(message, spot, ugc, affiliates, agent?.name || spot.name)
+          : getFallbackResponse(message, agent, ugc, affiliates, userName || '巡礼者'));
 
       // Simulate network latency (500ms)
       await new Promise((resolve) => setTimeout(resolve, 600));
@@ -212,7 +234,15 @@ export async function POST(request: Request) {
       `Offer [${index + 1}] (Category: ${aff.category}): Name: "${aff.title}", URL: "${aff.url}", Rating: ${aff.rating}, Price Range: ${aff.priceRange}`
     ).join('\n');
 
+    const taskContext = (tasks && tasks.length > 0)
+      ? (tasks as GodTaskCtx[]).map((t, i) => `Request [${i + 1}]: ${t.call ?? t.title} (reward: ${t.reward} 徳)`).join('\n')
+      : '';
+
     const fullSystemPrompt = `${agent.systemPrompt}
+
+You are the guardian deity of this place and you have requests (quests) for the pilgrim. When it fits the flow of conversation, naturally bring up ONE of your requests in your persona. If the user asks what they can do / about requests / how to help, present a specific request with its 徳 reward and tell them they can accept it from the「依頼」tab. Do not list them all mechanically — weave it into the dialogue.
+Your requests:
+${taskContext || 'No specific requests right now.'}
 
 Below is the visitor-contributed local knowledge (UGC) for your spot. You must use this information to answer questions where appropriate:
 ${ugcContext || 'No UGC posts yet.'}
@@ -298,15 +328,17 @@ Remember: Answer in character, be extremely concise (under 150 characters), and 
     // In case of error (e.g. invalid key, timeout), fallback gracefully
     const body = await request.clone().json();
     const bodySynthetic = typeof body.agent?.id === 'string' && body.agent.id.startsWith('agent-synthetic-');
-    const responseText = (bodySynthetic && body.spot)
-      ? getSpotFallbackResponse(body.message, body.spot, body.ugc, body.affiliates, body.agent?.name || body.spot.name)
-      : getFallbackResponse(
-          body.message,
-          body.agent,
-          body.ugc,
-          body.affiliates,
-          body.userName || '巡礼者'
-        );
+    const taskReply = pickTaskReply(body.message, body.tasks);
+    const responseText = taskReply
+      ?? ((bodySynthetic && body.spot)
+        ? getSpotFallbackResponse(body.message, body.spot, body.ugc, body.affiliates, body.agent?.name || body.spot.name)
+        : getFallbackResponse(
+            body.message,
+            body.agent,
+            body.ugc,
+            body.affiliates,
+            body.userName || '巡礼者'
+          ));
     
     return NextResponse.json({ 
       response: responseText, 

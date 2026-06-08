@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag } from 'lucide-react';
 import { Spot, Agent, User, db } from '../lib/db';
 import { getGodTasks, GodTask, TASK_TONE } from '../data/god-tasks';
@@ -82,6 +82,30 @@ function resolveAgent(spot: Spot): Agent {
     accessoryType: 'なし',
     voiceTone: '神秘的',
   };
+}
+
+// 神の発話を一文字ずつ表示（話しているような演出）。完了後は renderDone で整形（URLリンク化など）。
+function TypewriterText({
+  text,
+  speed = 26,
+  renderDone,
+  onTick,
+}: {
+  text: string;
+  speed?: number;
+  renderDone?: (t: string) => React.ReactNode;
+  onTick?: () => void;
+}) {
+  const [n, setN] = useState(0);
+  useEffect(() => { setN(0); }, [text]);
+  useEffect(() => {
+    if (n >= text.length) return;
+    const id = setTimeout(() => setN((v) => Math.min(text.length, v + 1)), speed);
+    return () => clearTimeout(id);
+  }, [n, text, speed]);
+  useEffect(() => { onTick?.(); }, [n, onTick]);
+  if (n >= text.length) return <>{renderDone ? renderDone(text) : text}</>;
+  return <>{text.slice(0, n)}<span className="ml-0.5 animate-pulse">▌</span></>;
 }
 
 export default function SpotDetail({
@@ -216,23 +240,32 @@ export default function SpotDetail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spot.id]);
 
-  // チャット初期あいさつ
+  // チャット初期あいさつ（会話の流れで「依頼」を自然に切り出す）
   useEffect(() => {
     if (tab === 'chat' && messages.length === 0) {
+      const topTask = tasks[0];
+      const hook = topTask
+        ? `実はな…そなたに頼みたいことがあってのう。${topTask.call(spot.name)}（成し遂げれば徳を ${topTask.reward} 授けよう）`
+        : 'この地のこと、何なりと尋ねるがよい。';
       setMessages([
         {
           id: `greet-${Date.now()}`,
           sender: 'agent',
-          text: `よう参られた、${currentUser.displayName} よ。わしは${spot.name}に宿る「${agent.name}」じゃ。この地のこと、何なりと尋ねるがよい。`,
+          text: `よう参られた、${currentUser.displayName} よ。わしは${spot.name}に宿る「${agent.name}」じゃ。${hook}`,
           createdAt: new Date().toISOString(),
         },
       ]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, messages.length, agent.name, spot.name, currentUser.displayName]);
 
-  useEffect(() => {
+  const scrollToEnd = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+  }, []);
+
+  useEffect(() => {
+    scrollToEnd();
+  }, [messages, isLoading, scrollToEnd]);
 
   const handleSend = async (textToSend: string) => {
     if (!textToSend.trim() || isLoading) return;
@@ -254,6 +287,7 @@ export default function SpotDetail({
           affiliates,
           userName: currentUser.displayName,
           spot: { name: spot.name, category: spot.category, description: spot.description, enjoyments, godName: spot.godName },
+          tasks: tasks.map((t) => ({ type: t.type, icon: t.icon, label: t.label, title: t.title, reward: t.reward, call: t.call(spot.name) })),
         }),
       });
       if (!res.ok) throw new Error('failed');
@@ -279,10 +313,10 @@ export default function SpotDetail({
     );
   };
 
-  const PRESETS = ['この場所の歴史は？', '見どころを教えて', '近くのおすすめは？'];
+  const PRESETS = ['何か頼みごとはある？', 'この場所の歴史は？', '見どころを教えて', '近くのおすすめは？'];
 
   return (
-    <div className="fixed sm:absolute inset-0 z-[3000] bg-[#f5f7fa] flex flex-col">
+    <div className="fixed sm:absolute inset-0 z-[3000] bg-[#f5f7fa] flex flex-col animate-detail-enter">
       {/* ── ヒーロー写真（無ければ NO IMAGE） ── */}
       <div className="relative h-52 flex-shrink-0 bg-gray-200">
         {heroPhoto ? (
@@ -418,8 +452,10 @@ export default function SpotDetail({
                   </div>
                   <div className="flex flex-col max-w-[78%]">
                     <span className={`text-[11px] text-gray-400 mb-0.5 ${isAgent ? 'text-left' : 'text-right'}`}>{isAgent ? agent.name : currentUser.displayName}</span>
-                    <div className={`px-3 py-2 rounded-2xl text-[13px] leading-relaxed whitespace-pre-wrap ${isAgent ? 'bg-amber-50 border border-amber-200/50 text-gray-800 rounded-tl-none' : 'bg-sky-50 border border-sky-200/60 text-gray-800 rounded-tr-none'}`}>
-                      {formatText(msg.text)}
+                    <div className={`px-3.5 py-2.5 rounded-2xl text-[15px] leading-relaxed whitespace-pre-wrap ${isAgent ? 'bg-amber-50 border border-amber-200/50 text-gray-800 rounded-tl-none' : 'bg-sky-50 border border-sky-200/60 text-gray-800 rounded-tr-none'}`}>
+                      {isAgent
+                        ? <TypewriterText text={msg.text} renderDone={formatText} onTick={scrollToEnd} />
+                        : formatText(msg.text)}
                     </div>
                   </div>
                 </div>

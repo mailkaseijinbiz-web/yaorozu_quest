@@ -187,3 +187,13 @@
   50% { top: 100%; }
   100% { top: 0%; }
 }
+
+/* 詳細画面のなめらかな登場（下からスライド＋フェード） */
+@keyframes detail-enter {
+  from { opacity: 0; transform: translateY(100%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-detail-enter {
+  animation: detail-enter 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform, opacity;
+}

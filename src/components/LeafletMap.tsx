@@ -227,8 +227,9 @@ export default function LeafletMap({
       const isActive = activeSpot?.id === spot.id;
       const iconEmoji = spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏');
       const spotToku = db.getSpotToku(spot.id);
-      // 最も近い神（と選択中）だけフキダシを表示。他は小さなピン＋地名のみ。
-      const showBubble = spot.id === nearestId || isActive;
+      // フキダシは「選択中」のスポットだけに表示（同時に複数光らない）。
+      // 未選択時のみ、最も近い神にフキダシを出す。
+      const showBubble = activeSpot ? isActive : spot.id === nearestId;
 
       const spotHtml = showBubble
         ? `
