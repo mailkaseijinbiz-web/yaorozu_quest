@@ -63,6 +63,10 @@ export default function HomePage() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [mypageTab, setMypageTab] = useState<'posts' | 'badges' | 'quests'>('posts');
 
+  // 初回起動：名前入力オンボーディング
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const [onboardName, setOnboardName] = useState('');
+
   // Initial load
   useEffect(() => {
     setSpots(db.getSpots());
@@ -87,6 +91,8 @@ export default function HomePage() {
       if (claimed) setClaimedQuests(JSON.parse(claimed));
       setHasChatted(localStorage.getItem('yaorozu_quest_chatted') === 'true');
       setHasTakenPhoto(localStorage.getItem('yaorozu_quest_photo') === 'true');
+      // 初回起動（名前未設定）なら名前入力オンボーディングを表示
+      if (!localStorage.getItem('yaorozu_onboarded')) setNeedsOnboarding(true);
     }
   }, []);
 
@@ -157,6 +163,16 @@ export default function HomePage() {
     } catch {
       /* ユーザーがキャンセルした等は無視 */
     }
+  };
+
+  const completeOnboarding = () => {
+    const name = onboardName.trim();
+    if (!name) return;
+    const updated = db.updateUserProfile('user-self', name);
+    setCurrentUser(updated);
+    setEditName(name);
+    localStorage.setItem('yaorozu_onboarded', 'true');
+    setNeedsOnboarding(false);
   };
 
   const handleUpdateAgent = (updatedAgent: Agent) => {
@@ -513,6 +529,45 @@ export default function HomePage() {
             );
           })}
         </nav>
+
+        {/* ── 初回オンボーディング：名前入力 ── */}
+        {needsOnboarding && (
+          <div
+            className="fixed sm:absolute inset-0 z-[4000] flex flex-col items-center justify-center px-7 text-center bg-gradient-to-br from-[#0c0d15] via-[#1c0f13] to-[#07080f]"
+            style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 24px)', paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)' }}
+          >
+            <div className="text-6xl mb-4 drop-shadow-[0_0_24px_rgba(212,175,55,0.5)] animate-float">⛩️</div>
+            <h1 className="text-3xl font-black tracking-tight leading-none mb-1">
+              <span className="text-shrine-red">YAOROZU</span>
+              <span className="text-white"> QUEST</span>
+            </h1>
+            <p className="text-gold text-[13px] font-bold tracking-widest mb-7">八百万の神が息づく地へ</p>
+
+            <p className="text-white/90 text-sm leading-relaxed mb-1">ようこそ、巡礼者よ。</p>
+            <p className="text-white/60 text-[13px] leading-relaxed mb-5">あなたの名を聞かせてください。<br />神々がその名で呼びかけるでしょう。</p>
+
+            <input
+              type="text"
+              value={onboardName}
+              onChange={(e) => setOnboardName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') completeOnboarding(); }}
+              maxLength={12}
+              autoFocus
+              placeholder="例：ヤオロズ太郎"
+              className="w-full max-w-xs bg-white/10 border border-gold/40 rounded-xl px-4 py-3 text-center text-base text-white placeholder-white/30 focus:outline-none focus:border-gold transition-all backdrop-blur-sm"
+            />
+            <p className="text-white/30 text-[11px] mt-2">12文字まで・あとから変更できます</p>
+
+            <button
+              onClick={completeOnboarding}
+              disabled={!onboardName.trim()}
+              className="w-full max-w-xs mt-6 bg-gold hover:bg-gold-light text-amber-950 font-black py-3.5 rounded-xl flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-95 shadow-lg shadow-gold/25 disabled:opacity-40 disabled:hover:scale-100 cursor-pointer"
+            >
+              <Flag className="w-4 h-4" />
+              巡礼をはじめる
+            </button>
+          </div>
+        )}
 
         {/* ── 寺の詳細ページ（写真＋会話＋依頼）── */}
         {detailSpot && (
