@@ -1008,6 +1008,14 @@ class MockDatabase {
     this.save(KEYS.CHALLENGE_PHOTOS, all);
   }
 
+  /** 全クエスト（チャレンジ）の証拠写真URLを平坦化して返す（写真評価タスク用） */
+  getAllChallengePhotoUrls(): string[] {
+    const all = this.load<{ [cid: string]: { [sid: string]: string } }>(KEYS.CHALLENGE_PHOTOS, {});
+    const urls: string[] = [];
+    Object.values(all).forEach((steps) => Object.values(steps).forEach((u) => { if (u) urls.push(u); }));
+    return urls;
+  }
+
   // ────────────────────────────────────────────────
   // 蘊蓄データベース（管理コンソール）
   // ────────────────────────────────────────────────

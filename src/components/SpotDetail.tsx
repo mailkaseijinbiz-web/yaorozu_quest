@@ -3,7 +3,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag } from 'lucide-react';
 import { Spot, Agent, User, db, isVerifiedSpot } from '../lib/db';
-import { getGodTasks, GodTask, TASK_TONE } from '../data/god-tasks';
+import { getGodTasks, GodTask, TASK_TONE, TASK_CATALOG } from '../data/god-tasks';
+import { CHALLENGES } from '../data/challenges';
+import { distanceKm } from '../lib/geo';
 import { uploadImage } from '../lib/upload';
 
 interface Message {
@@ -46,7 +48,7 @@ function resolveAgent(spot: Spot): Agent {
     spotId: spot.id,
     name: godName,
     personaDescription: `${spot.name}に宿る八百万の神。`,
-    systemPrompt: `あなたは「${spot.name}」(${spot.category})に宿る神霊「${godName}」です。${spot.description} この土地の歴史・見どころ・周辺の楽しみ方について、親しみやすくも神々しい口調で案内してください。返答は150文字以内。`,
+    systemPrompt: `あなたは「${spot.name}」(${spot.category})に宿る神霊「${godName}」です。${spot.description} この土地の歴史・見どころ・周辺の楽しみ方について、親しみやすくも神々しい口調で案内してください。会話の中では、巡礼者がこの街をもっと楽しめるよう、近くの「クエスト（街歩きの小さな冒険）」への挑戦や、あなたへの「依頼（徳を積むタスク）」を、押しつけがましくならない範囲で前向きに勧めてください。たとえば話題が一段落したら「ついでに近くの冒険に挑んでみぬか？」のように促します。返答は150文字以内。`,
     avatar3dUrl: 'shrine',
     haloColor: '#c5a028',
     accessoryType: 'なし',
@@ -77,6 +79,9 @@ export default function SpotDetail({
   const [postText, setPostText] = useState('');
   const [uploading, setUploading] = useState(false); // 写真アップロード中
   const photoInputRef = useRef<HTMLInputElement>(null);
+  // クエスト写真の評価タスク
+  const [evaluating, setEvaluating] = useState(false);
+  const [evalIdx, setEvalIdx] = useState(0);
 
   // チャット
   const [messages, setMessages] = useState<Message[]>([]);
@@ -89,6 +94,28 @@ export default function SpotDetail({
 
   const godEmoji = spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏');
   const tasks = getGodTasks(spot);
+
+  // 評価タスクの対象写真：クエスト証拠写真＋各スポットの奉納写真。不足時は巡礼地の代表写真で補完。
+  const evalPhotos = useMemo(() => {
+    const urls: string[] = [];
+    db.getAllChallengePhotoUrls().forEach((u) => u && urls.push(u));
+    allSpots.forEach((s) => (s.photos || []).forEach((u) => u && urls.push(u)));
+    if (urls.length < 5) allSpots.forEach((s) => { if (s.imageUrl) urls.push(s.imageUrl); });
+    return Array.from(new Set(urls)).slice(0, 8);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allSpots, spot.id]);
+  const evalTarget = Math.min(3, evalPhotos.length);
+
+  // このスポットに最も近い未制覇クエスト（会話で能動的に挑戦を促す）
+  const nearbyChallenge = useMemo(() => {
+    const prog = db.getChallengeProgress();
+    const completed = new Set(prog.completed);
+    return [...CHALLENGES]
+      .filter((c) => !completed.has(c.id) && c.id !== prog.activeId)
+      .map((c) => ({ c, d: distanceKm(spot.latitude, spot.longitude, c.goalLat, c.goalLng) }))
+      .sort((a, b) => a.d - b.d)[0]?.c ?? null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spot.id]);
   const heroPhoto = photos[0] || spot.imageUrl || '';
 
   const flashToast = (text: string) => {
@@ -141,6 +168,11 @@ export default function SpotDetail({
     if (task.type === 'photo') {
       handlePostPhoto(); // アップロード成功時に done にする
       return;
+    } else if (task.type === 'evaluate') {
+      if (evalPhotos.length === 0) { flashToast('まだ評価できる写真がありません'); return; }
+      setEvalIdx(0);
+      setEvaluating(true); // 評価し終えたら done にする
+      return;
     } else if (POST_TYPES.has(task.type)) {
       // 実際に投稿（口コミ・できごと・実食・買物）→ 入力モーダルを開く
       setPostingTask(task);
@@ -173,6 +205,22 @@ export default function SpotDetail({
     setPostText('');
   };
 
+  // クエスト写真の評価：1枚ずつ👍/👎で評価し、規定枚数で達成
+  const rateEval = () => {
+    if (evalIdx + 1 >= evalTarget) {
+      const reward = TASK_CATALOG.evaluate.reward;
+      db.completeGodTask(currentUser.id, spot.id, reward);
+      db.recordTaskDone(currentUser.id, 'evaluate', spot.id, reward);
+      setDoneTasks((prev) => ({ ...prev, evaluate: true }));
+      flashToast(`⭐ 評価ありがとう！ +${reward}徳`);
+      onChanged?.();
+      setEvaluating(false);
+      setEvalIdx(0);
+    } else {
+      setEvalIdx((i) => i + 1);
+    }
+  };
+
   // 訪問を記録（探訪バッジ・ランキング用）。スポットが変わるたびに1回。
   // 画面遷移を妨げないよう、記録と親へのリフレッシュ通知は描画後に遅延実行する。
   useEffect(() => {
@@ -187,16 +235,14 @@ export default function SpotDetail({
   // チャット初期あいさつ
   useEffect(() => {
     if (tab === 'chat' && messages.length === 0) {
+      const greet = nearbyChallenge
+        ? `よう参られた、${currentUser.displayName} よ。わしは${spot.name}に宿る「${agent.name}」じゃ。ときに——この界隈で「${nearbyChallenge.title}」という小さな冒険が始まっておる。腕試しに挑んでみぬか？ 下のボタンから、すぐに旅立てるぞ。`
+        : `よう参られた、${currentUser.displayName} よ。わしは${spot.name}に宿る「${agent.name}」じゃ。わしへの依頼をこなして徳を積み、この地を共に盛り立ててはくれぬか。`;
       setMessages([
-        {
-          id: `greet-${Date.now()}`,
-          sender: 'agent',
-          text: `よう参られた、${currentUser.displayName} よ。わしは${spot.name}に宿る「${agent.name}」じゃ。この地のこと、何なりと尋ねるがよい。`,
-          createdAt: new Date().toISOString(),
-        },
+        { id: `greet-${Date.now()}`, sender: 'agent', text: greet, createdAt: new Date().toISOString() },
       ]);
     }
-  }, [tab, messages.length, agent.name, spot.name, currentUser.displayName]);
+  }, [tab, messages.length, agent.name, spot.name, currentUser.displayName, nearbyChallenge]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -293,9 +339,9 @@ export default function SpotDetail({
           { key: 'requests', label: '依頼', icon: Flag },
           { key: 'photos', label: '写真', icon: Camera },
         ] as const).map(({ key, label, icon: Icon }) => (
-          <button key={key} onClick={() => setTab(key)} className={`flex-1 py-3 flex flex-col items-center justify-center gap-0.5 text-[13px] font-black transition-all cursor-pointer border-b-2 ${tab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
-            <Icon className="w-3.5 h-3.5" />
-            <span className="truncate">{label}</span>
+          <button key={key} onClick={() => setTab(key)} className={`flex-1 py-3 flex flex-row items-center justify-center gap-1.5 text-[13px] font-black transition-all cursor-pointer border-b-2 ${tab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
+            <Icon className="w-4 h-4" />
+            <span>{label}</span>
           </button>
         ))}
       </div>
@@ -346,8 +392,8 @@ export default function SpotDetail({
         /* ── 神様からの依頼（タブ） ── */
         <div className="flex-1 overflow-y-auto p-4">
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-black/5">
-            <h3 className="text-xs font-black text-gray-700 mb-1 flex items-center gap-1.5">
-              <span className="text-base">{godEmoji}</span>
+            <h3 className="text-lg font-black text-gray-800 mb-1 flex items-center gap-2">
+              <span className="text-2xl">{godEmoji}</span>
               {agent.name} からの依頼
             </h3>
             <p className="text-[13px] text-gray-400 mb-3">達成すると徳を授かり、この地の神が育っていく。依頼は徳の高い順。</p>
@@ -360,9 +406,9 @@ export default function SpotDetail({
                     <div className="flex items-start gap-2.5">
                       <span className="text-xl flex-shrink-0">{task.icon}</span>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <h4 className={`text-xs font-black ${done ? 'text-gray-500' : 'text-gray-800'}`}>{task.title}</h4>
-                          <span className={`text-[11px] font-black ${tone.text}`}>+{task.reward}徳</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className={`text-base font-black ${done ? 'text-gray-500' : 'text-gray-800'}`}>{task.title}</h4>
+                          <span className={`text-xs font-black ${tone.text}`}>+{task.reward}徳</span>
                         </div>
                         <p className="text-[13px] text-gray-500 leading-relaxed mt-0.5">{task.call(spot.name)}</p>
                       </div>
@@ -417,11 +463,25 @@ export default function SpotDetail({
             )}
             <div ref={messagesEndRef} />
           </div>
-          {messages.length <= 1 && !isLoading && (
-            <div className="flex flex-wrap gap-1.5 px-3 pb-2 flex-shrink-0">
-              {PRESETS.map((p, i) => (
-                <button key={i} onClick={() => handleSend(p)} className="whitespace-nowrap bg-white border border-gray-200 px-3 py-1.5 rounded-full text-[13px] text-gray-600 hover:border-gold hover:text-amber-700 transition-all cursor-pointer">{p}</button>
-              ))}
+          {messages.length <= 3 && !isLoading && (
+            <div className="px-3 pb-2 flex-shrink-0 space-y-1.5">
+              {/* 能動的アクション：クエストに挑戦 / 依頼を見る */}
+              <div className="flex flex-wrap gap-1.5">
+                {nearbyChallenge && onStartChallenge && (
+                  <button onClick={() => onStartChallenge(nearbyChallenge.id)} className="whitespace-nowrap bg-shrine-red text-white px-3 py-1.5 rounded-full text-[13px] font-black flex items-center gap-1 cursor-pointer active:scale-95 transition-transform">
+                    <Flag className="w-3 h-3" />クエストに挑戦
+                  </button>
+                )}
+                <button onClick={() => setTab('requests')} className="whitespace-nowrap bg-indigo-600 text-white px-3 py-1.5 rounded-full text-[13px] font-black flex items-center gap-1 cursor-pointer active:scale-95 transition-transform">
+                  ⭐ 依頼を見る
+                </button>
+              </div>
+              {/* 質問プリセット */}
+              <div className="flex flex-wrap gap-1.5">
+                {PRESETS.map((p, i) => (
+                  <button key={i} onClick={() => handleSend(p)} className="whitespace-nowrap bg-white border border-gray-200 px-3 py-1.5 rounded-full text-[13px] text-gray-600 hover:border-gold hover:text-amber-700 transition-all cursor-pointer">{p}</button>
+                ))}
+              </div>
             </div>
           )}
           <form onSubmit={(e) => { e.preventDefault(); handleSend(inputText); }} className="flex gap-2 p-3 border-t border-black/5 bg-white flex-shrink-0">
@@ -461,6 +521,32 @@ export default function SpotDetail({
               <button onClick={submitPost} disabled={!postText.trim()} className="flex-1 bg-shrine-red text-white text-xs font-black py-2.5 rounded-xl disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5">
                 <Send className="w-3.5 h-3.5" />投稿する
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* クエスト写真の評価モーダル（巡礼者の一枚を👍/👎で評価） */}
+      {evaluating && evalTarget > 0 && (
+        <div className="absolute inset-0 z-[3200] bg-black/60 flex items-center justify-center p-5" onClick={() => setEvaluating(false)}>
+          <div className="w-full max-w-[340px] bg-white rounded-3xl p-4 animate-in" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5"><span className="text-lg">⭐</span>クエスト写真を評価</h3>
+              <span className="text-[11px] font-black text-gray-400 tabular-nums">{evalIdx + 1} / {evalTarget}</span>
+            </div>
+            <p className="text-[12px] text-gray-500 mb-2.5">巡礼者が奉納した一枚です。佳いと思うか、そなたの目で評しておくれ。</p>
+            <div className="rounded-2xl overflow-hidden border border-gray-200 bg-gray-100 aspect-square">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={evalPhotos[evalIdx % evalPhotos.length]} alt="評価する写真" className="w-full h-full object-cover" />
+            </div>
+            <div className="flex gap-2 mt-3">
+              <button onClick={rateEval} className="flex-1 py-3 rounded-full bg-gray-100 text-gray-600 font-black text-sm cursor-pointer active:scale-95 transition-transform">👎 イマイチ</button>
+              <button onClick={rateEval} className="flex-1 py-3 rounded-full bg-indigo-600 text-white font-black text-sm cursor-pointer active:scale-95 transition-transform">👍 佳い</button>
+            </div>
+            <div className="flex items-center justify-center gap-1 mt-3">
+              {Array.from({ length: evalTarget }).map((_, i) => (
+                <span key={i} className={`h-1.5 rounded-full transition-all ${i < evalIdx ? 'w-4 bg-indigo-500' : i === evalIdx ? 'w-4 bg-indigo-300' : 'w-1.5 bg-gray-200'}`} />
+              ))}
             </div>
           </div>
         </div>

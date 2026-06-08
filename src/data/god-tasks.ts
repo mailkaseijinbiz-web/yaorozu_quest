@@ -14,6 +14,7 @@ import { Spot } from '../lib/db';
 export type GodTaskType =
   | 'context'
   | 'photo'
+  | 'evaluate'
   | 'event'
   | 'review'
   | 'sns'
@@ -57,6 +58,15 @@ export const TASK_CATALOG: Record<GodTaskType, GodTask> = {
     reward: 30,
     call: (p) => `おお、旅の者よ。${p}の佳き景色を一枚、撮って奉納してはくれぬか。`,
     murmur: 'そなたよ、佳き一枚を撮っておくれ…',
+  },
+  evaluate: {
+    type: 'evaluate',
+    icon: '⭐',
+    label: '写真を評価',
+    title: 'クエスト写真を評価する',
+    reward: 35,
+    call: (p) => `${p}を巡った皆の一枚を、そなたの目で評しておくれ。佳き写真には光を当ててやってほしい。`,
+    murmur: 'そなたの目で、皆の佳き一枚を選んでおくれ…',
   },
   event: {
     type: 'event',
@@ -123,7 +133,7 @@ function categoryExtraTypes(category: string): GodTaskType[] {
 }
 
 /** 共通タスク種別（神は場所のコンテキスト情報の収集を依頼する） */
-export const COMMON_TASK_TYPES: GodTaskType[] = ['context', 'photo', 'event', 'review', 'sns'];
+export const COMMON_TASK_TYPES: GodTaskType[] = ['context', 'photo', 'evaluate', 'event', 'review', 'sns'];
 
 /**
  * スポットで有効なタスク種別を解決する。
@@ -170,6 +180,7 @@ export function getHeartVoices(spot: Pick<Spot, 'name' | 'category' | 'taskTypes
 export const TASK_TONE: Record<GodTaskType, { text: string; bg: string; border: string }> = {
   context: { text: 'text-cyan-600', bg: 'bg-cyan-50', border: 'border-cyan-200' },
   photo: { text: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-200' },
+  evaluate: { text: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-200' },
   event: { text: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200' },
   review: { text: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
   sns: { text: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-200' },

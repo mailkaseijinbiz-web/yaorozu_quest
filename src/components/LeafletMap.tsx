@@ -8,6 +8,11 @@ import { Spot, isVerifiedSpot } from '../lib/db';
 import { roughDistance } from '../lib/geo';
 import { getHeartVoices } from '../data/god-tasks';
 
+// フキダシのつぶやきは長すぎたら省略
+function truncVoice(s: string): string {
+  return s.length > 30 ? s.slice(0, 29) + '…' : s;
+}
+
 // 1画面の表示数をズームに応じて制御（広域では少なく、拡大で増やす）
 function maxMarkersForZoom(zoom: number): number {
   if (zoom <= 12) return 12;
@@ -47,6 +52,8 @@ export default function LeafletMap({
   const userMarkerRef = useRef<L.Marker | null>(null);
   const markersRef = useRef<{ [spotId: string]: L.Marker }>({});
   const goalMarkerRef = useRef<L.Marker | null>(null);
+  // フキダシのつぶやきを動的に切り替えるため、スポット毎の声リストを保持
+  const voicesRef = useRef<{ [spotId: string]: string[] }>({});
   // 最新の現在地を参照（再生成を避けつつ、ゴール演出で使う）
   const userLocationRef = useRef(userLocation);
   userLocationRef.current = userLocation;
@@ -256,13 +263,14 @@ export default function LeafletMap({
       const showBubble = !questMode && (spot.id === nearestId || isActive);
       // 未検証スポットは淡く表示して信頼性を区別
       const dim = isVerifiedSpot(spot) ? '' : 'opacity:0.5;';
-      // フキダシの中身は「ここの神のつぶやき（心の声）」。スポット毎に変化させる
+      // フキダシの中身は「ここの神のつぶやき（心の声）」。スポット毎に変化させ、一定間隔で動的に切り替える
       let voice = '';
+      let voiceIdx = 0;
       if (showBubble) {
         const voices = getHeartVoices(spot);
-        const idx = voices.length ? spot.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % voices.length : 0;
-        const voiceRaw = voices[idx] || `${spot.godName || spot.name}が見守っておる。`;
-        voice = voiceRaw.length > 30 ? voiceRaw.slice(0, 29) + '…' : voiceRaw;
+        voicesRef.current[spot.id] = voices.length ? voices : [`${spot.godName || spot.name}が見守っておる。`];
+        voiceIdx = voices.length ? spot.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % voices.length : 0;
+        voice = truncVoice(voicesRef.current[spot.id][voiceIdx]);
       }
       const borderCls = isActive ? 'border-[#2563eb]' : 'border-[#2563eb]/40';
 
@@ -272,7 +280,7 @@ export default function LeafletMap({
           <div class="god-ripple ${isActive ? 'god-ripple-active' : ''}"></div>
           <div class="relative flex items-start gap-1.5 bg-white ${isActive ? 'border-2' : 'border'} ${borderCls} rounded-2xl px-2.5 py-1.5 shadow-lg" style="max-width:190px;">
             <span style="font-size:15px;line-height:1.15;flex-shrink:0;">${iconEmoji}</span>
-            <span class="text-[11px] font-bold leading-snug text-gray-800" style="word-break:break-word;">${voice}</span>
+            <span class="spot-voice text-[11px] font-bold leading-snug text-gray-800" data-spotid="${spot.id}" data-vi="${voiceIdx}" style="word-break:break-word;transition:opacity 0.3s ease;">${voice}</span>
           </div>
           <div class="w-2.5 h-2.5 bg-white rotate-45 -mt-1.5 border-r-2 border-b-2 ${borderCls}"></div>
           <span class="map-spot-name ${isActive ? 'map-spot-name-active' : ''}">${spot.name}</span>
@@ -302,6 +310,27 @@ export default function LeafletMap({
       markersRef.current[spot.id] = marker;
     });
   }, [visibleSpots, activeSpot, onSelectSpot, ugcCounts, userLocation, goalLat, goalLng]);
+
+  // 3.5 フキダシのつぶやきを一定間隔で次の声へ動的に切り替える（フェード付き・staticにしない）
+  useEffect(() => {
+    const id = setInterval(() => {
+      const spans = document.querySelectorAll<HTMLElement>('.spot-voice[data-spotid]');
+      spans.forEach((el) => {
+        const sid = el.getAttribute('data-spotid') || '';
+        const voices = voicesRef.current[sid];
+        if (!voices || voices.length < 2) return;
+        const cur = parseInt(el.getAttribute('data-vi') || '0', 10) || 0;
+        const next = (cur + 1) % voices.length;
+        el.setAttribute('data-vi', String(next));
+        el.style.opacity = '0';
+        window.setTimeout(() => {
+          el.textContent = truncVoice(voices[next]);
+          el.style.opacity = '1';
+        }, 300);
+      });
+    }, 4500);
+    return () => clearInterval(id);
+  }, []);
 
   // 4. 選択スポットを地図の中央へ（ズームは維持）
   useEffect(() => {
