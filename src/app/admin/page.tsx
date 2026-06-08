@@ -18,7 +18,7 @@ const AUTH_KEY = 'yaorozu_admin_auth';
 type AdminTab = 'blueprint' | 'analytics' | 'spots' | 'gods' | 'users' | 'challenges' | 'activity';
 
 const TABS: { key: AdminTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { key: 'blueprint', label: 'God(System)', icon: Network },
+  { key: 'blueprint', label: 'God', icon: Network },
   { key: 'analytics', label: 'Analytics', icon: LineChart },
   { key: 'spots', label: '場', icon: MapPin },
   { key: 'gods', label: '八百万神', icon: Brain },

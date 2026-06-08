@@ -22,7 +22,7 @@ export function ChallengesManager() {
       {/* クエスト生成ルール（生成方針） */}
       <RulesPanel
         title="クエスト生成ルール（生成方針）"
-        description={<>ここに書いたルールは、<b>新しくクエストを生成する際の方針</b>として使われます。クエストはタスクから構成され、タスクは<b className="text-emerald-600">場の価値を増幅</b>し<b className="text-rose-600">場の課題を解決</b>します。タスクの3種と例も下記の md 本文に含まれます。生成AIでの一括更新は「God (System)」タブの Update から。</>}
+        description={<>ここに書いたルールは、<b>新しくクエストを生成する際の方針</b>として使われます。クエストはタスクから構成され、タスクは<b className="text-emerald-600">場の価値を増幅</b>し<b className="text-rose-600">場の課題を解決</b>します。タスクの3種と例も下記の md 本文に含まれます。生成AIでの一括更新は「God」タブの Update から。</>}
         value={rules}
         onChange={(v) => { setRules(v); setSaved(false); }}
         onSave={() => { db.saveQuestRules(rules); setSaved(true); }}

@@ -36,7 +36,7 @@ export function SpotsManager({ spots, onChange }: { spots: Spot[]; onChange: () 
       <div className="mb-3">
         <RulesPanel
           title="場の生成ルール（生成方針）"
-          description={<>場（Spot）がどう創造され、どんな価値[]・課題[]を持つかの方針。ここに書いたルールに基づき、場と その価値・課題が生成・更新されます。生成AIでの一括更新は「God (System)」タブの Update から。</>}
+          description={<>場（Spot）がどう創造され、どんな価値[]・課題[]を持つかの方針。ここに書いたルールに基づき、場と その価値・課題が生成・更新されます。生成AIでの一括更新は「God」タブの Update から。</>}
           value={spotRules}
           onChange={(v) => { setSpotRules(v); setSpotRulesSaved(false); }}
           onSave={() => { db.saveSpotRules(spotRules); setSpotRulesSaved(true); }}

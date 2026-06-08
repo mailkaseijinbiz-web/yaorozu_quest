@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Wand2, Loader2, Check, Save } from 'lucide-react';
 import { Spot, db } from '../../lib/db';
+import { buildDainichiIdentityMd } from '../../lib/dainichi';
 import { TASK_TONE, type Quest, type TaskKind } from '../../data/tasks';
 import { Card, Field, inputCls, DeleteBtn } from './ui';
 
@@ -41,6 +42,9 @@ export function QuestGenerator({ spots }: { spots: Spot[] }) {
         body: JSON.stringify({
           count,
           ts: Date.now(),
+          rules: db.getQuestRules(),
+          godRules: db.getDainichiIdentity() ?? buildDainichiIdentityMd(), // 大日如来＝全神の基底
+          spotRules: db.getSpotRules(), // 場の生成ルール（背景文脈）
           spot: {
             id: spot.id,
             name: spot.name,

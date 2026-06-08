@@ -105,7 +105,7 @@ export function YaorozuGods({ spots, onChange }: { spots: Spot[]; onChange: () =
       <div className="mb-3">
         <RulesPanel
           title="神の生成ルール（大日如来 / 全神の基底）"
-          description={<>大日如来は全ての八百万神の基底。ここに書いたルールに基づき、各神の人格・口調・知性が生成・継承されます。生成AIでの一括更新は「God (System)」タブの Update から。</>}
+          description={<>大日如来は全ての八百万神の基底。ここに書いたルールに基づき、各神の人格・口調・知性が生成・継承されます。生成AIでの一括更新は「God」タブの Update から。</>}
           value={godRules}
           onChange={(v) => { setGodRules(v); setGodRulesSaved(false); }}
           onSave={() => { db.saveDainichiIdentity(godRules); setGodRulesSaved(true); }}

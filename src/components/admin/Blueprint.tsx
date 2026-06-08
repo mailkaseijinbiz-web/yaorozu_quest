@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Loader2, Sparkles } from 'lucide-react';
 import { db, DEFAULT_SYSTEM_ROLE } from '../../lib/db';
 import { GOD_FUNCTIONS } from '../../data/tasks';
+import { buildDainichiIdentityMd } from '../../lib/dainichi';
 import { RulesPanel } from './RulesPanel';
 
 // システム全体のブループリント（図解）。
@@ -89,6 +90,8 @@ export function Blueprint() {
     setUpdating(true);
     setUpdateMsg(null);
     const rules = db.getQuestRules();
+    const godRules = db.getDainichiIdentity() ?? buildDainichiIdentityMd(); // 大日如来＝全神の基底
+    const spotRules = db.getSpotRules(); // 場の生成ルール（背景文脈）
     const targets = db.getSpots().slice(0, 5); // 標本（全件は多数のため一部を更新）
     let ok = 0;
     for (const s of targets) {
@@ -101,6 +104,8 @@ export function Blueprint() {
             count: 2,
             ts: Date.now(),
             rules,
+            godRules,
+            spotRules,
             spot: { id: s.id, name: s.name, category: s.category, description: s.description, enjoyments: s.enjoyments, issues: s.issues, soulMd: agent?.soulMd, latitude: s.latitude, longitude: s.longitude },
           }),
         });
@@ -127,21 +132,10 @@ export function Blueprint() {
 
   return (
     <div className="max-w-2xl mx-auto">
-      {/* 究極目的：世界の幸福 = 場の活気 + 人間の覚り（最上部） */}
-      <div className="mb-3 rounded-2xl border-2 border-amber-300 bg-gradient-to-br from-emerald-50 via-amber-50 to-violet-50 p-4 text-center">
-        <p className="text-[11px] font-black text-gray-500">究極目的 ・ 世界の幸福 ＝ 場の活気 + 人間の覚り</p>
-        <p className="text-3xl font-black text-gray-900 tabular-nums mt-1">{fmt(happiness)}</p>
-        <p className="text-[11px] text-gray-500 mt-1">
-          場の活気 <b className="text-blue-600">{fmt(activeness)}</b>（価値{fmt(totalValue)} − 課題{fmt(totalIssues)}）
-          <span className="mx-1 text-gray-400">+</span>
-          人間の覚り <b className="text-violet-600">{fmt(enlightenment)}</b>（徳{fmt(totalToku)} − 煩悩0）
-        </p>
-      </div>
-
       {/* ヘッダー */}
       <div className="mb-3">
         <div className="flex items-start justify-between gap-2">
-          <h2 className="text-lg font-black text-gray-900 flex items-center gap-2">🪷 God (System)</h2>
+          <h2 className="text-lg font-black text-gray-900 flex items-center gap-2">🪷 God</h2>
           <button
             onClick={runUpdate}
             disabled={updating}
@@ -169,8 +163,19 @@ export function Blueprint() {
         />
       </div>
 
-      {/* 図解本体 */}
-      <div className="rounded-2xl border border-gray-200 p-4" style={gridBg}>
+      {/* 図解本体 = 世界。この枠全体が「世界」であり、中に世界の幸福スコアを表示する */}
+      <div className="rounded-2xl border-2 border-gray-300 p-4" style={gridBg}>
+        {/* World 見出し（この枠全体が世界） */}
+        <h3 className="text-lg font-black text-gray-900 flex items-center gap-2 mb-3">🌏 World</h3>
+        {/* 世界の幸福スコア */}
+        <div className="mb-3 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-center">
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            <span className="text-[10px] font-black px-2 py-0.5 rounded-full text-white bg-gray-800">🌏 世界</span>
+            <span className="text-[11px] font-black text-gray-900">世界の幸福 ＝ 場の活気 + 人間の覚り</span>
+          </div>
+          <p className="text-2xl font-black text-gray-900 tabular-nums mt-0.5">{fmt(happiness)}</p>
+        </div>
+
         {/* ① 場（すべての中心） */}
         <Stage tag="場" sub="場のゴール = 場の価値を高める" color="#2563eb">
           <Node icon="📍" name="場 / スポット" type="Spot · 基本情報 / 座標" count={spots} />

@@ -119,10 +119,14 @@ function buildFallbackQuest(spot: SpotInput, count: number, ts: number): Quest[]
   return quests;
 }
 
-function buildPrompt(spot: SpotInput, count: number, rules: string): string {
+function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '', spotRules = ''): string {
   const soul = spot.soulMd ? `\n神の魂（口調・人格・世界観。これに沿った語り口で）:\n${spot.soulMd.slice(0, 1200)}` : '';
   const policy = rules.trim() ? `【生成ルール（最優先で厳守）】\n${rules.trim().slice(0, 2500)}\n\n` : '';
-  return `${policy}あなたは位置情報巡礼ゲーム「八百万クエスト」のクエストデザイナーです。
+  // 大日如来＝全神の基底（普遍原則）。最優先の生成ルールと衝突する場合は生成ルールを優先する。
+  const base = godRules.trim() ? `【神の普遍原則（大日如来・全神の基底）】\n${godRules.trim().slice(0, 600)}\n（普遍原則。上の生成ルールと衝突する場合は生成ルールを優先する）\n\n` : '';
+  // 場の生成ルールは「この場の価値・課題がどう整備されたか」の背景文脈として短く添える（生成指示ではない）。
+  const spotPolicy = spotRules.trim() ? `\nこの場の価値・課題は次の方針で整備されている（背景。価値・課題の読み解きの参考に）:\n${spotRules.trim().slice(0, 600)}` : '';
+  return `${policy}${base}あなたは位置情報巡礼ゲーム「八百万クエスト」のクエストデザイナーです。
 以下の「場」を題材に、街歩き型のクエストを${count}個、日本語で考えてください。
 
 クエストは「タスクの集まり」です。各タスクは神の3つの働きのいずれかに属します:
@@ -137,7 +141,7 @@ function buildPrompt(spot: SpotInput, count: number, rules: string): string {
 カテゴリ: ${spot.category}
 説明: ${spot.description ?? ''}
 価値（楽しみ方）: ${(spot.enjoyments ?? []).join(' / ') || '（未収集）'}
-課題: ${(spot.issues ?? []).map((s, i) => `[${i}] ${s}`).join(' / ') || '（なし）'}${soul}
+課題: ${(spot.issues ?? []).map((s, i) => `[${i}] ${s}`).join(' / ') || '（なし）'}${spotPolicy}${soul}
 
 必ず次のJSONだけを出力してください（前後に文章を付けない）:
 {"quests":[{"title":"クエスト名","description":"100字以内の導入","difficulty":1,"estMinutes":20,"badgeIcon":"絵文字","badgeName":"バッジ名","tasks":[{"type":"visit","title":"タスク名","action":"行動指示","reward":20,"issueIndex":0}]}]}`;
@@ -160,6 +164,8 @@ export async function POST(request: Request) {
     const count: number = Math.min(5, Math.max(1, Number(body.count) || 3));
     const ts: number = Number(body.ts) || 0;
     const rules: string = typeof body.rules === 'string' ? body.rules : '';
+    const godRules: string = typeof body.godRules === 'string' ? body.godRules : '';
+    const spotRules: string = typeof body.spotRules === 'string' ? body.spotRules : '';
 
     if (!spot?.name) {
       return NextResponse.json({ error: 'spot.name is required' }, { status: 400 });
@@ -167,7 +173,7 @@ export async function POST(request: Request) {
 
     const geminiKey = process.env.GEMINI_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
-    const prompt = buildPrompt(spot, count, rules);
+    const prompt = buildPrompt(spot, count, rules, godRules, spotRules);
 
     const finalize = (parsed: unknown) => {
       const arr = (parsed as { quests?: unknown[] })?.quests;
