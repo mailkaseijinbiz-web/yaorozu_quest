@@ -5,10 +5,14 @@ import { MapPin, Trophy, Flag, Clock, X, Check } from 'lucide-react';
 import { User, db } from '../lib/db';
 import { CHALLENGES, difficultyLabel, Challenge } from '../data/challenges';
 import { getLevelInfo } from '../data/levels';
+import LocationBanner, { LocationStatus } from './LocationBanner';
+import { haptic } from '../lib/haptics';
 
 interface HomeTabProps {
   currentUser: User;
   userLocation: { lat: number; lng: number };
+  locationStatus?: LocationStatus;
+  onRetryLocation?: () => void;
   onStartChallenge: (challengeId: string) => void;
   onEndChallenge?: () => void;
   onChanged?: () => void;
@@ -22,7 +26,7 @@ function distKm(aLat: number, aLng: number, bLat: number, bLng: number) {
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
-export default function HomeTab({ currentUser, userLocation, onStartChallenge, onEndChallenge }: HomeTabProps) {
+export default function HomeTab({ currentUser, userLocation, locationStatus = 'idle', onRetryLocation, onStartChallenge, onEndChallenge }: HomeTabProps) {
   // localStorage 依存のため、マウント後にのみ動的レンダリング（ハイドレーション不一致回避）
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -98,6 +102,11 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
           ))}
         </div>
 
+        {/* 現在地ステータス（距離表示の信頼性をユーザーに明示） */}
+        {mounted && onRetryLocation && (
+          <LocationBanner status={locationStatus} onRetry={onRetryLocation} />
+        )}
+
         {!mounted ? (
           <div className="text-center py-10 text-xs text-gray-400">読み込み中…</div>
         ) : nearChallenges.length === 0 ? (
@@ -121,7 +130,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
             return (
               <button
                 key={ch.id}
-                onClick={() => setConfirmCh(ch)}
+                onClick={() => { haptic('tap'); setConfirmCh(ch); }}
                 className={`w-full text-left rounded-2xl border p-3.5 transition-all cursor-pointer active:scale-[0.99] ${
                   active
                     ? 'bg-[#2563eb] border-[#2563eb] shadow-md'
@@ -201,7 +210,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
               <div className="mt-4">
                 {isActive ? (
                   <button
-                    onClick={() => { setConfirmCh(null); onEndChallenge?.(); }}
+                    onClick={() => { haptic('warning'); setConfirmCh(null); onEndChallenge?.(); }}
                     className="w-full bg-rose-600 text-white text-base font-black py-3 rounded-xl hover:opacity-90 cursor-pointer flex items-center justify-center gap-1.5"
                   >
                     <X className="w-4 h-4" />チャレンジを終了する
