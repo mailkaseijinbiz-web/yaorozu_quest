@@ -47,6 +47,7 @@ export default function CreatorTab({
   const [voiceTone, setVoiceTone] = useState<'厳格' | '親しみやすい' | '神秘的' | '高飛車' | '賢者'>('親しみやすい');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   // Sync state when active spot/agent changes
   useEffect(() => {
@@ -78,9 +79,10 @@ export default function CreatorTab({
     if (!isCreator) return;
     setIsSaving(true);
     setSaveSuccess(false);
+    setSaveError(false);
 
-    // Simulate database write
-    setTimeout(() => {
+    try {
+      // 実書き込み：localStorage を更新し、クラウド・スナップショット同期もトリガーされる。
       const updatedAgent = db.updateAgent(activeSpot.id, {
         name,
         personaDescription,
@@ -89,14 +91,16 @@ export default function CreatorTab({
         accessoryType,
         voiceTone,
       });
-
       onUpdateAgent(updatedAgent);
-      setIsSaving(false);
       setSaveSuccess(true);
-      
-      // Clear success alert after 3 seconds
       setTimeout(() => setSaveSuccess(false), 3000);
-    }, 800);
+    } catch (err) {
+      console.error('Agent save failed:', err);
+      setSaveError(true);
+      setTimeout(() => setSaveError(false), 4000);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Locked View
@@ -318,6 +322,12 @@ export default function CreatorTab({
           <span className="text-cyber-green text-xs font-bold flex items-center gap-1 animate-pulse">
             <Check className="w-4 h-4" />
             設定が八百万データベースに反映されました！
+          </span>
+        )}
+        {saveError && (
+          <span className="text-shrine-red text-xs font-bold flex items-center gap-1">
+            <AlertTriangle className="w-4 h-4" />
+            保存に失敗しました。時間をおいて再度お試しください。
           </span>
         )}
         <button
