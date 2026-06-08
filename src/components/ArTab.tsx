@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Camera, RefreshCw, Download, Share2, Sparkles, AlertTriangle, Check, Info } from 'lucide-react';
 import { Spot, Agent, User } from '../lib/db';
+import SpiritCanvas from './Spirit3D';
 
 interface ArTabProps {
   activeSpot: Spot | null;
@@ -33,6 +34,7 @@ export default function ArTab({
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const spiritWrapRef = useRef<HTMLDivElement>(null); // 3D精霊のラッパ（写真合成用）
 
   // Initialize/Shutdown camera stream based on useCamera toggles
   useEffect(() => {
@@ -145,28 +147,27 @@ export default function ArTab({
     // Reset shadow
     ctx.shadowBlur = 0;
 
-    // 3. Draw God Emoji Avatar (as a stand-in for 3D model)
-    const getAvatarEmoji = (type: string) => {
-      switch (type) {
-        case 'dragon': return '🐉';
-        case 'fox': return '🦊';
-        case 'buddha': return '🙏';
-        case 'spirit': return '🌿';
-        case 'goddess': return '🌊';
-        default: return '⛩️';
-      }
-    };
-    
-    ctx.font = '110px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(getAvatarEmoji(agent.avatar3dUrl), centerX, centerY);
-
-    // 4. Draw Accessory if present
-    if (agent.accessoryType !== 'なし') {
-      const accEmoji = agent.accessoryType === '鏡' ? '🪞' : agent.accessoryType === '剣' ? '⚔️' : agent.accessoryType === '扇子' ? '🪭' : '';
-      ctx.font = '40px Arial';
-      ctx.fillText(accEmoji, centerX + 60, centerY + 50);
+    // 3. Draw the live 3D spirit by compositing its WebGL canvas
+    const spiritCanvas = spiritWrapRef.current?.querySelector('canvas') as HTMLCanvasElement | null;
+    if (spiritCanvas && spiritCanvas.width > 0) {
+      const size = 300;
+      ctx.drawImage(spiritCanvas, centerX - size / 2, centerY - size / 2 - 10, size, size);
+    } else {
+      // フォールバック：3Dが読めない場合は絵文字
+      const getAvatarEmoji = (type: string) => {
+        switch (type) {
+          case 'dragon': return '🐉';
+          case 'fox': return '🦊';
+          case 'buddha': return '🙏';
+          case 'spirit': return '🌿';
+          case 'goddess': return '🌊';
+          default: return '⛩️';
+        }
+      };
+      ctx.font = '110px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(getAvatarEmoji(agent.avatar3dUrl), centerX, centerY);
     }
 
     // 5. Draw Decorative HUD Overlay
@@ -404,14 +405,13 @@ export default function ArTab({
                 style={{ borderColor: agent.haloColor }}
               />
 
-              {/* God Character emoji representation */}
+              {/* God Character — 3D 精霊（カメラに重ねて出現） */}
               <div
-                className="text-7xl drop-shadow-[0_0_15px_rgba(255,255,255,0.8)] select-none relative z-10 flex items-center justify-center"
-                style={{
-                  filter: `drop-shadow(0 0 20px ${agent.haloColor}80)`,
-                }}
+                ref={spiritWrapRef}
+                className="relative z-10 w-56 h-56 pointer-events-none"
+                style={{ filter: `drop-shadow(0 0 24px ${agent.haloColor}66)` }}
               >
-                {getAvatarEmoji(agent.avatar3dUrl)}
+                <SpiritCanvas seed={agent.name} motion="greet" style={{ width: '100%', height: '100%' }} />
               </div>
 
               {/* Floating Accessories */}

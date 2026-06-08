@@ -16,7 +16,7 @@ const USER_QUESTS_KEY = 'yaorozu_user_quests';
 
 type AdminTab = 'spots' | 'ugc' | 'users' | 'agents' | 'quests' | 'challenges' | 'trivia';
 
-const TABS: { key: AdminTab; label: string; icon: React.ElementType }[] = [
+const TABS: { key: AdminTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'spots', label: 'スポット', icon: MapPin },
   { key: 'challenges', label: 'チャレンジ', icon: Flag },
   { key: 'trivia', label: '蘊蓄DB', icon: BookOpen },
