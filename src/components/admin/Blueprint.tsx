@@ -236,15 +236,15 @@ export function Blueprint() {
             </div>
             {/* クエスト達成で生まれるアクティビティ（クエストに内包） */}
             <p className="text-[10px] font-black text-amber-600 mt-2 mb-1.5 pl-0.5">┗ 達成で生まれる アクティビティ[]</p>
-            <div className="rounded-lg border border-cyan-200 bg-transparent px-2.5 py-2 flex items-center justify-between gap-2">
+            <div className="rounded-lg border border-amber-300 bg-transparent px-2.5 py-2 flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-[12px] font-black text-cyan-700">アクティビティ[]</p>
-                <p className="text-[9px] font-mono text-cyan-600">activities</p>
-                <p className="text-[10px] text-cyan-600 mt-0.5 leading-tight">訪問・達成・写真・口コミ</p>
+                <p className="text-[12px] font-black text-amber-800">アクティビティ[]</p>
+                <p className="text-[9px] font-mono text-amber-600">activities</p>
+                <p className="text-[10px] text-amber-700 mt-0.5 leading-tight">訪問・達成・写真・口コミ</p>
               </div>
               <div className="text-right shrink-0">
-                <p className="text-lg font-black text-cyan-700 tabular-nums leading-none">{fmt(activities)}</p>
-                <p className="text-[9px] text-cyan-500">総和</p>
+                <p className="text-lg font-black text-amber-800 tabular-nums leading-none">{fmt(activities)}</p>
+                <p className="text-[9px] text-amber-500">総和</p>
               </div>
             </div>
           </div>
