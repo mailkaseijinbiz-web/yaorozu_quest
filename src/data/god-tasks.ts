@@ -38,6 +38,74 @@ export interface GodTask {
   murmur: string;
 }
 
+// ── 神の依頼セリフ生成（1000通り以上のバリエーション）─────────────────────────
+// 「口上(opener) × 依頼の核(core) × 結び(closer)」を組み合わせて生成する。
+// スポット名＋種別でシードを固定するため、同じ場所の依頼文は安定し、場所ごとに異なる。
+//   opener(12) × core(各種3) × closer(12) = 種別ごとに432通り、8種で 3456通り。
+const VOW_OPENERS = [
+  'のう、', '旅の者よ、', 'おお、よう参った。', 'そなたに頼みがある。', 'ひとつ、頼まれてくれぬか。',
+  'ちと、力を貸しておくれ。', 'よう聞け、巡礼者よ。', 'はるばる、ご苦労じゃ。', 'さても、', 'これも何かの縁。',
+  'よき折に来たのう。', 'たまさかに来たそなたへ、',
+];
+
+const VOW_CLOSERS = [
+  '…頼めるかの？', '…そうしてくれると嬉しいのう。', '…それが何よりの供物となろう。', '…きっと、よき徳となるぞ。',
+  '…後から来る巡礼者のためにもな。', '…わしは待っておるぞ。', '…縁が縁を呼ぶでな。', '…のう、頼んだぞ。',
+  '…悪いようにはせぬ。', '…そなたなら、できよう。', '…ささやかでよいのじゃ。', '…この地のためにな。',
+];
+
+const ASK_CORES: Record<GodTaskType, Array<(p: string) => string>> = {
+  context: [
+    (p) => `今の${p}の様子を、わしに教えておくれ`,
+    (p) => `${p}の混み具合や雰囲気を、見てきて聞かせておくれ`,
+    (p) => `${p}が今どんな表情をしておるか、確かめておくれ`,
+  ],
+  photo: [
+    (p) => `${p}の佳き一枚を撮って奉納しておくれ`,
+    (p) => `${p}の美しき景色を、写真におさめておくれ`,
+    (p) => `そなたの目に映る${p}を、一枚切り取っておくれ`,
+  ],
+  event: [
+    (p) => `今この${p}で何が起きておるか、教えておくれ`,
+    (p) => `${p}での出来事を、わしに伝えておくれ`,
+    (p) => `${p}の今この瞬間を、言葉にして残しておくれ`,
+  ],
+  review: [
+    (p) => `${p}の良さを、後の巡礼者へ言伝てしておくれ`,
+    (p) => `${p}で感じたことを、口コミとして残しておくれ`,
+    (p) => `そなたの言葉で、${p}の魅力を伝えておくれ`,
+  ],
+  sns: [
+    (p) => `${p}の名を、外の世界へ広めておくれ`,
+    (p) => `${p}のことを、そなたの仲間にも知らせておくれ`,
+    (p) => `${p}の評判を、遠くまで届けておくれ`,
+  ],
+  buy: [
+    (p) => `${p}で求めた佳き品を、わしにも見せておくれ`,
+    (p) => `${p}で手に入れたものを、教えておくれ`,
+    (p) => `${p}での買い物の戦利品を、自慢しておくれ`,
+  ],
+  eat: [
+    (p) => `${p}で味わったものの感想を、聞かせておくれ`,
+    (p) => `${p}の美味を、その喜びの声とともに伝えておくれ`,
+    (p) => `${p}で食したものの味を、言葉にしておくれ`,
+  ],
+  cleaning: [
+    (p) => `${p}の掃除が行き届いておるか、確かめておくれ`,
+    (p) => `${p}に乱れがないか、見回っておくれ`,
+    (p) => `${p}の清らかさを、その目で確かめておくれ`,
+  ],
+};
+
+/** 種別×場所から、安定したシードで依頼セリフを1つ生成する。 */
+function buildCall(type: GodTaskType, place: string): string {
+  const seed = hashStr(`${place}|${type}`);
+  const opener = pick(VOW_OPENERS, seed);
+  const core = pick(ASK_CORES[type], seed >>> 5);
+  const closer = pick(VOW_CLOSERS, seed >>> 9);
+  return `${opener}${core(place)}${closer}`;
+}
+
 /** 全タスクのカタログ（管理画面の選択肢にも使う） */
 export const TASK_CATALOG: Record<GodTaskType, GodTask> = {
   context: {
@@ -46,7 +114,7 @@ export const TASK_CATALOG: Record<GodTaskType, GodTask> = {
     label: '今の様子を伝える',
     title: '場所のコンテキストを集める',
     reward: 25,
-    call: (p) => `今の${p}の様子はどうじゃ？　混み具合・雰囲気・営業の様子を、わしに教えておくれ。`,
+    call: (p) => buildCall('context', p),
     murmur: 'のう、今この場の様子を教えておくれ…',
   },
   photo: {
@@ -55,7 +123,7 @@ export const TASK_CATALOG: Record<GodTaskType, GodTask> = {
     label: '写真を投稿',
     title: '佳き一枚を奉納',
     reward: 30,
-    call: (p) => `おお、旅の者よ。${p}の佳き景色を一枚、撮って奉納してはくれぬか。`,
+    call: (p) => buildCall('photo', p),
     murmur: 'そなたよ、佳き一枚を撮っておくれ…',
   },
   event: {
@@ -64,7 +132,7 @@ export const TASK_CATALOG: Record<GodTaskType, GodTask> = {
     label: 'できごとを共有',
     title: '今のできごとを共有',
     reward: 20,
-    call: (p) => `今この${p}で何が起きておる？　そなたの目に映るものを、わしに教えておくれ。`,
+    call: (p) => buildCall('event', p),
     murmur: 'のう、今のできごとを教えておくれ…',
   },
   review: {
@@ -73,7 +141,7 @@ export const TASK_CATALOG: Record<GodTaskType, GodTask> = {
     label: '口コミを共有',
     title: '口コミを言伝て',
     reward: 50,
-    call: (p) => `${p}の良さを、後から来る巡礼者へ言伝てしておくれ。それが何よりの供物じゃ。`,
+    call: (p) => buildCall('review', p),
     murmur: 'そなたの言葉で、この地を伝えておくれ…',
   },
   sns: {
@@ -82,7 +150,7 @@ export const TASK_CATALOG: Record<GodTaskType, GodTask> = {
     label: 'SNSにシェア',
     title: 'SNSで広める',
     reward: 15,
-    call: (p) => `この${p}の名を、外の世界にも広めてはくれぬか。縁が縁を呼ぶでな。`,
+    call: (p) => buildCall('sns', p),
     murmur: 'のう旅人よ、わが名を広めてはくれぬか…',
   },
   buy: {
@@ -91,7 +159,7 @@ export const TASK_CATALOG: Record<GodTaskType, GodTask> = {
     label: '買物を報告',
     title: 'モノを買ったと伝える',
     reward: 40,
-    call: (p) => `${p}で何か佳き品を求めたか？　手にした品を、わしにも見せておくれ。`,
+    call: (p) => buildCall('buy', p),
     murmur: 'そなた、佳き品を見せておくれ…',
   },
   eat: {
@@ -100,7 +168,7 @@ export const TASK_CATALOG: Record<GodTaskType, GodTask> = {
     label: '実食の声',
     title: '食べた感想を伝える',
     reward: 40,
-    call: (p) => `${p}の味はどうじゃった？　美味かったなら、その喜びの声を上げておくれ。`,
+    call: (p) => buildCall('eat', p),
     murmur: 'のう、味の感想を聞かせておくれ…',
   },
   cleaning: {
@@ -109,7 +177,7 @@ export const TASK_CATALOG: Record<GodTaskType, GodTask> = {
     label: '清掃を確認',
     title: '掃除の行き届きを確認',
     reward: 25,
-    call: (p) => `${p}の境内、掃除は行き届いておるか？　乱れがあれば、わしに知らせておくれ。`,
+    call: (p) => buildCall('cleaning', p),
     murmur: 'そなた、掃除の様子を確かめておくれ…',
   },
 };
