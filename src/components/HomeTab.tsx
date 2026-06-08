@@ -5,6 +5,7 @@ import { MapPin, Trophy, Flag, Clock, X, Check } from 'lucide-react';
 import { User, db } from '../lib/db';
 import { CHALLENGES, difficultyLabel, Challenge } from '../data/challenges';
 import { getLevelInfo } from '../data/levels';
+import { formatDistanceParts } from '../lib/format';
 
 interface HomeTabProps {
   currentUser: User;
@@ -111,8 +112,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
             const completed = progress.completed.includes(ch.id);
             const active = progress.activeId === ch.id; // 現在挑戦中
             const distToGoal = distKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng);
-            const distValue = distToGoal < 1 ? `${Math.round(distToGoal * 1000)}` : `${distToGoal.toFixed(1)}`;
-            const distUnit = distToGoal < 1 ? 'm' : 'km';
+            const { value: distValue, unit: distUnit } = formatDistanceParts(distToGoal);
             const levelOk = userLevel >= ch.minLevel; // 必須レベルを満たすか
 
             const total = ch.steps.length;

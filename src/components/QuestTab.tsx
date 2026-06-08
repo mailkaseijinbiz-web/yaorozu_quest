@@ -16,6 +16,7 @@ import {
   isSeriesCompleted,
   QUIZ_UNLOCK_RADIUS_KM,
 } from '../data/shinnakano-quiz';
+import { formatDistance } from '../lib/format';
 
 // ユーザー投稿クエスト型
 export interface UserQuest {
@@ -637,7 +638,7 @@ export default function QuestTab({
 
             const dist = quizDistance(quiz, userLocation);
             const unlocked = isQuizUnlocked(quiz, userLocation);
-            const distText = dist < 1 ? `${Math.round(dist * 1000)}m` : `${dist.toFixed(1)}km`;
+            const distText = formatDistance(dist);
 
             const badgeColor =
               badge.tone === 'secret' ? 'bg-purple-100 border-purple-300 text-purple-700'

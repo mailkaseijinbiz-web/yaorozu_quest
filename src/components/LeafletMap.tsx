@@ -229,7 +229,9 @@ export default function LeafletMap({
       const spotToku = db.getSpotToku(spot.id);
       // フキダシは「選択中」のスポットだけに表示（同時に複数光らない）。
       // 未選択時のみ、最も近い神にフキダシを出す。
-      const showBubble = activeSpot ? isActive : spot.id === nearestId;
+      // クエスト中（ゴール表示中）はスポットのフキダシを一切出さない（目的地マーカーのみ）。
+      const questActive = goalLat != null && goalLng != null;
+      const showBubble = questActive ? false : activeSpot ? isActive : spot.id === nearestId;
 
       const spotHtml = showBubble
         ? `
@@ -271,7 +273,7 @@ export default function LeafletMap({
 
       markersRef.current[spot.id] = marker;
     });
-  }, [visibleSpots, activeSpot, onSelectSpot, ugcCounts, userLocation]);
+  }, [visibleSpots, activeSpot, onSelectSpot, ugcCounts, userLocation, goalLat, goalLng]);
 
   // 4. 選択スポットを地図の中央へ（ズームは維持）
   useEffect(() => {

@@ -5,6 +5,7 @@ import { Compass, ChevronRight, Flag, X, Camera, Check } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { Spot, User, db } from '../lib/db';
 import { getHeartVoices } from '../data/god-tasks';
+import { formatDistance } from '../lib/format';
 import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON } from '../data/challenges';
 
 const LeafletMap = dynamic(() => import('./LeafletMap'), {
@@ -218,7 +219,7 @@ export default function MapTab({
                 </div>
                 {nextStep.lat != null && (
                   <span className="text-[13px] font-mono text-gray-500 flex-shrink-0">
-                    {getDistance(userLocation.lat, userLocation.lng, nextStep.lat, nextStep.lng!).toFixed(1)}km
+                    {formatDistance(getDistance(userLocation.lat, userLocation.lng, nextStep.lat, nextStep.lng!))}
                   </span>
                 )}
               </div>
@@ -273,7 +274,7 @@ export default function MapTab({
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-2">
                 <h4 className="font-black text-sm text-[#1e2024] truncate">{activeSpot.name}</h4>
-                <span className="text-[13px] font-mono text-gray-500 whitespace-nowrap">{activeDist.toFixed(1)} km</span>
+                <span className="text-[13px] font-mono text-gray-500 whitespace-nowrap">{formatDistance(activeDist)}</span>
               </div>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="text-[13px] font-black text-[#2563eb] bg-[#2563eb]/10 px-1.5 py-0.5 rounded-full">徳 {activeToku.toLocaleString()}</span>
