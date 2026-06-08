@@ -7,12 +7,14 @@ import type { CapacitorConfig } from '@capacitor/cli';
  * 依存しており静的エクスポートできないため、ネイティブ殻は「ホスト済みの Web アプリ」を
  * WKWebView で読み込む方式を採る（推奨）。
  *
- *   CAP_SERVER_URL=https://<your-deployed-site> npx cap sync ios
+ * 既定では本番URL（Vercel）を読み込む。別URL（ステージング/ローカル等）を使う場合のみ
+ * CAP_SERVER_URL で上書きする:
  *
- * CAP_SERVER_URL を未指定の場合は webDir(cap-www) のローカル読み込み画面が使われる。
+ *   CAP_SERVER_URL=https://staging.example.com npx cap sync ios
+ *
  * 詳細は docs/IOS.md を参照。
  */
-const serverUrl = process.env.CAP_SERVER_URL;
+const serverUrl = process.env.CAP_SERVER_URL ?? 'https://yaorozu-quest.vercel.app';
 
 const config: CapacitorConfig = {
   appId: 'biz.mailkaseijin.yaorozuquest',
@@ -21,14 +23,10 @@ const config: CapacitorConfig = {
   ios: {
     contentInset: 'always',
   },
-  ...(serverUrl
-    ? {
-        server: {
-          url: serverUrl,
-          cleartext: serverUrl.startsWith('http://'),
-        },
-      }
-    : {}),
+  server: {
+    url: serverUrl,
+    cleartext: serverUrl.startsWith('http://'),
+  },
 };
 
 export default config;

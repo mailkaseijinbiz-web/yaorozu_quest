@@ -48,9 +48,11 @@ Import 後にこのブランチがそのままプレビューとしてデプロ�
 
 ## 補足: Capacitor（App Store）と連動
 
-`docs/IOS.md` の Capacitor 手順で、ここでデプロイした本番URLを `CAP_SERVER_URL` に指定すると、
-ネイティブアプリ（WKWebView）がこの公開サイトを読み込みます。
+`capacitor.config.ts` は既定で本番URL **https://yaorozu-quest.vercel.app** を読み込むよう設定済みです。
+そのまま同期すれば、ネイティブアプリ（WKWebView）がこの公開サイトを読み込みます。
 
 ```bash
-CAP_SERVER_URL="https://<Vercelの本番URL>" npm run ios:sync
+npm run ios:sync   # 既定で https://yaorozu-quest.vercel.app
 ```
+
+別URL（ステージング等）にする場合のみ `CAP_SERVER_URL` で上書きします。

@@ -50,6 +50,9 @@ const svg=fs.readFileSync("public/icons/icon.svg");
 静的エクスポートできません。そのため Capacitor の殻は **ホスト済みの Web アプリを WKWebView で読み込む**
 方式を採ります（`capacitor.config.ts` の `server.url`）。
 
+既定の読み込み先は本番URL **https://yaorozu-quest.vercel.app** です（`capacitor.config.ts` に設定済み）。
+別URL（ステージング等）にする場合のみ `CAP_SERVER_URL` で上書きします。
+
 セットアップ済みのもの:
 
 - `@capacitor/core` / `@capacitor/ios` / `@capacitor/cli`（package.json）
@@ -73,8 +76,10 @@ npm install
 # 2) iOS ネイティブプロジェクトを生成（初回のみ）。ios/ が作られる
 npm run ios:add
 
-# 3) 公開中のサイトURLを指定して同期（WKWebView がこのURLを読み込む）
-CAP_SERVER_URL="https://<あなたの公開URL>" npm run ios:sync
+# 3) 同期（既定で https://yaorozu-quest.vercel.app を読み込む）
+npm run ios:sync
+#   別URLにする場合のみ:
+#   CAP_SERVER_URL="https://staging.example.com" npm run ios:sync
 
 # 4) Xcode で開く → 署名(Team)設定 → 実機/シミュレータで Run、Archive で .ipa
 npm run ios:open
