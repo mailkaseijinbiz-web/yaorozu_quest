@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Compass, ChevronRight, Flag, X, Camera, Check, MapPin, Clock, Navigation2 } from 'lucide-react';
+import { Compass, ChevronRight, Flag, X, Camera, Check, MapPin, Clock, Navigation2, MessageCircle, Send, Volume2, VolumeX } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { Spot, User, db } from '../lib/db';
 import { uploadImage } from '../lib/upload';
@@ -19,6 +19,84 @@ const LeafletMap = dynamic(() => import('./LeafletMap'), {
     </div>
   ),
 });
+
+// 道案内の精霊のセリフ。
+// near=false（遠い）：土地の紹介 → 歩いて向かおう、という案内。
+// near=true（500m以内）：到着間近 → さあ撮影しよう、という流れに切り替える。
+function composeGuideText(step: ChallengeStep, near = false): string {
+  if (near) {
+    return '目的地はもう目の前。あたりをゆっくり見回して、心に残る一枚を写真におさめてみよう。';
+  }
+  const intro = step.trivia ? step.trivia : '';
+  const alreadyPhoto = /写真|一枚|撮|収め|おさめ/.test(step.action);
+  const photoLine = alreadyPhoto ? '' : 'そして、心に残った風景を一枚、写真におさめてみよう。';
+  return `${intro}${step.action}${photoLine}`;
+}
+
+// Web Speech API による読み上げ（端末内蔵の最良の日本語ボイスを選択）。
+function pickJaVoice(): SpeechSynthesisVoice | null {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return null;
+  const voices = window.speechSynthesis.getVoices().filter((v) => /^ja/i.test(v.lang));
+  if (!voices.length) return null;
+  return (
+    voices.find((v) => /(enhanced|premium|neural|siri)/i.test(v.name)) ||
+    voices.find((v) => /google/i.test(v.name)) ||
+    voices.find((v) => /(kyoko|o-?ren|otoya|hattori|ichiro|nanami)/i.test(v.name)) ||
+    voices[0]
+  );
+}
+// ElevenLabs（サーバ /api/tts）で生成した自然な音声をメッセージ単位でキャッシュ。
+const ttsCache = new Map<string, string>(); // text -> object URL
+async function fetchTtsUrl(text: string): Promise<string | null> {
+  if (!text) return null;
+  const cached = ttsCache.get(text);
+  if (cached) return cached;
+  try {
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('audio')) {
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      ttsCache.set(text, url);
+      return url;
+    }
+  } catch {
+    /* ネットワーク失敗時は Web Speech にフォールバック */
+  }
+  return null; // キー未設定/失敗 → クライアントは Web Speech を使う
+}
+
+function speakJa(text: string) {
+  try {
+    const synth = window.speechSynthesis;
+    if (!synth || !text) return;
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'ja-JP';
+    const v = pickJaVoice();
+    if (v) u.voice = v;
+    u.rate = 0.95; // 少しゆっくり＝落ち着いた精霊の語り
+    u.pitch = 1.05;
+    synth.speak(u);
+  } catch {
+    /* TTS非対応環境は無視 */
+  }
+}
+
+type GuideMsg = { role: 'spirit' | 'user'; text: string };
+
+// 現在のクエスト進捗から、精霊が語ってきた会話ログを再構成する（序章→現在の目的地まで）。
+function buildGuideLog(ch: Challenge, doneIds: Set<string>): GuideMsg[] {
+  const msgs: GuideMsg[] = [{ role: 'spirit', text: ch.description }];
+  let cur = ch.steps.findIndex((s) => !doneIds.has(s.id));
+  if (cur === -1) cur = ch.steps.length - 1;
+  for (let i = 0; i <= cur; i++) msgs.push({ role: 'spirit', text: composeGuideText(ch.steps[i]) });
+  return msgs;
+}
 
 interface MapTabProps {
   spots: Spot[];
@@ -82,6 +160,52 @@ export default function MapTab({
   const [introTyped, setIntroTyped] = useState('');
   // 複数ステップのクエスト：上部に進捗ガイドのフキダシを常時表示し、次のすべきことを案内する
   const [briefTyped, setBriefTyped] = useState('');
+  // 目的地が遠い（500m以上）のに達成を押したときの注意表示
+  const [farNotice, setFarNotice] = useState(false);
+  // 上部ガイド（語り部）の読み上げが終わったか。終わってから下部オーバーレイを出す
+  const [guideDone, setGuideDone] = useState(false);
+  // 道案内の精霊との会話（狐アイコンのタップでログ閲覧＋参加）
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatExtra, setChatExtra] = useState<GuideMsg[]>([]); // 参加（ユーザー⇄精霊）の追加分
+  const [chatInput, setChatInput] = useState('');
+  const [chatSending, setChatSending] = useState(false);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  // 上部ガイドのフキダシ本文（3行＋スクロール）の自動スクロール用
+  const guideScrollRef = useRef<HTMLDivElement | null>(null);
+  // 読み上げ（TTS）：ElevenLabs（自然な音声）を優先し、失敗/キー無しは Web Speech にフォールバック
+  const [ttsOn, setTtsOn] = useState(false);
+  const ttsOnRef = useRef(false);
+  const briefFullRef = useRef(''); // 現在のガイド全文（トグルON時に読み上げる）
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const stopSpeak = () => {
+    try { audioRef.current?.pause(); audioRef.current = null; } catch {}
+    try { window.speechSynthesis?.cancel(); } catch {}
+  };
+  const speak = async (text: string) => {
+    stopSpeak();
+    if (!text) return;
+    const url = await fetchTtsUrl(text); // ElevenLabs（キーが無ければ null）
+    if (!ttsOnRef.current) return; // 取得中にOFFになったら鳴らさない
+    if (url) {
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.play().catch(() => speakJa(text)); // 自動再生ブロック時は Web Speech
+    } else {
+      speakJa(text); // フォールバック（端末内蔵）
+    }
+  };
+  useEffect(() => { try { setTtsOn(localStorage.getItem('yaorozu_tts') === '1'); } catch {} }, []);
+  useEffect(() => { ttsOnRef.current = ttsOn; }, [ttsOn]);
+  useEffect(() => () => { stopSpeak(); }, []);
+  const toggleTts = () => {
+    setTtsOn((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('yaorozu_tts', next ? '1' : '0'); } catch {}
+      if (next) speak(briefFullRef.current);
+      else stopSpeak();
+      return next;
+    });
+  };
 
   const onPickProof = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -150,6 +274,13 @@ export default function MapTab({
   const chDone = activeChallenge && chProgress ? new Set(chProgress.done[activeChallenge.id] || []) : null;
   const nextStep = activeChallenge && chDone ? activeChallenge.steps.find((s) => !chDone.has(s.id)) || null : null;
   const chAllDone = activeChallenge && chDone ? chDone.size >= activeChallenge.steps.length : false;
+  // 次の目的地までの距離（500m以内で達成可能。圏外は達成ボタンをグレイに）
+  const nextDist =
+    nextStep && nextStep.lat != null && nextStep.lng != null
+      ? distanceKm(userLocation.lat, userLocation.lng, nextStep.lat, nextStep.lng)
+      : null;
+  const tooFar = nextDist != null && nextDist >= 0.5;
+  const near = nextDist != null && nextDist < 0.5; // 500m以内＝到着間近
   // ゴールマーカーは「次の目的地」を指す（全達成なら最終ゴール）
   const challengeGoal = activeChallenge
     ? nextStep && nextStep.lat != null && nextStep.lng != null
@@ -170,7 +301,11 @@ export default function MapTab({
     .map((c) => ({ c, d: distanceKm(userLocation.lat, userLocation.lng, c.goalLat, c.goalLng), ok: userLevel >= c.minLevel }))
     .sort((a, b) => (a.ok !== b.ok ? (a.ok ? -1 : 1) : a.d - b.d))[0]?.c ?? null;
 
-  // 下部オーバーレイの高さを測り、現在地ボタンをその上端 +10px に置く
+  // 導入（プロローグ）表示中か。表示中はヘッダー/下部オーバーレイ/現在地ボタンを隠す。
+  const introShowing = !!activeChallenge && !celebrate && (chDone?.size ?? 0) === 0 && introSeenId !== activeChallenge.id;
+
+  // 下部オーバーレイの高さを測り、現在地ボタンをその上端 +10px に置く。
+  // 導入終了・ガイド読み上げ完了でオーバーレイが遅れてマウントされるため、それらも依存に含めて再計測する。
   const overlayElRef = useRef<HTMLElement | null>(null);
   const [overlayH, setOverlayH] = useState(196);
   useEffect(() => {
@@ -181,16 +316,12 @@ export default function MapTab({
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [activeChallenge?.id, nextStep?.id, !!nearChallenge, !!celebrate, chAllDone]);
+  }, [activeChallenge?.id, nextStep?.id, !!nearChallenge, !!celebrate, chAllDone, introShowing, guideDone]);
   // bottom-3(12px) + オーバーレイ高さ + 余白10px
   const controlsBottom = overlayH > 0 ? overlayH + 12 + 10 : 210;
 
   // 「次の目的地」タップで地図を目的地中央へ寄せるためのトークン
   const [focusGoalToken, setFocusGoalToken] = useState(0);
-
-  // 導入（プロローグ）表示中か。表示中はヘッダー/下部オーバーレイ/現在地ボタンを隠し、
-  // 冒険開始時にそれぞれふわっと登場させる。
-  const introShowing = !!activeChallenge && !celebrate && (chDone?.size ?? 0) === 0 && introSeenId !== activeChallenge.id;
 
   // 精霊のセリフを一文字ずつタイプ表示（フェーズ0）→ 読み終えたら自動でフェーズ1へ
   // チャレンジ開始直後にいきなり喋り出すと速すぎるので、少し溜めてから語り始める
@@ -222,18 +353,86 @@ export default function MapTab({
   // 複数ステップのクエストでは、上部の進捗ガイドをクエスト中ずっと表示する
   const showGuide = !!activeChallenge && activeChallenge.steps.length > 1 && !introShowing && !celebrate && !chAllDone && !!nextStep;
   useEffect(() => {
-    if (!(showGuide && nextStep && activeChallenge)) { setBriefTyped(''); return; }
-    const full = `次は「${nextStep.title}」へ。${nextStep.action}`;
+    if (!(showGuide && nextStep && activeChallenge)) { setBriefTyped(''); setGuideDone(false); return; }
+    // 「次は『title』へ」ではなく、土地の紹介 → 現地で写真を撮ろう、という自然な語りにする。
+    // 目的地名・距離は下部カードに表示するため、ここでは触れない。
+    const full = composeGuideText(nextStep, near);
+    briefFullRef.current = full;
+    if (ttsOnRef.current) speak(full); // 読み上げONなら、メッセージ確定と同時に発話（ElevenLabs優先）
     setBriefTyped('');
+    setGuideDone(false);
     let i = 0;
     const id = setInterval(() => {
       i += 1;
       setBriefTyped(full.slice(0, i));
-      if (i >= full.length) clearInterval(id);
+      if (i >= full.length) { clearInterval(id); setGuideDone(true); }
     }, 30);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showGuide, nextStep?.id]);
+  }, [showGuide, nextStep?.id, near]);
+  // タイプ中はフキダシ本文を最下部へ追従（3行枠内でスクロール）
+  useEffect(() => {
+    const el = guideScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [briefTyped]);
+
+  // 「近づいてください」注意は、目的地が変わったとき/圏内に入ったときに消す
+  useEffect(() => { setFarNotice(false); }, [nextStep?.id]);
+  useEffect(() => { if (!tooFar) setFarNotice(false); }, [tooFar]);
+  // 表示したら数秒で自動的に消す
+  useEffect(() => {
+    if (!farNotice) return;
+    const id = setTimeout(() => setFarNotice(false), 2800);
+    return () => clearTimeout(id);
+  }, [farNotice]);
+
+  // ── 道案内の精霊との会話（これまでの語りログ＋参加分）──
+  const chatMessages: GuideMsg[] = activeChallenge
+    ? [...buildGuideLog(activeChallenge, chDone ?? new Set<string>()), ...chatExtra]
+    : [];
+  // チャレンジが変わったら会話をリセット
+  useEffect(() => { setChatExtra([]); setChatOpen(false); setChatInput(''); }, [activeChallenge?.id]);
+  // 新着・送信中で最下部へスクロール
+  useEffect(() => {
+    if (!chatOpen) return;
+    const el = chatScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [chatOpen, chatExtra.length, chatSending]);
+
+  const sendChat = async () => {
+    const text = chatInput.trim();
+    if (!text || chatSending || !activeChallenge) return;
+    setChatInput('');
+    setChatExtra((prev) => [...prev, { role: 'user', text }]);
+    setChatSending(true);
+    try {
+      const history = chatMessages.map((m) => ({ sender: m.role === 'user' ? 'user' : 'agent', text: m.text }));
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text,
+          history,
+          agent: {
+            id: 'agent-guide-spirit',
+            name: '道案内の精霊',
+            systemPrompt: `あなたは「道案内の精霊」。狐の姿をした町歩きクエストの案内役です。いまは「${activeChallenge.title}」を巡る旅の途中。旅人に寄り添い、土地の歴史・地形・建築・道の蘊蓄を、やさしく簡潔に語ります。現在の目的地は「${nextStep?.title ?? '最終地点'}」。質問には親切に、200文字以内で、温かく少し古風な精霊らしい口調（「〜じゃ」「〜ぞ」）で答えてください。`,
+            voiceTone: '案内役',
+          },
+          ugc: [],
+          affiliates: [],
+          userName: currentUser.displayName || '旅人',
+          spot: { name: activeChallenge.title, category: 'クエスト', description: activeChallenge.description, enjoyments: [] },
+        }),
+      });
+      const data = await res.json();
+      setChatExtra((prev) => [...prev, { role: 'spirit', text: data?.response || '…（精霊は静かに微笑んでいる）' }]);
+    } catch {
+      setChatExtra((prev) => [...prev, { role: 'spirit', text: 'すまぬ、いまは声が届かぬようじゃ。もう一度試しておくれ。' }]);
+    } finally {
+      setChatSending(false);
+    }
+  };
 
   return (
     <div className="relative w-full h-full flex flex-col">
@@ -271,10 +470,30 @@ export default function MapTab({
       {activeChallenge && showGuide && nextStep && (
         <div className="absolute top-0 left-0 right-0 z-[1200] px-4 pt-[68px] flex justify-center pointer-events-none">
           <div className="w-full max-w-sm flex items-start gap-2">
-            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-amber-100 to-orange-50 border-2 border-white shadow-lg flex items-center justify-center text-2xl flex-shrink-0">🦊</div>
+            <button
+              onClick={() => setChatOpen(true)}
+              aria-label="道案内の精霊と話す"
+              className="relative w-12 h-12 rounded-full bg-gradient-to-br from-amber-100 to-orange-50 border-2 border-white shadow-lg flex items-center justify-center text-2xl flex-shrink-0 pointer-events-auto cursor-pointer active:scale-95 transition-transform"
+            >
+              🦊
+              <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#2563eb] border-2 border-white flex items-center justify-center">
+                <MessageCircle className="w-2.5 h-2.5 text-white" />
+              </span>
+            </button>
             <div className="relative flex-1 bg-white rounded-2xl rounded-tl-sm shadow-xl px-4 py-3">
-              <p className="text-[11px] font-black tracking-wider text-amber-600">道案内の精霊</p>
-              <p className="text-sm text-gray-800 leading-relaxed mt-0.5 min-h-[3em]">{briefTyped}<span className="animate-pulse text-amber-500">▌</span></p>
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-black tracking-wider text-amber-600">道案内の精霊</p>
+                <button
+                  onClick={toggleTts}
+                  aria-label={ttsOn ? '読み上げを止める' : '読み上げる'}
+                  className="pointer-events-auto -mr-1.5 -mt-0.5 w-7 h-7 rounded-full flex items-center justify-center hover:bg-gray-100 cursor-pointer"
+                >
+                  {ttsOn ? <Volume2 className="w-4 h-4 text-[#2563eb]" /> : <VolumeX className="w-4 h-4 text-gray-400" />}
+                </button>
+              </div>
+              <div ref={guideScrollRef} className="mt-0.5 max-h-[4.4rem] overflow-y-auto pointer-events-auto pr-1">
+                <p className="text-sm text-gray-800 leading-relaxed">{briefTyped}<span className="animate-pulse text-amber-500">▌</span></p>
+              </div>
             </div>
           </div>
         </div>
@@ -283,7 +502,7 @@ export default function MapTab({
       {/*
         3a. チャレンジ参加中の下部オーバーレイ（次の目的地・次の案内）
       */}
-      {activeChallenge && !celebrate && !introShowing ? (
+      {activeChallenge && !celebrate && !introShowing && (!showGuide || guideDone) ? (
         <div ref={(el) => { overlayElRef.current = el; }} className="quest-overlay-in absolute bottom-3 left-3 right-3 z-[1000] bg-white/97 backdrop-blur-md rounded-3xl shadow-xl p-3">
           {chAllDone ? (
             <div className="flex items-center gap-3">
@@ -323,14 +542,22 @@ export default function MapTab({
                   );
                 })()}
               </div>
-              {/* アクション（達成には証拠写真が必要）。次の案内は上部の進捗ガイドに集約 */}
+              {/* アクション（達成には証拠写真が必要・500m以内で解放）。次の案内は上部の進捗ガイドに集約 */}
               <div className="mt-3">
                 <button
-                  onClick={() => { setProofStep(nextStep); setProofPhoto(null); }}
-                  className="w-full bg-[#2563eb] text-white text-[15px] font-black py-3 rounded-full hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer flex items-center justify-center gap-2"
+                  onClick={() => {
+                    if (tooFar) { setFarNotice(true); return; }
+                    setProofStep(nextStep); setProofPhoto(null);
+                  }}
+                  className={`w-full text-[15px] font-black py-3 rounded-full transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    tooFar ? 'bg-gray-200 text-gray-400' : 'bg-[#2563eb] text-white hover:opacity-90 active:scale-[0.99]'
+                  }`}
                 >
-                  <Camera className="w-4 h-4 flex-shrink-0" /><span className="truncate">{nextStep.title}</span>
+                  <Camera className="w-4 h-4" />証拠写真を撮影
                 </button>
+                {farNotice && tooFar && (
+                  <p className="text-center text-[12px] font-black text-rose-500 mt-2">📍 目的地に近づいてください（500m以内で達成できます）</p>
+                )}
               </div>
             </>
           ) : null}
@@ -472,13 +699,56 @@ export default function MapTab({
                   <span className="flex items-center gap-0.5"><Clock className="w-3.5 h-3.5" />約{activeChallenge.estMinutes}分</span>
                   <span>全{activeChallenge.steps.length}ミッション</span>
                 </div>
-                {/* ボタン無しで3秒後に自動で冒険開始（進捗バー） */}
-                <div className="mt-5 h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-[#2563eb] rounded-full" style={{ animation: 'intro-auto 3s linear forwards' }} />
-                </div>
-                <p className="text-[11px] font-bold text-gray-400 mt-2">まもなく冒険がはじまる…</p>
+                {/* ボタン無し・進捗バー無しで3秒後に自動で冒険開始 */}
+                <p className="text-[11px] font-bold text-gray-400 mt-5">まもなく冒険がはじまる…</p>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 道案内の精霊との会話（狐アイコンのタップで開く・これまでの語りログ＋参加） */}
+      {chatOpen && activeChallenge && (
+        <div className="absolute inset-0 z-[2300] bg-black/50 flex items-end" onClick={() => setChatOpen(false)}>
+          <div className="w-full bg-white rounded-t-3xl flex flex-col max-h-[82%] animate-in" onClick={(e) => e.stopPropagation()}>
+            {/* ヘッダー */}
+            <div className="flex items-center gap-2 px-4 pt-3 pb-2.5 border-b border-black/5">
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-100 to-orange-50 border border-white shadow flex items-center justify-center text-xl flex-shrink-0">🦊</div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-black text-gray-900">道案内の精霊</p>
+                <p className="text-[11px] text-gray-400 truncate">{activeChallenge.title}・会話のログ</p>
+              </div>
+              <button onClick={() => setChatOpen(false)} aria-label="閉じる" className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center cursor-pointer"><X className="w-4 h-4 text-gray-500" /></button>
+            </div>
+            {/* メッセージ（これまでの語り＋参加分） */}
+            <div ref={chatScrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+              {chatMessages.map((m, i) => m.role === 'user' ? (
+                <div key={i} className="flex justify-end">
+                  <div className="max-w-[80%] bg-[#2563eb] text-white rounded-2xl rounded-br-sm px-3.5 py-2 text-[13px] leading-relaxed">{m.text}</div>
+                </div>
+              ) : (
+                <div key={i} className="flex items-start gap-2">
+                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-100 to-orange-50 flex items-center justify-center text-base flex-shrink-0">🦊</div>
+                  <div className="max-w-[80%] bg-gray-100 text-gray-800 rounded-2xl rounded-tl-sm px-3.5 py-2 text-[13px] leading-relaxed whitespace-pre-line">{m.text}</div>
+                </div>
+              ))}
+              {chatSending && (
+                <div className="flex items-center gap-2 pl-9 text-gray-400 text-[12px]"><span className="animate-pulse">精霊が考えている…</span></div>
+              )}
+            </div>
+            {/* 入力（会話に参加） */}
+            <div className="px-3 pt-2 border-t border-black/5 flex items-center gap-2" style={{ paddingBottom: 'calc(0.625rem + env(safe-area-inset-bottom))' }}>
+              <input
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) sendChat(); }}
+                placeholder="精霊に話しかける…"
+                className="flex-1 bg-gray-100 rounded-full px-4 py-2.5 text-[14px] text-gray-900 placeholder:text-gray-400 outline-none focus:ring-2 focus:ring-[#2563eb]/30"
+              />
+              <button onClick={sendChat} disabled={!chatInput.trim() || chatSending} aria-label="送信" className="w-10 h-10 rounded-full bg-[#2563eb] text-white flex items-center justify-center disabled:opacity-40 cursor-pointer flex-shrink-0">
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       )}

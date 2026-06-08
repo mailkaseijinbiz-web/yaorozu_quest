@@ -179,7 +179,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
           {visibleCount < nearChallenges.length && (
             <button
               onClick={() => setVisibleCount((c) => c + 5)}
-              className="w-full mt-1 py-3 rounded-full bg-white border border-shrine-red/30 text-shrine-red text-sm font-black hover:bg-shrine-red/5 active:scale-[0.99] transition-all cursor-pointer"
+              className="mx-auto mt-1 py-2 text-shrine-red text-sm font-black underline underline-offset-4 decoration-shrine-red/40 hover:decoration-shrine-red cursor-pointer"
             >
               もっと見る（残り{nearChallenges.length - visibleCount}件）
             </button>

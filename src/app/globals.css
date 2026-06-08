@@ -105,8 +105,6 @@
 @keyframes quest-header-in { from { transform: translateY(-110%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 .quest-overlay-in { animation: quest-overlay-in 0.5s cubic-bezier(0.2, 0.9, 0.2, 1) 0.08s both; }
 @keyframes quest-overlay-in { from { transform: translateY(130%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-/* 導入PROLOGUEの自動進行（3秒）プログレスバー */
-@keyframes intro-auto { from { width: 0%; } to { width: 100%; } }
 
 /* スポット名（フキダシ外の縁取り文字・Google Map ラベル風） */
 .map-spot-name {

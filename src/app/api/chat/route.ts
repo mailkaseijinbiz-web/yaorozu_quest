@@ -180,6 +180,18 @@ function getFallbackResponse(
   }
 }
 
+// 道案内の精霊（クエスト案内役）用フォールバック（APIキーが無いときの簡易応答）
+function getGuideFallbackResponse(message: string, spot?: SpotContext): string {
+  const msg = message || '';
+  const place = spot?.name || 'この街';
+  if (/歴史|由来|昔|いつ|なぜ|どんな/.test(msg)) return `ふむ、${place}の来し方が気になるか。古い門前や街道には、人々の暮らしの跡が刻まれておる。石碑や地名に、そっと目を向けてみるがよい。`;
+  if (/どこ|道|行き方|向か|迷/.test(msg)) return `案ずるな。下に示した目的地へ、ゆるりと向かえばよい。道すがらの風景こそ、この旅のごちそうじゃ。`;
+  if (/写真|撮|カメラ/.test(msg)) return `よい心がけじゃ。心が動いた景色を、そのまま一枚に収めるがよい。上手も下手もない、それがそなたの記録になる。`;
+  if (/疲|休|つかれ/.test(msg)) return `無理は禁物じゃ。近くの茶屋で一息つくのも、また町歩きの味わいよ。`;
+  if (/ありがと|助か|嬉/.test(msg)) return `なに、礼にはおよばぬ。わしはいつでもそなたの傍におる。さあ、次の景色を見に行こうぞ。`;
+  return `ほう、「${msg.slice(0, 30)}」とな。よき問いじゃ。焦らず、足元と空とを見比べながら歩けば、${place}はもっと多くを語ってくれるぞ。`;
+}
+
 export async function POST(request: Request) {
   try {
     const { message, history, spotId, agent, ugc, affiliates, userName, spot } = await request.json();
@@ -189,10 +201,14 @@ export async function POST(request: Request) {
 
     // 個別Agentが無いスポット（合成エージェント）は spot 情報で応答する
     const isSynthetic = typeof agent?.id === 'string' && agent.id.startsWith('agent-synthetic-');
+    // クエストの案内役（道案内の精霊）
+    const isGuide = agent?.id === 'agent-guide-spirit';
 
     if (!apiKey && !geminiKey) {
       // API Key is not set, use the robust rule-based fallback
-      const responseText = (isSynthetic && spot)
+      const responseText = isGuide
+        ? getGuideFallbackResponse(message, spot)
+        : (isSynthetic && spot)
         ? getSpotFallbackResponse(message, spot, ugc, affiliates, agent?.name || spot.name)
         : getFallbackResponse(message, agent, ugc, affiliates, userName || '巡礼者');
 
@@ -298,7 +314,10 @@ Remember: Answer in character, be extremely concise (under 150 characters), and 
     // In case of error (e.g. invalid key, timeout), fallback gracefully
     const body = await request.clone().json();
     const bodySynthetic = typeof body.agent?.id === 'string' && body.agent.id.startsWith('agent-synthetic-');
-    const responseText = (bodySynthetic && body.spot)
+    const bodyGuide = body.agent?.id === 'agent-guide-spirit';
+    const responseText = bodyGuide
+      ? getGuideFallbackResponse(body.message, body.spot)
+      : (bodySynthetic && body.spot)
       ? getSpotFallbackResponse(body.message, body.spot, body.ugc, body.affiliates, body.agent?.name || body.spot.name)
       : getFallbackResponse(
           body.message,
