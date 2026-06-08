@@ -225,29 +225,38 @@ export default function ArTab({
     if (!capturedImage) return;
     setIsSharing(true);
     
+    const shareText = `${activeSpot?.name}で神様 ${agent?.name} をAR召喚しました！ #八百万クエスト #YaorozuQuest`;
     try {
-      // Simulated native share or Web Share API
-      if (navigator.share) {
-        // Fetch image blob to share
-        const res = await fetch(capturedImage);
-        const blob = await res.blob();
-        const file = new File([blob], 'yaorozu_god_ar.png', { type: 'image/png' });
-        
+      // 画像ファイル付きの Web Share に対応していれば、それを優先（モバイル等）
+      const res = await fetch(capturedImage);
+      const blob = await res.blob();
+      const file = new File([blob], 'yaorozu_god_ar.png', { type: 'image/png' });
+
+      if (navigator.canShare?.({ files: [file] }) && navigator.share) {
         await navigator.share({
           files: [file],
           title: `八百万神霊AR: ${agent?.name}`,
-          text: `${activeSpot?.name}で神様をAR召喚しました！ #八百万クエスト #YaorozuQuest`,
+          text: shareText,
         });
         setShareSuccess(true);
       } else {
-        // Fallback for desktop browsers
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        // デスクトップ等のフォールバック：画像をダウンロードし、X(Twitter) の投稿画面を開く。
+        // （Web Intent では画像添付ができないため、保存した画像を手動添付してもらう）
+        const a = document.createElement('a');
+        a.href = capturedImage;
+        a.download = `yaorozu_${agent?.name ?? 'god'}_ar.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
+        window.open(intent, '_blank', 'noopener,noreferrer');
         setShareSuccess(true);
       }
-      
+
       setTimeout(() => setShareSuccess(false), 3000);
     } catch (err) {
-      console.error('Share error:', err);
+      // ユーザーが共有シートをキャンセルした場合（AbortError）は無視
+      if ((err as Error)?.name !== 'AbortError') console.error('Share error:', err);
     } finally {
       setIsSharing(false);
     }

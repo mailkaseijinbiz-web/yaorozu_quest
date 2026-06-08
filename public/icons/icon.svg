@@ -1,0 +1,50 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="八百万クエスト">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="75%">
+      <stop offset="0%" stop-color="#1c1018"/>
+      <stop offset="55%" stop-color="#0d0e16"/>
+      <stop offset="100%" stop-color="#07080f"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f6d77a"/>
+      <stop offset="55%" stop-color="#d4af37"/>
+      <stop offset="100%" stop-color="#b8860b"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="40%" r="50%">
+      <stop offset="0%" stop-color="#e60012" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#e60012" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background (safe for maskable: full bleed) -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <circle cx="256" cy="210" r="170" fill="url(#glow)"/>
+
+  <!-- Stars -->
+  <g fill="#f6d77a" opacity="0.85">
+    <circle cx="120" cy="120" r="3"/>
+    <circle cx="402" cy="150" r="2.5"/>
+    <circle cx="150" cy="330" r="2"/>
+    <circle cx="380" cy="340" r="3"/>
+    <circle cx="96" cy="240" r="2"/>
+    <circle cx="430" cy="250" r="2"/>
+  </g>
+
+  <!-- Torii gate (centered, within maskable safe zone) -->
+  <g fill="url(#gold)">
+    <!-- Kasagi: top beam with overhang -->
+    <path d="M150 168 q106 -22 212 0 l0 26 q-106 -16 -212 0 Z"/>
+    <!-- Shimaki ridge under kasagi -->
+    <rect x="158" y="196" width="196" height="10" rx="3"/>
+    <!-- Nuki: second beam -->
+    <rect x="176" y="236" width="160" height="22" rx="4"/>
+    <!-- Gakuzuka (center tablet) -->
+    <rect x="246" y="206" width="20" height="32" rx="3"/>
+    <!-- Pillars (slightly tapered via trapezoids) -->
+    <path d="M190 168 l26 0 l6 200 l-38 0 Z"/>
+    <path d="M296 168 l26 0 l6 200 l-38 0 Z"/>
+  </g>
+
+  <!-- 八 mark above the gate -->
+  <text x="256" y="138" text-anchor="middle" font-family="serif" font-weight="900" font-size="86" fill="url(#gold)">八</text>
+</svg>

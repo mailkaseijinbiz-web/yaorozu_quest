@@ -691,7 +691,25 @@ class MockDatabase {
   updateAgent(spotId: string, updates: Partial<Agent>): Agent {
     const agents = this.getAgents();
     const index = agents.findIndex(a => a.spotId === spotId);
-    if (index === -1) throw new Error('Agent not found');
+
+    // 既存エージェントが無いスポット（自動生成分の大多数）は新規作成（upsert）。
+    // 種データ INITIAL_AGENTS に載っていないスポットでも創世主が神霊を設定できるようにする。
+    if (index === -1) {
+      const spot = this.getSpot(spotId);
+      const newAgent: Agent = {
+        id: `agent-${spotId}`,
+        spotId,
+        name: updates.name ?? spot?.godName ?? `${spot?.name ?? 'この地'}の守り神`,
+        personaDescription: updates.personaDescription ?? `${spot?.name ?? 'この地'}に宿る八百万の神。`,
+        systemPrompt: updates.systemPrompt ?? '',
+        avatar3dUrl: updates.avatar3dUrl ?? 'shrine',
+        haloColor: updates.haloColor ?? '#c5a028',
+        accessoryType: updates.accessoryType ?? 'なし',
+        voiceTone: updates.voiceTone ?? '神秘的',
+      };
+      this.save(KEYS.AGENTS, [...agents, newAgent]);
+      return newAgent;
+    }
 
     const updatedAgent = { ...agents[index], ...updates };
     agents[index] = updatedAgent;

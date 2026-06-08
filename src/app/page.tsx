@@ -1,17 +1,24 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, MessageSquare, Heart, Share2 } from 'lucide-react';
 import { db, Spot, Agent, User as UserType, UserContribution } from '../lib/db';
 import { pullSnapshot } from '../lib/cloud-sync';
 import HomeTab from '../components/HomeTab';
 import MapTab from '../components/MapTab';
 import SpotDetail from '../components/SpotDetail';
+import Onboarding from '../components/Onboarding';
+import { ToastProvider, ToastViewport, useToast } from '../components/Toast';
+import type { LocationStatus } from '../components/LocationBanner';
+import { haptic } from '../lib/haptics';
 import { getLevelInfo } from '../data/levels';
 import { getBadgeStates, godAvatarEmoji } from '../data/badges';
 import { getChallenge } from '../data/challenges';
 
 type TabType = 'home' | 'quest' | 'mypage';
+
+const ONBOARDED_KEY = 'yaorozu_onboarded';
+const DEFAULT_LOCATION = { lat: 35.6580, lng: 139.7514 };
 
 const FALLBACK_CURRENT_USER: UserType = {
   id: 'user-self',
@@ -22,6 +29,15 @@ const FALLBACK_CURRENT_USER: UserType = {
 };
 
 export default function HomePage() {
+  return (
+    <ToastProvider>
+      <AppShell />
+    </ToastProvider>
+  );
+}
+
+function AppShell() {
+  const { notify } = useToast();
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [spots, setSpots] = useState<Spot[]>([]);
   const [activeSpot, setActiveSpot] = useState<Spot | null>(null);
@@ -48,7 +64,36 @@ export default function HomePage() {
   const [currentUser, setCurrentUser] = useState<UserType | null>(null);
   const [userStats, setUserStats] = useState<UserContribution | null>(null);
   const [creatorProfiles, setCreatorProfiles] = useState<{ [userId: string]: UserType }>({});
-  const [userLocation, setUserLocation] = useState({ lat: 35.6580, lng: 139.7514 });
+  const [userLocation, setUserLocation] = useState(DEFAULT_LOCATION);
+
+  // 初回オンボーディング & 現在地の取得状態
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [locationStatus, setLocationStatus] = useState<LocationStatus>('idle');
+
+  // 現在地を取得（オンボーディングのCTAや「現在地を使う」ボタンから呼ぶ）
+  const requestLocation = useCallback(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setLocationStatus('unavailable');
+      return;
+    }
+    setLocationStatus('locating');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setLocationStatus('granted');
+        notify('現在地を取得しました', { tone: 'success' });
+      },
+      (err) => {
+        setLocationStatus(err.code === err.PERMISSION_DENIED ? 'denied' : 'unavailable');
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+    );
+  }, [notify]);
+
+  const completeOnboarding = useCallback(() => {
+    if (typeof window !== 'undefined') localStorage.setItem(ONBOARDED_KEY, 'true');
+    setShowOnboarding(false);
+  }, []);
 
   // Quest states
   const [claimedQuests, setClaimedQuests] = useState<string[]>([]);
@@ -100,16 +145,16 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 実際のGPS現在地を取得して反映
+  // 初回判定：未オンボーディングなら案内を表示。既にオンボーディング済みなら現在地を取得。
   useEffect(() => {
-    if (typeof navigator !== 'undefined' && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => { /* 取得失敗時は既定の現在地を維持 */ },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
-      );
+    if (typeof window === 'undefined') return;
+    const onboarded = localStorage.getItem(ONBOARDED_KEY) === 'true';
+    if (!onboarded) {
+      setShowOnboarding(true);
+    } else {
+      requestLocation();
     }
-  }, []);
+  }, [requestLocation]);
 
   useEffect(() => {
     if (activeSpot) {
@@ -173,6 +218,8 @@ export default function HomePage() {
     setTimeout(() => {
       setIsSavingProfile(false);
       setProfileSaved(true);
+      haptic('success');
+      notify('プロフィールを更新しました', { tone: 'success' });
       setTimeout(() => setProfileSaved(false), 2000);
     }, 400);
   };
@@ -192,6 +239,8 @@ export default function HomePage() {
       setClaimedQuests(updatedClaimed);
       localStorage.setItem('yaorozu_claimed_quests', JSON.stringify(updatedClaimed));
       refreshDatabaseStates();
+      haptic('success');
+      notify(`+${reward} 徳を得た！`, { tone: 'reward' });
     }
   };
 
@@ -241,9 +290,14 @@ export default function HomePage() {
               <HomeTab
                 currentUser={currentUser || FALLBACK_CURRENT_USER}
                 userLocation={userLocation}
+                locationStatus={locationStatus}
+                onRetryLocation={requestLocation}
                 onStartChallenge={(cid) => {
                   db.setActiveChallenge(cid);
                   setActiveChallengeId(cid);
+                  haptic('success');
+                  const ch = getChallenge(cid);
+                  if (ch) notify(`「${ch.title}」に挑戦開始！`, { tone: 'default' });
                   setActiveTab('quest');
                 }}
                 onEndChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
@@ -494,6 +548,7 @@ export default function HomePage() {
               <button
                 key={key}
                 onClick={() => {
+                  haptic('tap');
                   if (key === 'home') setHomeResetSignal(s => s + 1);
                   setActiveTab(key);
                 }}
@@ -534,6 +589,14 @@ export default function HomePage() {
               }
             }}
           />
+        )}
+
+        {/* トースト表示（端末枠の内側に配置） */}
+        <ToastViewport />
+
+        {/* 初回オンボーディング（最前面） */}
+        {showOnboarding && (
+          <Onboarding onRequestLocation={requestLocation} onComplete={completeOnboarding} />
         )}
       </div>
     </div>

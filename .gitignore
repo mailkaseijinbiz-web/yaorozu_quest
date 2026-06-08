@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +40,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# capacitor / ios native build artifacts
+# (commit the generated `ios/` project itself, but not these artifacts)
+/ios/App/Pods
+/ios/App/App/public
+/ios/App/Podfile.lock
+/ios/DerivedData
+/ios/capacitor-cordova-ios-plugins
+*.xcuserstate
+DerivedData/
