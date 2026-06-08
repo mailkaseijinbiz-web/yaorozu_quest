@@ -1,28 +1,30 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Shield, MapPin, MessageSquare, Users as UsersIcon, Lock, LogOut, RotateCcw, Flag, BookOpen } from 'lucide-react';
-import { db, Spot, User, UgcPost, Agent } from '../../lib/db';
+import { Shield, MapPin, Users as UsersIcon, Lock, LogOut, RotateCcw, Flag, Network, Brain, Activity as ActivityIcon, LineChart } from 'lucide-react';
+import { db, Spot, User } from '../../lib/db';
 import { CHALLENGES } from '../../data/challenges';
+import { Blueprint } from '../../components/admin/Blueprint';
+import { Analytics } from '../../components/admin/Analytics';
+import { YaorozuGods } from '../../components/admin/YaorozuGods';
+import { ActivityManager } from '../../components/admin/ActivityManager';
 import { SpotsManager } from '../../components/admin/SpotsManager';
 import { ChallengesManager } from '../../components/admin/ChallengesManager';
-import { TriviaManager } from '../../components/admin/TriviaManager';
-import { UgcManager } from '../../components/admin/UgcManager';
 import { UsersManager } from '../../components/admin/UsersManager';
-import { AgentsManager } from '../../components/admin/AgentsManager';
-import { QuestGenerator } from '../../components/admin/QuestGenerator';
 
 const ADMIN_PASSWORD = 'Kaseijinbiz1';
 const AUTH_KEY = 'yaorozu_admin_auth';
 
-type AdminTab = 'spots' | 'ugc' | 'users' | 'agents' | 'quests' | 'challenges' | 'trivia';
+type AdminTab = 'blueprint' | 'analytics' | 'spots' | 'gods' | 'users' | 'challenges' | 'activity';
 
 const TABS: { key: AdminTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { key: 'spots', label: 'スポット', icon: MapPin },
-  { key: 'challenges', label: 'チャレンジ', icon: Flag },
-  { key: 'trivia', label: '蘊蓄DB', icon: BookOpen },
-  { key: 'ugc', label: 'UGC投稿', icon: MessageSquare },
-  { key: 'users', label: 'ユーザー', icon: UsersIcon },
+  { key: 'blueprint', label: 'God', icon: Network },
+  { key: 'analytics', label: 'Analytics', icon: LineChart },
+  { key: 'spots', label: '場', icon: MapPin },
+  { key: 'gods', label: '八百万神', icon: Brain },
+  { key: 'users', label: '人間', icon: UsersIcon },
+  { key: 'challenges', label: 'クエスト', icon: Flag },
+  { key: 'activity', label: 'アクティビティ', icon: ActivityIcon },
 ];
 
 export default function AdminPage() {
@@ -31,19 +33,15 @@ export default function AdminPage() {
   const [pw, setPw] = useState('');
   const [pwError, setPwError] = useState(false);
 
-  const [tab, setTab] = useState<AdminTab>('spots');
+  const [tab, setTab] = useState<AdminTab>('blueprint');
 
   // Data
   const [spots, setSpots] = useState<Spot[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [ugc, setUgc] = useState<UgcPost[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
 
   const refresh = () => {
     setSpots(db.getSpots());
     setUsers(db.getUsers());
-    setUgc(db.getUgc());
-    setAgents(db.getAgents());
   };
 
   useEffect(() => {
@@ -85,7 +83,7 @@ export default function AdminPage() {
             <div className="w-14 h-14 rounded-2xl bg-blue-50 flex items-center justify-center">
               <Shield className="w-7 h-7 text-blue-600" />
             </div>
-            <h1 className="text-xl font-black text-gray-900">YAOROZU 管理コンソール</h1>
+            <h1 className="text-xl font-black text-gray-900">GOD MANAGER</h1>
             <p className="text-xs text-gray-500">管理パスワードを入力してください</p>
           </div>
           <div className="space-y-2">
@@ -119,7 +117,7 @@ export default function AdminPage() {
       <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Shield className="w-5 h-5 text-blue-600" />
-          <h1 className="text-base font-black text-gray-900">YAOROZU 管理コンソール</h1>
+          <h1 className="text-base font-black text-gray-900">GOD MANAGER</h1>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -146,8 +144,9 @@ export default function AdminPage() {
       <nav className="px-4 sm:px-6 pt-4 flex gap-2 flex-wrap">
         {TABS.map(({ key, label, icon: Icon }) => {
           const counts: Record<AdminTab, number | null> = {
-            spots: spots.length, ugc: ugc.length, users: users.length, agents: agents.length, quests: null,
-            challenges: CHALLENGES.length, trivia: db.getTrivia().length,
+            blueprint: null, analytics: null, gods: spots.length, activity: db.getActivities().length,
+            spots: spots.length, users: users.length,
+            challenges: CHALLENGES.length,
           };
           const active = tab === key;
           return (
@@ -170,13 +169,13 @@ export default function AdminPage() {
       </nav>
 
       <main className="px-4 sm:px-6 py-5 max-w-6xl mx-auto">
+        {tab === 'blueprint' && <Blueprint />}
+        {tab === 'analytics' && <Analytics />}
+        {tab === 'gods' && <YaorozuGods spots={spots} onChange={refresh} />}
+        {tab === 'activity' && <ActivityManager spots={spots} />}
         {tab === 'spots' && <SpotsManager spots={spots} onChange={refresh} />}
         {tab === 'challenges' && <ChallengesManager />}
-        {tab === 'trivia' && <TriviaManager />}
-        {tab === 'ugc' && <UgcManager ugc={ugc} spots={spots} onChange={refresh} />}
         {tab === 'users' && <UsersManager users={users} spots={spots} onChange={refresh} />}
-        {tab === 'agents' && <AgentsManager agents={agents} spots={spots} onChange={refresh} />}
-        {tab === 'quests' && <QuestGenerator spots={spots} />}
       </main>
     </div>
   );

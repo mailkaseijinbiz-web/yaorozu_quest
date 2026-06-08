@@ -3,8 +3,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag } from 'lucide-react';
 import { Spot, Agent, User, db, isVerifiedSpot } from '../lib/db';
-import { getGodTasks, GodTask, TASK_TONE, TASK_CATALOG } from '../data/god-tasks';
-import { CHALLENGES } from '../data/challenges';
+import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
 import { uploadImage } from '../lib/upload';
 
@@ -93,7 +92,7 @@ export default function SpotDetail({
   const affiliates = db.getAffiliatesBySpot(spot.name);
 
   const godEmoji = spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏');
-  const tasks = getGodTasks(spot);
+  const tasks = buildSpotTasks(spot);
 
   // 評価タスクの対象写真：クエスト証拠写真＋各スポットの奉納写真。不足時は巡礼地の代表写真で補完。
   const evalPhotos = useMemo(() => {
@@ -110,7 +109,7 @@ export default function SpotDetail({
   const nearbyChallenge = useMemo(() => {
     const prog = db.getChallengeProgress();
     const completed = new Set(prog.completed);
-    return [...CHALLENGES]
+    return db.getAllQuests()
       .filter((c) => !completed.has(c.id) && c.id !== prog.activeId)
       .map((c) => ({ c, d: distanceKm(spot.latitude, spot.longitude, c.goalLat, c.goalLng) }))
       .sort((a, b) => a.d - b.d)[0]?.c ?? null;
@@ -158,12 +157,12 @@ export default function SpotDetail({
     onChanged?.();
   };
 
-  // テキスト投稿が必要なタスク種別（コンテキスト収集を含む）
-  const POST_TYPES = new Set(['context', 'review', 'event', 'eat', 'buy']);
+  // テキスト投稿が必要なタスク種別（コンテキスト収集・課題解決を含む）
+  const POST_TYPES = new Set(['context', 'review', 'event', 'eat', 'buy', 'resolveIssue']);
 
   // ── 神の依頼タスク達成 ──
   const handleTask = (task: GodTask) => {
-    if (doneTasks[task.type]) return;
+    if (doneTasks[task.id]) return;
 
     if (task.type === 'photo') {
       handlePostPhoto(); // アップロード成功時に done にする
@@ -174,17 +173,18 @@ export default function SpotDetail({
       setEvaluating(true); // 評価し終えたら done にする
       return;
     } else if (POST_TYPES.has(task.type)) {
-      // 実際に投稿（口コミ・できごと・実食・買物）→ 入力モーダルを開く
+      // 実際に投稿（口コミ・できごと・実食・買物・課題解決の報告）→ 入力モーダルを開く
       setPostingTask(task);
       return; // 投稿完了時に done にする
     } else {
-      // SNS / 清掃確認 など：その場で達成
+      // SNS / 清掃確認 / 来訪 など：その場で達成
+      if (task.type === 'visit') db.recordVisit(currentUser.id, spot.id);
       db.completeGodTask(currentUser.id, spot.id, task.reward);
       db.recordTaskDone(currentUser.id, task.type, spot.id, task.reward);
       flashToast(`${task.icon} 依頼を達成！ +${task.reward}徳`);
       onChanged?.();
     }
-    setDoneTasks((prev) => ({ ...prev, [task.type]: true }));
+    setDoneTasks((prev) => ({ ...prev, [task.id]: true }));
   };
 
   // 投稿モーダルの送信（実際に口コミ等を投稿）
@@ -197,7 +197,7 @@ export default function SpotDetail({
       db.addEnjoyment(spot.id, grow);
       setEnjoyments(db.getSpot(spot.id)?.enjoyments ?? []);
     }
-    setDoneTasks((prev) => ({ ...prev, [postingTask.type]: true }));
+    setDoneTasks((prev) => ({ ...prev, [postingTask.id]: true }));
     setUgcTick((t) => t + 1);
     flashToast(`${postingTask.icon} 投稿しました！ +徳`);
     onChanged?.();
@@ -396,30 +396,43 @@ export default function SpotDetail({
               <span className="text-2xl">{godEmoji}</span>
               {agent.name} からの依頼
             </h3>
-            <p className="text-[13px] text-gray-400 mb-3">達成すると徳を授かり、この地の神が育っていく。依頼は徳の高い順。</p>
-            <div className="space-y-2">
-              {tasks.map((task) => {
-                const tone = TASK_TONE[task.type];
-                const done = doneTasks[task.type];
+            <p className="text-[13px] text-gray-400 mb-3">達成すると徳を授かり、この地の神が育っていく。依頼は神の3つの働き（情報収集・理解判断・操作）で分かれる。</p>
+            <div className="space-y-4">
+              {GOD_FUNCTIONS.map((fn) => {
+                const groupTasks = tasks.filter((t) => t.kind === fn.key);
+                if (groupTasks.length === 0) return null;
                 return (
-                  <div key={task.type} className={`rounded-xl border p-3 ${done ? 'bg-gray-50 border-gray-200 opacity-70' : `${tone.bg} ${tone.border}`}`}>
-                    <div className="flex items-start gap-2.5">
-                      <span className="text-xl flex-shrink-0">{task.icon}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <h4 className={`text-base font-black ${done ? 'text-gray-500' : 'text-gray-800'}`}>{task.title}</h4>
-                          <span className={`text-xs font-black ${tone.text}`}>+{task.reward}徳</span>
-                        </div>
-                        <p className="text-[13px] text-gray-500 leading-relaxed mt-0.5">{task.call(spot.name)}</p>
-                      </div>
-                      <button
-                        onClick={() => handleTask(task)}
-                        disabled={done}
-                        className={`flex-shrink-0 text-[13px] font-black px-3 py-1.5 rounded-full transition-all cursor-pointer ${done ? 'bg-gray-200 text-gray-400' : 'bg-shrine-red text-white hover:opacity-90 active:scale-95'}`}
-                      >
-                        {done ? '達成済' : task.label}
-                      </button>
+                  <div key={fn.key} className="space-y-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-base">{fn.icon}</span>
+                      <span className="text-[13px] font-black text-gray-700">{fn.label}</span>
+                      <span className="text-[11px] text-gray-400 truncate">{fn.desc}</span>
                     </div>
+                    {groupTasks.map((task) => {
+                      const tone = TASK_TONE[task.type];
+                      const done = doneTasks[task.id];
+                      return (
+                        <div key={task.id} className={`rounded-xl border p-3 ${done ? 'bg-gray-50 border-gray-200 opacity-70' : `${tone.bg} ${tone.border}`}`}>
+                          <div className="flex items-start gap-2.5">
+                            <span className="text-xl flex-shrink-0">{task.icon}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <h4 className={`text-base font-black ${done ? 'text-gray-500' : 'text-gray-800'}`}>{task.title}</h4>
+                                <span className={`text-xs font-black ${tone.text}`}>+{task.reward}徳</span>
+                              </div>
+                              <p className="text-[13px] text-gray-500 leading-relaxed mt-0.5">{task.call?.(spot.name)}</p>
+                            </div>
+                            <button
+                              onClick={() => handleTask(task)}
+                              disabled={done}
+                              className={`flex-shrink-0 text-[13px] font-black px-3 py-1.5 rounded-full transition-all cursor-pointer ${done ? 'bg-gray-200 text-gray-400' : 'bg-shrine-red text-white hover:opacity-90 active:scale-95'}`}
+                            >
+                              {done ? '達成済' : task.label}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })}
@@ -501,7 +514,7 @@ export default function SpotDetail({
             <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5">
               <span className="text-lg">{postingTask.icon}</span>{postingTask.title}
             </h3>
-            <p className="text-[13px] text-gray-500 mt-0.5">{postingTask.call(spot.name)}</p>
+            <p className="text-[13px] text-gray-500 mt-0.5">{postingTask.call?.(spot.name)}</p>
             <textarea
               value={postText}
               onChange={(e) => setPostText(e.target.value)}

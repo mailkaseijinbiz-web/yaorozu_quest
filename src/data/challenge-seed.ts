@@ -5,7 +5,7 @@
 // 決定論的PRNG（mulberry32）でシード。
 // -----------------------------------------------------------------------------
 
-import type { Challenge, ChallengeStep, TriviaCategory } from './challenges';
+import { questStep, type Quest, type Task, type TriviaCategory } from './tasks';
 
 function mulberry32(seed: number) {
   return function () {
@@ -110,9 +110,9 @@ const SIMPLE_KINDS: { title: string; action: string; icon: string; badge: string
   { title: '空を見上げる', action: 'で空を見上げて、今日の空模様を記録しよう。', icon: '☁️', badge: '空', photo: true },
 ];
 
-export function generateSimpleChallenges(count = 300): Challenge[] {
+export function generateSimpleChallenges(count = 300): Quest[] {
   const rand = mulberry32(20260610);
-  const out: Challenge[] = [];
+  const out: Quest[] = [];
   for (let i = 0; i < count; i++) {
     const area = AREAS[Math.floor(rand() * AREAS.length)];
     const kind = SIMPLE_KINDS[Math.floor(rand() * SIMPLE_KINDS.length)];
@@ -131,17 +131,18 @@ export function generateSimpleChallenges(count = 300): Challenge[] {
       goalName: `${place}`,
       goalLat: lat,
       goalLng: lng,
-      steps: [
-        { id: 's0', title: kind.title, action: `${place}${kind.action}`, photo: kind.photo, lat, lng },
+      source: 'simple',
+      tasks: [
+        questStep({ id: 's0', title: kind.title, action: `${place}${kind.action}`, photo: kind.photo, lat, lng }),
       ],
     });
   }
   return out;
 }
 
-export function generateChallenges(count = 697): Challenge[] {
+export function generateChallenges(count = 697): Quest[] {
   const rand = mulberry32(20260609);
-  const out: Challenge[] = [];
+  const out: Quest[] = [];
   for (let i = 0; i < count; i++) {
     const area = AREAS[Math.floor(rand() * AREAS.length)];
     const theme = THEMES[Math.floor(rand() * THEMES.length)];
@@ -154,24 +155,28 @@ export function generateChallenges(count = 697): Challenge[] {
     const fill = (s: string) => s.replace(/\{a\}/g, place).replace(/\{area\}/g, area.name);
 
     // 起承転結：序・承・転（3幕の探索）＋ 結（ゴールでの写真）
-    const steps: ChallengeStep[] = story.acts.map((act, s) => ({
-      id: `s${s}`,
-      title: act.title,
-      action: fill(act.action),
-      triviaCategory: act.cat,
-      trivia: fill(act.trivia),
-      lat: +(goalLat + (rand() - 0.5) * 0.006).toFixed(5),
-      lng: +(goalLng + (rand() - 0.5) * 0.006).toFixed(5),
-    }));
+    const tasks: Task[] = story.acts.map((act, s) =>
+      questStep({
+        id: `s${s}`,
+        title: act.title,
+        action: fill(act.action),
+        triviaCategory: act.cat,
+        trivia: fill(act.trivia),
+        lat: +(goalLat + (rand() - 0.5) * 0.006).toFixed(5),
+        lng: +(goalLng + (rand() - 0.5) * 0.006).toFixed(5),
+      }),
+    );
     // 結末：ゴール地点での写真ミッション
-    steps.push({
-      id: `s${story.acts.length}`,
-      title: story.climaxTitle,
-      action: fill(story.climaxAction),
-      photo: true,
-      lat: goalLat,
-      lng: goalLng,
-    });
+    tasks.push(
+      questStep({
+        id: `s${story.acts.length}`,
+        title: story.climaxTitle,
+        action: fill(story.climaxAction),
+        photo: true,
+        lat: goalLat,
+        lng: goalLng,
+      }),
+    );
 
     out.push({
       id: `chg-${i}`,
@@ -185,7 +190,8 @@ export function generateChallenges(count = 697): Challenge[] {
       goalName: `${area.name}駅周辺`,
       goalLat,
       goalLng,
-      steps,
+      source: 'generated',
+      tasks,
     });
   }
   return out;

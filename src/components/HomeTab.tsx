@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { MapPin, Trophy, Flag, Clock, X, Check } from 'lucide-react';
 import { User, db } from '../lib/db';
-import { CHALLENGES, difficultyLabel, Challenge } from '../data/challenges';
+import { difficultyLabel, Challenge } from '../data/challenges';
 import { getLevelInfo } from '../data/levels';
 import { distanceKm } from '../lib/geo';
 
@@ -37,7 +37,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
   ] as const;
 
   // フィルタ → 第1ソート＝参加できるもの、第2ソート＝距離の近い順
-  const nearChallenges = [...CHALLENGES]
+  const nearChallenges = db.getAllQuests()
     .filter((ch) => {
       const completed = progress.completed.includes(ch.id);
       const ok = userLevel >= ch.minLevel;
@@ -112,7 +112,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
             const distUnit = distToGoal < 1 ? 'm' : 'km';
             const levelOk = userLevel >= ch.minLevel; // 必須レベルを満たすか
 
-            const total = ch.steps.length;
+            const total = ch.tasks.length;
             const doneN = (progress.done[ch.id] || []).length;
             // カードをタップするとモーダル（参加/終了ボタンはモーダル内）。
             return (
@@ -158,7 +158,7 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
                     </div>
                     {/* 進捗インジケータ（ステップごとのドット） */}
                     <div className="flex items-center gap-1 mt-2">
-                      {ch.steps.map((_, i) => (
+                      {ch.tasks.map((_, i) => (
                         <span
                           key={i}
                           className={`h-1.5 flex-1 rounded-full ${

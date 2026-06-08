@@ -1,51 +1,67 @@
 'use client';
 
 import { useState } from 'react';
-import { Wand2, Loader2, Check, Save, MapPin } from 'lucide-react';
-import { Spot } from '../../lib/db';
-import type { GeneratedQuest } from '../../app/api/generate-quest/route';
+import { Wand2, Loader2, Check, Save } from 'lucide-react';
+import { Spot, db } from '../../lib/db';
+import { buildDainichiIdentityMd } from '../../lib/dainichi';
+import { TASK_TONE, type Quest, type TaskKind } from '../../data/tasks';
 import { Card, Field, inputCls, DeleteBtn } from './ui';
 
-const USER_QUESTS_KEY = 'yaorozu_user_quests';
+// ════════════════════════════════════════════════
+// AI Quest Generator — 場の 価値・課題・魂 からクエスト（=タスクの集まり）を生成
+// ════════════════════════════════════════════════
+const KIND_LABEL: Record<TaskKind, string> = { sense: '情報収集', understand: '理解判断', act: '操作' };
+const SOURCE_LABEL: Record<string, string> = { gemini: 'Gemini', openai: 'OpenAI', fallback: 'ルールベース（フォールバック）' };
 
-// ════════════════════════════════════════════════
-// AI Quest Generator
-// ════════════════════════════════════════════════
-interface DraftQuest extends GeneratedQuest { _key: string; }
+interface DraftQuest extends Quest {
+  _key: string;
+}
 
 export function QuestGenerator({ spots }: { spots: Spot[] }) {
   const [spotId, setSpotId] = useState<string>(spots[0]?.id ?? '');
   const [count, setCount] = useState(3);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [source, setSource] = useState<'openai' | 'fallback' | null>(null);
+  const [source, setSource] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<DraftQuest[]>([]);
   const [publishedCount, setPublishedCount] = useState(0);
 
-  const spot = spots.find(s => s.id === spotId);
+  const spot = spots.find((s) => s.id === spotId);
 
   const handleGenerate = async () => {
-    if (!spot) { setError('スポットを選択してください。'); return; }
+    if (!spot) { setError('場を選択してください。'); return; }
     setLoading(true);
     setError('');
     setSource(null);
     setPublishedCount(0);
     try {
+      const agent = db.getAgentBySpot(spot.id);
       const res = await fetch('/api/generate-quest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           count,
+          ts: Date.now(),
+          rules: db.getQuestRules(),
+          godRules: db.getDainichiIdentity() ?? buildDainichiIdentityMd(), // 大日如来＝全神の基底
+          spotRules: db.getSpotRules(), // 場の生成ルール（背景文脈）
           spot: {
-            name: spot.name, category: spot.category,
-            description: spot.description, enjoyments: spot.enjoyments,
+            id: spot.id,
+            name: spot.name,
+            category: spot.category,
+            description: spot.description,
+            enjoyments: spot.enjoyments,
+            issues: spot.issues,
+            soulMd: agent?.soulMd,
+            latitude: spot.latitude,
+            longitude: spot.longitude,
           },
         }),
       });
       const data = await res.json();
       if (!res.ok || !data.quests) throw new Error(data.error || '生成に失敗しました。');
       setSource(data.source ?? null);
-      setDrafts(data.quests.map((q: GeneratedQuest, i: number) => ({ ...q, _key: `${Date.now()}-${i}` })));
+      setDrafts((data.quests as Quest[]).map((q, i) => ({ ...q, _key: `${q.id}-${i}` })));
     } catch (e) {
       setError(e instanceof Error ? e.message : '生成に失敗しました。');
     } finally {
@@ -53,26 +69,19 @@ export function QuestGenerator({ spots }: { spots: Spot[] }) {
     }
   };
 
-  const updateDraft = (key: string, patch: Partial<DraftQuest>) =>
-    setDrafts(ds => ds.map(d => d._key === key ? { ...d, ...patch } : d));
+  const updateDraft = (key: string, patch: Partial<Quest>) =>
+    setDrafts((ds) => ds.map((d) => (d._key === key ? { ...d, ...patch } : d)));
 
-  const removeDraft = (key: string) => setDrafts(ds => ds.filter(d => d._key !== key));
+  const removeDraft = (key: string) => setDrafts((ds) => ds.filter((d) => d._key !== key));
 
   const handlePublish = () => {
-    if (drafts.length === 0) return;
-    const existing = JSON.parse(localStorage.getItem(USER_QUESTS_KEY) || '[]');
-    const newQuests = drafts.map((d, i) => ({
-      id: `uq-ai-${Date.now()}-${i}`,
-      creatorId: 'ai-oracle',
-      creatorName: 'AI神官（自動生成）',
-      title: d.title,
-      description: d.description,
-      reward: d.reward,
-      targetSpotName: d.targetSpotName,
-      createdAt: new Date().toISOString(),
-      completedBy: [],
-    }));
-    localStorage.setItem(USER_QUESTS_KEY, JSON.stringify([...newQuests, ...existing]));
+    if (!spot || drafts.length === 0) return;
+    const quests: Quest[] = drafts.map((d) => {
+      const q = { ...d } as Partial<DraftQuest>;
+      delete q._key;
+      return q as Quest;
+    });
+    db.saveGeneratedQuests(spot.id, quests);
     setPublishedCount(drafts.length);
     setDrafts([]);
   };
@@ -83,20 +92,21 @@ export function QuestGenerator({ spots }: { spots: Spot[] }) {
       <div className="bg-white border border-gray-200 rounded-2xl p-4 space-y-3">
         <div className="flex items-center gap-2">
           <Wand2 className="w-4 h-4 text-blue-600" />
-          <h2 className="text-sm font-black text-gray-900">AIクエスト自動生成</h2>
+          <h2 className="text-sm font-black text-gray-900">クエスト生成（価値・課題・魂から）</h2>
         </div>
         <p className="text-[11px] text-gray-500 leading-relaxed">
-          スポット情報をもとにAIが街歩きクエストを生成します。確認・編集してから公開すると、ユーザーアプリの「コミュニティクエスト」に追加されます。
+          場の<b>価値（楽しみ方）・課題・神の魂</b>をもとに、AIが「情報収集・理解判断・操作」の3種タスクで構成されたクエストを生成します。
+          確認・編集して公開すると、プレイヤーアプリのクエスト一覧とこの場の詳細に追加されます。
         </p>
         <div className="grid sm:grid-cols-[1fr_auto_auto] gap-3 items-end">
-          <Field label="対象スポット">
-            <select className={inputCls} value={spotId} onChange={e => setSpotId(e.target.value)}>
-              {spots.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          <Field label="対象の場">
+            <select className={inputCls} value={spotId} onChange={(e) => setSpotId(e.target.value)}>
+              {spots.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </Field>
           <Field label="生成数">
-            <select className={inputCls} value={count} onChange={e => setCount(Number(e.target.value))}>
-              {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}個</option>)}
+            <select className={inputCls} value={count} onChange={(e) => setCount(Number(e.target.value))}>
+              {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}個</option>)}
             </select>
           </Field>
           <button
@@ -108,15 +118,16 @@ export function QuestGenerator({ spots }: { spots: Spot[] }) {
             {loading ? '生成中…' : 'AIで生成'}
           </button>
         </div>
-        {error && <p className="text-[11px] text-red-500 font-bold">{error}</p>}
-        {source && (
+        {spot && (
           <p className="text-[10px] text-gray-400">
-            生成エンジン: {source === 'openai' ? 'OpenAI' : 'ルールベース（APIキー未設定のためフォールバック）'}
+            価値 {spot.enjoyments?.length ?? 0}件 ・ 課題 {spot.issues?.length ?? 0}件 ・ 魂 {db.getAgentBySpot(spot.id)?.soulMd ? 'あり' : 'なし'}
           </p>
         )}
+        {error && <p className="text-[11px] text-red-500 font-bold">{error}</p>}
+        {source && <p className="text-[10px] text-gray-400">生成エンジン: {SOURCE_LABEL[source] ?? source}</p>}
         {publishedCount > 0 && (
           <p className="text-[11px] text-green-600 font-bold flex items-center gap-1">
-            <Check className="w-3.5 h-3.5" /> {publishedCount}件のクエストを公開しました。
+            <Check className="w-3.5 h-3.5" /> {publishedCount}件のクエストを公開しました（プレイヤーに反映済み）。
           </p>
         )}
       </div>
@@ -133,33 +144,31 @@ export function QuestGenerator({ spots }: { spots: Spot[] }) {
               <Save className="w-3.5 h-3.5" /> すべて公開
             </button>
           </div>
-          {drafts.map(d => (
+          {drafts.map((d) => (
             <Card key={d._key}>
               <div className="flex items-start gap-3">
                 <div className="flex-1 space-y-2">
                   <input
                     className={`${inputCls} font-bold`}
                     value={d.title}
-                    onChange={e => updateDraft(d._key, { title: e.target.value })}
+                    onChange={(e) => updateDraft(d._key, { title: e.target.value })}
                   />
                   <textarea
                     className={inputCls}
                     rows={2}
                     value={d.description}
-                    onChange={e => updateDraft(d._key, { description: e.target.value })}
+                    onChange={(e) => updateDraft(d._key, { description: e.target.value })}
                   />
-                  <div className="flex items-center gap-3">
-                    <label className="text-[10px] text-gray-500 font-bold">報酬</label>
-                    <select
-                      className="bg-white border border-gray-300 rounded-lg px-2 py-1 text-xs text-gray-900 focus:outline-none focus:border-blue-500"
-                      value={d.reward}
-                      onChange={e => updateDraft(d._key, { reward: Number(e.target.value) })}
-                    >
-                      {[10, 20, 30, 50, 80, 100].map(v => <option key={v} value={v}>+{v} 徳</option>)}
-                    </select>
-                    <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
-                      <MapPin className="w-3 h-3" /> {d.targetSpotName}
-                    </span>
+                  {/* タスク（3種の働き） */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {d.tasks.map((t) => {
+                      const tone = TASK_TONE[t.type];
+                      return (
+                        <span key={t.id} className={`text-[11px] font-bold px-2 py-1 rounded-lg border ${tone.bg} ${tone.text} ${tone.border}`} title={t.action}>
+                          {t.icon} {t.title} <span className="opacity-60">+{t.reward}徳・{KIND_LABEL[t.kind]}</span>
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
                 <DeleteBtn onClick={() => removeDraft(d._key)} />
