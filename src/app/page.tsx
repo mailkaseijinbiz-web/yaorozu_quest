@@ -4,8 +4,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, Clock, Share2, X, Stamp } from 'lucide-react';
 import { db, Spot, Agent, User as UserType, UserContribution, Activity, SPOT_TTL_MS } from '../lib/db';
 import { getGoShuinList, Goshuin } from '../lib/goshuin';
-import { pullSnapshot } from '../lib/cloud-sync';
-import { distanceKm } from '../lib/geo';
+import { pullSnapshot, setSyncUser } from '../lib/cloud-sync';
+import { isAuthConfigured, getSupabaseBrowser, signInWithProvider, signOutAuth, profileFromUser, type AuthProfile } from '../lib/supabase-browser';
+import { distanceKm, destinationPoint } from '../lib/geo';
 import HomeTab from '../components/HomeTab';
 import MapTab from '../components/MapTab';
 import SpotDetail from '../components/SpotDetail';
@@ -24,6 +25,9 @@ const MEDALLION_FRAME =
   'polygon(50% 0%, 79.4% 9.5%, 97.6% 34.5%, 97.6% 65.5%, 79.4% 90.5%, 50% 100%, 20.6% 90.5%, 2.4% 65.5%, 2.4% 34.5%, 20.6% 9.5%)';
 const XP_SHIELD = 'polygon(0% 0%, 100% 0%, 100% 58%, 50% 100%, 0% 58%)';
 
+// 場・クエストを「近い / 中くらい / 遠い」が混ざるように散らす距離（km）。約 500m / 1000m / 3000m。
+const VARIED_SPOT_DISTANCES_KM = [0.5, 1.0, 3.0];
+
 const FALLBACK_CURRENT_USER: UserType = {
   id: 'user-self',
   displayName: 'あなた (巡礼者)',
@@ -37,6 +41,7 @@ export default function HomePage() {
   const [isRevoked, setIsRevoked] = useState(false); // 管理者削除によるアカウント失効
   const [needsOnboard, setNeedsOnboard] = useState(false); // 初回起動の登録（オンボーディング）
   const [onboardName, setOnboardName] = useState(''); // オンボーディングの名前入力
+  const [authProfile, setAuthProfile] = useState<AuthProfile | null>(null); // OAuthログイン中のユーザー
   const [spots, setSpots] = useState<Spot[]>([]);
   const [activeSpot, setActiveSpot] = useState<Spot | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -137,12 +142,16 @@ export default function HomePage() {
     finally { setIsGeneratingQuests(false); }
   }, []);
 
-  const generateSpotNearby = useCallback(async (lat: number, lng: number, force = false) => {
-    const now = Date.now();
-    const prev = lastGenRef.current;
-    // 5 分以内かつ 500 m 以内なら重複生成しない（force 時は無視）
-    if (!force && prev && now - prev.at < 5 * 60_000 && distanceKm(lat, lng, prev.lat, prev.lng) < 0.5) return;
-    lastGenRef.current = { lat, lng, at: now };
+  /**
+   * 指定座標に場と神を1件生成・保存する（スロットルなし・低レベル）。
+   * selectActive: アクティブスポット未設定なら生成した場を選択する。
+   * chainQuests: その場のクエストも続けて生成する（クールダウン無視）。
+   */
+  const generateSpotAt = useCallback(async (
+    lat: number,
+    lng: number,
+    opts: { selectActive?: boolean; chainQuests?: boolean } = {},
+  ) => {
     try {
       const res = await fetch('/api/generate-spot', {
         method: 'POST',
@@ -162,22 +171,50 @@ export default function HomePage() {
       db.logActivity({ type: 'god_generate', userId: 'system', source: 'system', spotId: spot.id, detail: agent.name || spot.godName });
       refreshDatabaseStates();
       // アクティブスポットが未設定なら生成した場を選択（地図がその位置にパンされる）
-      if (!activeSpotRef.current) {
+      if (opts.selectActive && !activeSpotRef.current) {
         setActiveSpot(spot);
       }
-      // 場を生成後、クエストが無い or force 時はこの場のクエストも生成する
-      if (force || db.getAllQuests().length === 0) {
-        generateQuestsForSpot(spot, agent, force);
+      if (opts.chainQuests) {
+        generateQuestsForSpot(spot, agent, true);
       }
     } catch { /* ネットワークエラーは無視 */ }
   }, [generateQuestsForSpot]);
 
-  /** 「他のクエストを探す」：現在地周辺に新しい場を生成し、そのクエストを必ず追加する（複数追加） */
+  /** 現在地周辺に1件だけ場を生成する（スロットルつき・地図移動などの逐次生成用）。 */
+  const generateSpotNearby = useCallback(async (lat: number, lng: number, force = false) => {
+    const now = Date.now();
+    const prev = lastGenRef.current;
+    // 5 分以内かつ 500 m 以内なら重複生成しない（force 時は無視）
+    if (!force && prev && now - prev.at < 5 * 60_000 && distanceKm(lat, lng, prev.lat, prev.lng) < 0.5) return;
+    lastGenRef.current = { lat, lng, at: now };
+    // 場を生成後、クエストが無い or force 時はこの場のクエストも生成する
+    await generateSpotAt(lat, lng, { selectActive: true, chainQuests: force || db.getAllQuests().length === 0 });
+  }, [generateSpotAt]);
+
+  /**
+   * 現在地周辺に「近い・中くらい・遠い」が混ざるよう、約 500m / 1000m / 3000m の3地点へ
+   * 場とクエストをまとめて生成する。地図に場が無いとき・「他のクエストを探す」で使う。
+   */
+  const generateVariedSpots = useCallback(async (centerLat: number, centerLng: number, force = false) => {
+    const now = Date.now();
+    const prev = lastGenRef.current;
+    // 同じ場所での 5 分以内の連続バッチ生成は抑止（force 時は無視）
+    if (!force && prev && now - prev.at < 5 * 60_000 && distanceKm(centerLat, centerLng, prev.lat, prev.lng) < 0.5) return;
+    lastGenRef.current = { lat: centerLat, lng: centerLng, at: now };
+    // 各距離帯にランダムな方位で1件ずつ。最初の1件だけアクティブにする。
+    await Promise.all(
+      VARIED_SPOT_DISTANCES_KM.map((km, i) => {
+        const { lat, lng } = destinationPoint(centerLat, centerLng, km, Math.random() * 360);
+        return generateSpotAt(lat, lng, { selectActive: i === 0, chainQuests: true });
+      }),
+    );
+  }, [generateSpotAt]);
+
+  /** 「他のクエストを探す」：現在地周辺に近・中・遠の場とクエストをまとめて追加する。 */
   const findMoreQuests = useCallback(() => {
     subscribePush(); // ユーザー操作のタイミングで通知購読（以降サーバ自動プッシュが届く）
-    const jitter = () => (Math.random() - 0.5) * 0.012; // 約 ±0.6km
-    generateSpotNearby(userLocation.lat + jitter(), userLocation.lng + jitter(), true);
-  }, [generateSpotNearby, userLocation]);
+    generateVariedSpots(userLocation.lat, userLocation.lng, true);
+  }, [generateVariedSpots, userLocation]);
 
   // Initial load
   useEffect(() => {
@@ -220,8 +257,8 @@ export default function HomePage() {
     const seed = (isDebugEnabled() && getDebugLocation()) || { lat: 35.6580, lng: 139.7514 };
     // 初回表示時：場が無ければ生成（クエスト有無に関係なく）。場があってクエストが無ければクエストだけ生成
     if (initSpots.length === 0) {
-      // 場も無い → 場を生成（場の生成後にクエストも自動チェーンされる）
-      generateSpotNearby(seed.lat, seed.lng);
+      // 場も無い → 近・中・遠の場を複数生成（場の生成後にクエストも自動チェーンされる）
+      generateVariedSpots(seed.lat, seed.lng);
     } else if (db.getAllQuests().length === 0) {
       // 場はあるがクエストが無い → クエストを生成
       const agentSpotIds = new Set(db.getAgents().map(a => a.spotId));
@@ -244,6 +281,36 @@ export default function HomePage() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 認証ユーザー（OAuth）をアプリのプロフィール＋同期ユーザーに反映する
+  const applyAuthUser = useCallback((u: import('@supabase/supabase-js').User) => {
+    const p = profileFromUser(u);
+    setAuthProfile(p);
+    setSyncUser(p.id); // クラウドデータを認証ユーザー単位に分離
+    // ローカルプロフィールを認証アイデンティティで更新
+    db.updateUserProfile('user-self', p.displayName);
+    db.setUserAvatar('user-self', p.avatarUrl);
+    try { localStorage.setItem('yaorozu_registered', '1'); } catch {}
+    setNeedsOnboard(false);
+    // 認証ユーザーのクラウドデータを復元
+    pullSnapshot().then(() => refreshDatabaseStates());
+    const self = db.getUser('user-self');
+    if (self) { setCurrentUser(self); setEditName(self.displayName); }
+  }, []);
+
+  // Supabase Auth セッション監視（OAuth リダイレクト復帰・サインイン/アウト）
+  useEffect(() => {
+    if (!isAuthConfigured()) return;
+    const sb = getSupabaseBrowser();
+    if (!sb) return;
+    sb.auth.getSession().then(({ data }) => { if (data.session?.user) applyAuthUser(data.session.user); });
+    const { data: sub } = sb.auth.onAuthStateChange((_e, session) => {
+      if (session?.user) applyAuthUser(session.user);
+      else { setAuthProfile(null); setSyncUser(null); }
+    });
+    return () => { sub.subscription.unsubscribe(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyAuthUser]);
 
   // 実際のGPS現在地を取得して反映
   const requestLocation = useCallback(() => {
@@ -279,17 +346,18 @@ export default function HomePage() {
     setDebugLocation(loc);       // localStorage に保持（リロードしても維持）
     setUserLocation(loc);
     setGeoStatus('ok');
-    lastGenRef.current = null;   // スロットルを解除し、ジャンプ先で確実に生成
-    generateSpotNearby(loc.lat, loc.lng);
+    // ジャンプ先は周囲に場が無いので、近・中・遠を確実に生成（force でスロットル無視）
+    generateVariedSpots(loc.lat, loc.lng, true);
     if (currentUser) db.logActivity({ type: 'map_move', userId: currentUser.id, source: 'human' });
-  }, [generateSpotNearby, currentUser]);
+  }, [generateVariedSpots, currentUser]);
 
-  // 場が0件かつ位置情報が確定したら自動生成（初回起動・全期限切れ後）
+  // 場が0件かつ位置情報が確定したら自動生成（初回起動・全期限切れ後）。
+  // 地図に場が無いので、近・中・遠が混ざるよう複数生成する。
   useEffect(() => {
     if (spots.length > 0) return;
     if (geoStatus === 'locating') return;
-    generateSpotNearby(userLocation.lat, userLocation.lng);
-  }, [spots.length, geoStatus, userLocation, generateSpotNearby]);
+    generateVariedSpots(userLocation.lat, userLocation.lng);
+  }, [spots.length, geoStatus, userLocation, generateVariedSpots]);
 
   useEffect(() => {
     if (activeSpot) {
@@ -436,6 +504,31 @@ export default function HomePage() {
             <span className="text-shrine-red">YAOROZU</span><span className="text-gray-900"> QUEST</span>
           </div>
           <p className="text-[13px] text-gray-500 mb-5">巡礼者として、名前を授かりましょう。</p>
+
+          {/* アカウントでログイン（OAuth 設定時のみ表示） */}
+          {isAuthConfigured() && (
+            <div className="mb-5">
+              <button
+                onClick={() => signInWithProvider('google')}
+                className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 text-gray-800 font-black py-3 rounded-xl hover:bg-gray-50 active:scale-[0.99] transition-all cursor-pointer mb-2"
+              >
+                <span className="text-base">🔵</span> Google で続ける
+              </button>
+              <button
+                onClick={() => signInWithProvider('apple')}
+                className="w-full flex items-center justify-center gap-2 bg-black text-white font-black py-3 rounded-xl hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer"
+              >
+                <span className="text-base"></span> Apple で続ける
+              </button>
+              <div className="flex items-center gap-2 my-4">
+                <span className="flex-1 h-px bg-gray-200" />
+                <span className="text-[11px] text-gray-400">または</span>
+                <span className="flex-1 h-px bg-gray-200" />
+              </div>
+              <p className="text-[12px] font-bold text-gray-500 mb-2">ゲストとして始める</p>
+            </div>
+          )}
+
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={avatarUrl} alt="アバター" className="w-24 h-24 mx-auto rounded-full border-4 border-shrine-red/30 bg-sky-50 mb-4" />
           <input
@@ -506,7 +599,7 @@ export default function HomePage() {
                 onNeedSpots={() => {
                   const existingSpots = db.getSpots();
                   if (existingSpots.length === 0) {
-                    generateSpotNearby(userLocation.lat, userLocation.lng);
+                    generateVariedSpots(userLocation.lat, userLocation.lng);
                   } else {
                     const agentIds = new Set(db.getAgents().map(a => a.spotId));
                     const target = existingSpots.find(s => agentIds.has(s.id)) ?? existingSpots[0];
@@ -675,6 +768,26 @@ export default function HomePage() {
                       );
                     })()}
                   </div>
+
+                  {/* ログイン状態（OAuth） */}
+                  {isAuthConfigured() && (
+                    <div className="relative mt-4 flex items-center justify-center gap-2 text-[12px]">
+                      {authProfile ? (
+                        <>
+                          <span className="text-gray-500 truncate max-w-[180px]">🔓 {authProfile.email ?? authProfile.displayName}</span>
+                          <button
+                            onClick={async () => { await signOutAuth(); setSyncUser(null); setAuthProfile(null); window.location.reload(); }}
+                            className="font-black text-shrine-red hover:underline cursor-pointer"
+                          >ログアウト</button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-gray-400">ゲストでプレイ中</span>
+                          <button onClick={() => signInWithProvider('google')} className="font-black text-shrine-red hover:underline cursor-pointer">Googleでログイン</button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* タブ */}
@@ -885,24 +998,25 @@ export default function HomePage() {
                   if (key === 'home') {
                     setHomeResetSignal(s => s + 1);
                     if (currentUser) db.logActivity({ type: 'home_view', userId: currentUser.id, source: 'human' });
-                    generateSpotNearby(userLocation.lat, userLocation.lng);
-                    // クエストが無い場合は最近の場からクエストを生成
-                    if (db.getAllQuests().length === 0) {
-                      const nearSpots = db.getSpots();
-                      if (nearSpots.length > 0) {
+                    // 場が無ければ近・中・遠を複数生成。あれば現在地に1件だけ追加（スロットルつき）。
+                    if (db.getSpots().length === 0) {
+                      generateVariedSpots(userLocation.lat, userLocation.lng);
+                    } else {
+                      generateSpotNearby(userLocation.lat, userLocation.lng);
+                      // 場はあるがクエストが無い場合は最近の場からクエストを生成
+                      if (db.getAllQuests().length === 0) {
                         const agentSpotIds = new Set(db.getAgents().map(a => a.spotId));
-                        const spotWithAgent = nearSpots.find(s => agentSpotIds.has(s.id));
+                        const spotWithAgent = db.getSpots().find(s => agentSpotIds.has(s.id));
                         if (spotWithAgent) {
                           generateQuestsForSpot(spotWithAgent, db.getAgentBySpot(spotWithAgent.id) ?? null);
                         }
                         // 場はあるが agent が無い場合は generateSpotNearby 内でクエスト生成がチェーンされる
                       }
-                      // 場が無い場合は generateSpotNearby が内部でクエストも生成する
                     }
                   }
                   if (key === 'quest' && spots.length === 0) {
-                    // マップに場が表示されていない場合は生成する
-                    generateSpotNearby(userLocation.lat, userLocation.lng);
+                    // マップに場が表示されていない場合は近・中・遠を複数生成する
+                    generateVariedSpots(userLocation.lat, userLocation.lng);
                   }
                   setActiveTab(key);
                 }}

@@ -31,8 +31,13 @@ const SYNC_KEYS = [
   'yaorozu_app_settings',
 ];
 
-// 単一ユーザーデモのためスナップショットIDは固定。将来は認証ユーザーIDに。
-const SNAPSHOT_ID = 'user-self';
+// スナップショットID。未ログインは 'user-self'、OAuth ログイン中は認証ユーザーIDに切り替える。
+let SNAPSHOT_ID = 'user-self';
+
+/** 同期対象ユーザー（クラウドスナップショットの分離キー）を設定する。認証ログイン/ログアウト時に呼ぶ。 */
+export function setSyncUser(id: string | null): void {
+  SNAPSHOT_ID = id || 'user-self';
+}
 
 let cloudEnabled: boolean | null = null;
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
