@@ -178,7 +178,7 @@ export function Blueprint() {
 
         {/* ① 場（すべての中心） */}
         <Stage tag="場" sub="場のゴール = 場の価値を高める" color="#2563eb">
-          <Node icon="📍" name="場 / スポット" count={spots} />
+          <Node icon="📍" name="場" count={spots} />
           <div className="rounded-xl border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white p-3">
             <p className="text-[11px] font-black text-blue-600 mb-2">場の中心データ（神の知識になる）</p>
             <div className="grid grid-cols-2 gap-2">
@@ -212,6 +212,8 @@ export function Blueprint() {
 
         {/* ② 鋳造（神・工房） */}
         <Stage tag="八百万神" sub="場に宿る神が、価値・課題・魂から クエスト を鋳造する" color="#d97706">
+          {/* 大日如来（根源・一者） */}
+          <Node icon="☸️" name="大日如来" count={1} />
           {/* 場に宿る神（Agent）＝ 工房の主 */}
           <Node icon="🦊" name="八百万の神 (Agent)" count={spots} />
           <div className="flex items-center gap-2 pl-6 text-[11px] font-bold text-gray-400">└─ が鋳造する ─▶</div>
