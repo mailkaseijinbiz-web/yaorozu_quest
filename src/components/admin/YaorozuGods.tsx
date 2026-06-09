@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Brain, Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Trash2 } from 'lucide-react';
 import { Card, Field, inputCls, PER_PAGE, Pager, Modal, ModalActions } from './ui';
 import { RulesPanel } from './RulesPanel';
 import { db, Spot, Agent } from '../../lib/db';
@@ -133,8 +133,6 @@ export function YaorozuGods({ spots, onChange }: { spots: Spot[]; onChange: () =
           const photoN = s.photos?.length ?? 0;
           const taskN = resolveTaskTypes(s).length;
           const lv = godLevel(ag, taskN, ugcN, photoN);
-          const brainCustom = !!(ag && ag.systemPrompt.trim());
-          const knowledgeCustom = !!(ag && (ag.identityMd || ag.soulMd));
           const tone = ag?.voiceTone || '神秘的';
           const spotQuests = db.getQuestsForSpot(s.id); // この神が所持するクエスト（複数）
           return (
@@ -149,9 +147,6 @@ export function YaorozuGods({ spots, onChange }: { spots: Spot[]; onChange: () =
                   <p className="text-[11px] text-gray-500 truncate">{s.name}・{s.category}</p>
                   <div className="flex items-center gap-1 mt-1 flex-wrap text-[10px] font-bold">
                     <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">口調 {tone}</span>
-                    <span className={`px-1.5 py-0.5 rounded ${brainCustom ? 'bg-emerald-50 text-emerald-600' : 'bg-gray-100 text-gray-400'}`}>頭脳 {brainCustom ? 'カスタム' : '既定'}</span>
-                    <span className={`px-1.5 py-0.5 rounded ${knowledgeCustom ? 'bg-violet-50 text-violet-600' : 'bg-gray-100 text-gray-400'}`}>知識 {knowledgeCustom ? '編集済' : '自動'}</span>
-                    <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-600">権能 {taskN}</span>
                     <span className="px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">クエスト {spotQuests.length}</span>
                   </div>
                   {spotQuests.length > 0 && (
