@@ -35,6 +35,8 @@ const FALLBACK_CURRENT_USER: UserType = {
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [isRevoked, setIsRevoked] = useState(false); // 管理者削除によるアカウント失効
+  const [needsOnboard, setNeedsOnboard] = useState(false); // 初回起動の登録（オンボーディング）
+  const [onboardName, setOnboardName] = useState(''); // オンボーディングの名前入力
   const [spots, setSpots] = useState<Spot[]>([]);
   const [activeSpot, setActiveSpot] = useState<Spot | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -199,6 +201,11 @@ export default function HomePage() {
     const self = db.getUser('user-self') ?? FALLBACK_CURRENT_USER;
     setCurrentUser(self);
     setEditName(self.displayName);
+    // 初回起動：未登録ならオンボーディング（名前・アバター設定）へ
+    if (typeof window !== 'undefined' && localStorage.getItem('yaorozu_registered') !== '1') {
+      setNeedsOnboard(true);
+      setOnboardName(self.displayName && self.displayName !== '巡礼者' ? self.displayName : '');
+    }
     setUserStats(db.getUserStats('user-self'));
     setActiveChallengeId(db.getChallengeProgress().activeId);
 
@@ -395,13 +402,60 @@ export default function HomePage() {
           <button
             onClick={() => {
               db.reinstateUser('user-self');
-              // ユーザーデータをクリアして再スタート
-              ['yaorozu_users','yaorozu_user_stats','yaorozu_challenge_progress','yaorozu_challenge_photos','yaorozu_goshuin_user-self'].forEach(k => localStorage.removeItem(k));
+              // ユーザーデータをクリアして再スタート（登録もリセットしてオンボーディングへ）
+              ['yaorozu_users','yaorozu_user_stats','yaorozu_challenge_progress','yaorozu_challenge_photos','yaorozu_goshuin_user-self','yaorozu_registered'].forEach(k => localStorage.removeItem(k));
               window.location.reload();
             }}
             className="w-full bg-shrine-red text-white font-black py-3 rounded-xl hover:opacity-90 cursor-pointer"
           >
             新たな巡礼者として始める
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 初回起動：巡礼者登録（オンボーディング）
+  if (needsOnboard) {
+    const previewName = onboardName.trim() || 'あなた';
+    const avatarUrl = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(previewName)}`;
+    const register = () => {
+      const name = onboardName.trim();
+      if (!name) return;
+      const updated = db.updateUserProfile('user-self', name); // displayName + avatar を設定
+      setCurrentUser(updated);
+      setEditName(updated.displayName);
+      try { localStorage.setItem('yaorozu_registered', '1'); } catch {}
+      if (currentUser) db.logActivity({ type: 'home_view', userId: 'user-self', source: 'human', detail: '登録' });
+      setNeedsOnboard(false);
+      refreshDatabaseStates();
+    };
+    return (
+      <div className="flex-1 min-h-dvh bg-[#eaecef] flex items-center justify-center p-6">
+        <div className="bg-white rounded-3xl shadow-xl p-8 max-w-xs w-full text-center">
+          <div className="text-2xl font-black tracking-tight leading-none mb-1">
+            <span className="text-shrine-red">YAOROZU</span><span className="text-gray-900"> QUEST</span>
+          </div>
+          <p className="text-[13px] text-gray-500 mb-5">巡礼者として、名前を授かりましょう。</p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={avatarUrl} alt="アバター" className="w-24 h-24 mx-auto rounded-full border-4 border-shrine-red/30 bg-sky-50 mb-4" />
+          <input
+            type="text"
+            value={onboardName}
+            onChange={(e) => setOnboardName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') register(); }}
+            maxLength={12}
+            autoFocus
+            placeholder="巡礼者の名前"
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-center text-base text-gray-900 focus:outline-none focus:border-shrine-red mb-2"
+          />
+          <p className="text-[11px] text-gray-400 mb-4">アバターは名前から自動生成されます（後でクエストの「アバターを撮る」で写真にできます）。</p>
+          <button
+            onClick={register}
+            disabled={!onboardName.trim()}
+            className="w-full bg-shrine-red text-white font-black py-3 rounded-xl hover:opacity-90 disabled:opacity-40 cursor-pointer"
+          >
+            巡礼をはじめる
           </button>
         </div>
       </div>
