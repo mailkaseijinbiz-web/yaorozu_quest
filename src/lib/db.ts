@@ -1291,7 +1291,7 @@ class MockDatabase {
       })
       .filter((r) => r.toku > 0)
       .sort((a, b) => b.toku - a.toku)
-      .slice(0, 5);
+      .slice(0, 10);
   }
 
   /** スポットに集まった徳の総量（地図のフキダシ「徳 123」用）。

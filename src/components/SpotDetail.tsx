@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag } from 'lucide-react';
+import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark } from 'lucide-react';
 import { Spot, Agent, User, db, isVerifiedSpot } from '../lib/db';
 import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
@@ -117,7 +117,7 @@ export default function SpotDetail({
   onStartChallenge,
   onGoShuinGranted,
 }: SpotDetailProps) {
-  const [tab, setTab] = useState<'chat' | 'requests' | 'photos'>('chat');
+  const [tab, setTab] = useState<'chat' | 'requests' | 'photos' | 'leaderboard'>('chat');
   const [agent] = useState<Agent>(() => resolveAgent(spot));
 
   // UGCで変化する状態（写真・楽しみ方）は db から都度読む
@@ -426,18 +426,65 @@ export default function SpotDetail({
       {/* ── タブ切替 ── */}
       <div className="flex border-b border-black/5 bg-white flex-shrink-0">
         {([
-          { key: 'chat', label: '会話', icon: MessageCircle },
-          { key: 'requests', label: 'クエスト', icon: Flag },
-          { key: 'photos', label: '写真', icon: Camera },
+          { key: 'chat',        label: '会話',   icon: MessageCircle },
+          { key: 'requests',    label: 'クエスト', icon: Flag },
+          { key: 'photos',      label: '写真',   icon: Camera },
+          { key: 'leaderboard', label: '石碑',   icon: Landmark },
         ] as const).map(({ key, label, icon: Icon }) => (
-          <button key={key} onClick={() => setTab(key)} className={`flex-1 py-3 flex flex-row items-center justify-center gap-1.5 text-[13px] font-black transition-all cursor-pointer border-b-2 ${tab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
+          <button key={key} onClick={() => setTab(key)} className={`flex-1 py-2.5 flex flex-col items-center justify-center gap-0.5 text-[10px] font-black transition-all cursor-pointer border-b-2 ${tab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
             <Icon className="w-4 h-4" />
             <span>{label}</span>
           </button>
         ))}
       </div>
 
-      {tab === 'photos' ? (
+      {tab === 'leaderboard' ? (
+        /* ── 石碑（参拝者ランキング） ── */
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+            <div className="px-4 pt-4 pb-2 flex items-center gap-2 border-b border-black/5">
+              <Landmark className="w-4 h-4 text-stone-500" />
+              <h3 className="text-sm font-black text-gray-800">石碑</h3>
+              <span className="text-[11px] text-gray-400 ml-auto">この地に捧げた徳</span>
+            </div>
+            {(() => {
+              const ranking = db.getSpotRanking(spot.id);
+              if (ranking.length === 0) {
+                return (
+                  <div className="text-center py-10">
+                    <div className="text-4xl mb-2">🪨</div>
+                    <p className="text-sm text-gray-400">まだ参拝者がいません</p>
+                    <p className="text-xs text-gray-300 mt-1">この地で徳を積んで刻まれよう</p>
+                  </div>
+                );
+              }
+              const RANK_MEDAL = ['🥇','🥈','🥉'];
+              return (
+                <ul>
+                  {ranking.map(({ user, toku }, i) => {
+                    const isSelf = user.id === currentUser.id;
+                    return (
+                      <li key={user.id} className={`flex items-center gap-3 px-4 py-3 border-b border-black/4 last:border-0 ${isSelf ? 'bg-amber-50/60' : ''}`}>
+                        <span className="w-6 text-center text-base flex-shrink-0">
+                          {i < 3 ? RANK_MEDAL[i] : <span className="text-[12px] font-black text-gray-400">{i + 1}</span>}
+                        </span>
+                        <img src={user.avatarUrl} alt={user.displayName} className="w-8 h-8 rounded-full border-2 flex-shrink-0 object-cover" style={{ borderColor: user.avatarFrameColor || '#e5e7eb' }} />
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-[13px] font-black truncate ${isSelf ? 'text-amber-700' : 'text-gray-800'}`}>
+                            {user.displayName}{isSelf && <span className="ml-1 text-[10px] text-amber-500">（あなた）</span>}
+                          </p>
+                          <p className="text-[10px] text-gray-400">{user.currentTitle || '巡礼者'}</p>
+                        </div>
+                        <span className="text-sm font-black text-amber-600 flex-shrink-0">{toku.toLocaleString()} 徳</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              );
+            })()}
+          </div>
+        </div>
+      ) : tab === 'photos' ? (
         /* ── みんなの写真（タブ） ── */
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-black/5">
