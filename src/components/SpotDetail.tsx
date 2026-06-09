@@ -140,9 +140,16 @@ export default function SpotDetail({
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
-  const speak = async (text: string) => {
+  const greetSpokenRef = useRef<string | null>(null); // 読み上げ済みスポットID（二重再生防止）
+  const stopAudio = () => {
     try { ttsAudioRef.current?.pause(); ttsAudioRef.current = null; } catch {}
+    try { window.speechSynthesis?.cancel(); } catch {}
+  };
+  const speak = async (text: string) => {
+    stopAudio();
     const url = await _fetchTtsUrl(text);
+    // 取得中に他の speak が走っていたら鳴らさない
+    if (ttsAudioRef.current !== null) return;
     if (url) {
       const audio = new Audio(url);
       ttsAudioRef.current = audio;
@@ -305,8 +312,13 @@ export default function SpotDetail({
       setMessages([
         { id: `greet-${Date.now()}`, sender: 'agent', text: greet, createdAt: new Date().toISOString() },
       ]);
-      speak(greet);
+      // スポットごとに1度だけ読み上げる（StrictMode の二重呼び出し防止）
+      if (greetSpokenRef.current !== spot.id) {
+        greetSpokenRef.current = spot.id;
+        speak(greet);
+      }
     }
+    return () => { stopAudio(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, messages.length, agent.name, spot.name, currentUser.displayName, nearbyChallenge]);
 
