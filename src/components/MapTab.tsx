@@ -113,6 +113,7 @@ interface MapTabProps {
   onAdvanceChallenge?: (stepId: string, photo?: string | null) => void; // 次の目的地ステップを達成（証拠写真つき）
   currentUser: User; // 近くのクエストカード表示・レベル判定用
   onStartChallenge?: (challengeId: string) => void; // 未参加時のカードから挑戦開始
+  onMapMove?: (center: { lat: number; lng: number }) => void; // 地図を移動させたとき（アクティビティログ用）
 }
 
 
@@ -129,6 +130,7 @@ export default function MapTab({
   onAdvanceChallenge,
   currentUser,
   onStartChallenge,
+  onMapMove,
 }: MapTabProps) {
   const displaySpots = spots;
 
@@ -457,6 +459,7 @@ export default function MapTab({
           controlsBottom={controlsBottom}
           focusGoalToken={focusGoalToken}
           hideControls={introShowing}
+          onMapMove={onMapMove}
         />
       </div>
 

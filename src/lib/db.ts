@@ -129,6 +129,9 @@ const INITIAL_USERS: User[] = [
 ];
 
 const INITIAL_SPOTS: Spot[] = [
+  // リセット済み — 管理画面から追加してください
+];
+const _UNUSED_SPOTS_ARCHIVE: Spot[] = [
   {
     id: 'spot-jukusen',
     name: '成願寺',
@@ -328,10 +331,14 @@ const INITIAL_SPOTS: Spot[] = [
   },
   // 東京周辺の手続き生成スポット（合計で約1000件になる）
   ...generateTokyoSpots(),
-];
+]; // _UNUSED_SPOTS_ARCHIVE end
 
 
 const INITIAL_AGENTS: Agent[] = [
+  // リセット済み — 管理画面から追加してください
+  // 旧データは yaorozu_agents キーに残存（無効）
+];
+const _UNUSED_AGENTS_ARCHIVE: Agent[] = [
   {
     id: 'agent-sensoji',
     spotId: 'spot-sensoji',
@@ -387,7 +394,7 @@ const INITIAL_AGENTS: Agent[] = [
     accessoryType: '剣',
     voiceTone: '厳格'
   }
-];
+]; // _UNUSED_AGENTS_ARCHIVE end
 
 const INITIAL_UGC: UgcPost[] = [
   {
@@ -512,14 +519,14 @@ const INITIAL_TRIVIA: TriviaEntry[] = [
 // Local Storage Keys
 const KEYS = {
   USERS: 'yaorozu_users',
-  SPOTS: 'yaorozu_spots_v2', // v2: 東京1000スポットへ拡張のため再シード
-  AGENTS: 'yaorozu_agents',
+  SPOTS: 'yaorozu_spots_v3', // v3: リセット（空からスタート）
+  AGENTS: 'yaorozu_agents_v2', // v2: リセット（空からスタート）
   UGC: 'yaorozu_ugc',
   AFFILIATE: 'yaorozu_affiliate',
   STATS: 'yaorozu_user_stats',
   CHALLENGE: 'yaorozu_challenge_progress',
   CHALLENGE_PHOTOS: 'yaorozu_challenge_photos',
-  QUESTS: 'yaorozu_generated_quests', // 場ごとに生成したクエスト（プレイヤーが読む実ストア）
+  QUESTS: 'yaorozu_quests_v2', // v2: リセット（空からスタート）
   QUEST_RULES: 'yaorozu_quest_rules', // クエスト生成のルール（方針）
   SPOT_RULES: 'yaorozu_spot_rules', // 場の生成のルール（方針）
   SYSTEM_ROLE: 'yaorozu_system_role', // Godの役割（システムの目的）
@@ -528,6 +535,8 @@ const KEYS = {
   TRIVIA: 'yaorozu_trivia',
   ACTIVITIES: 'yaorozu_activities',
   DAINICHI: 'yaorozu_dainichi_identity',
+  API_CALLS: 'yaorozu_api_calls',     // AI / TTS API呼び出しログ（日別集計）
+  REVOKED: 'yaorozu_revoked_users',   // 削除済みユーザーID（再ログイン強制用）
 };
 
 /** クエスト生成ルール（生成方針）の既定値。クエストタブで編集できる。 */
@@ -629,7 +638,13 @@ export interface MetricsSnapshot {
   users: number;     // ユーザー
   activities: number;// アクティビティ
   toku: number;      // 徳の総和
+  aiCalls: number;   // AI API 累計リクエスト数
+  ttsCalls: number;  // TTS API 累計リクエスト数
 }
+
+// API 呼び出しログ: { [YYYY-MM-DD]: { ai_chat: n, ai_generate: n, tts: n } }
+export type ApiCallType = 'ai_chat' | 'ai_generate' | 'tts';
+export type ApiCallsByDay = Record<string, Partial<Record<ApiCallType, number>>>;
 
 // チャレンジ進捗
 export interface ChallengeProgress {
@@ -639,11 +654,13 @@ export interface ChallengeProgress {
 }
 
 // アクティビティ（クエスト参加・場所訪問・依頼達成などの行動記録）
-export type ActivityType = 'quest_join' | 'quest_step' | 'quest_complete' | 'visit' | 'task' | 'photo' | 'ugc';
+export type ActivityType = 'quest_join' | 'quest_step' | 'quest_complete' | 'visit' | 'task' | 'photo' | 'ugc' | 'home_view' | 'map_move' | 'spot_generate';
+export type ActivitySource = 'human' | 'system';
 export interface Activity {
   id: string;
   type: ActivityType;
   userId: string;
+  source?: ActivitySource; // 'human'=ユーザー操作, 'system'=自動生成（未設定は human 扱い）
   spotId?: string;       // 場所がある行動（訪問・依頼・写真）
   challengeId?: string;  // クエストがある行動（参加・達成・制覇）
   detail?: string;       // 補足（タスク種別など）
@@ -791,6 +808,12 @@ class MockDatabase {
   getCurrentMetrics(): Omit<MetricsSnapshot, 'ts'> {
     const spots = this.getSpots();
     const users = this.getUsers();
+    const apiByDay = this.getApiCallsByDay();
+    let aiCalls = 0, ttsCalls = 0;
+    for (const day of Object.values(apiByDay)) {
+      aiCalls += (day.ai_chat ?? 0) + (day.ai_generate ?? 0);
+      ttsCalls += day.tts ?? 0;
+    }
     return {
       spots: spots.length,
       quests: this.getAllQuests().length,
@@ -799,7 +822,46 @@ class MockDatabase {
       users: users.length,
       activities: this.getActivities().length,
       toku: users.reduce((n, u) => n + (u.totalToku ?? 0), 0),
+      aiCalls,
+      ttsCalls,
     };
+  }
+
+  // API 呼び出しログ
+  getApiCallsByDay(): ApiCallsByDay {
+    return this.load<ApiCallsByDay>(KEYS.API_CALLS, {});
+  }
+
+  trackApiCall(type: ApiCallType): void {
+    const date = new Date().toISOString().slice(0, 10);
+    const log = this.getApiCallsByDay();
+    const day = log[date] ?? {};
+    day[type] = (day[type] ?? 0) + 1;
+    log[date] = day;
+    // 60日より古いエントリを削除
+    const cutoff = new Date(Date.now() - 60 * 86400_000).toISOString().slice(0, 10);
+    for (const k of Object.keys(log)) { if (k < cutoff) delete log[k]; }
+    this.save(KEYS.API_CALLS, log);
+  }
+
+  // ユーザー失効（管理者削除 → 再ログイン強制）
+  getRevokedUsers(): string[] {
+    return this.load<string[]>(KEYS.REVOKED, []);
+  }
+
+  isRevoked(userId: string): boolean {
+    return this.getRevokedUsers().includes(userId);
+  }
+
+  revokeUser(userId: string): void {
+    const list = this.getRevokedUsers();
+    if (!list.includes(userId)) {
+      this.save(KEYS.REVOKED, [...list, userId]);
+    }
+  }
+
+  reinstateUser(userId: string): void {
+    this.save(KEYS.REVOKED, this.getRevokedUsers().filter(id => id !== userId));
   }
 
   getMetricsSnapshots(): MetricsSnapshot[] {
@@ -979,6 +1041,7 @@ class MockDatabase {
 
   adminDeleteUser(id: string): void {
     this.save(KEYS.USERS, this.getUsers().filter(u => u.id !== id));
+    this.revokeUser(id); // 次回ログイン時に再登録を強制
   }
 
   adminDeleteUgc(id: string): void {

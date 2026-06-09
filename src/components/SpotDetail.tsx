@@ -25,6 +25,7 @@ async function _fetchTtsUrl(text: string): Promise<string | null> {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       _ttsCache.set(text, url);
+      db.trackApiCall('tts');
       return url;
     }
   } catch { /* fallback */ }
@@ -363,6 +364,7 @@ export default function SpotDetail({
       });
       if (!res.ok) throw new Error('failed');
       const data = await res.json();
+      db.trackApiCall('ai_chat');
       setMessages((prev) => [...prev, { id: `a-${Date.now()}`, sender: 'agent', text: data.response, createdAt: new Date().toISOString(), mode: data.mode }]);
     } catch {
       setMessages((prev) => [...prev, { id: `err-${Date.now()}`, sender: 'agent', text: '神聖なる通信に乱れが生じた。しばし時をおいて、再び問いかけてくれ。', createdAt: new Date().toISOString() }]);

@@ -50,7 +50,11 @@ export function YaorozuGods({ spots, onChange }: { spots: Spot[]; onChange: () =
   const [godRules, setGodRules] = useState(() => db.getDainichiIdentity() ?? buildDainichiIdentityMd());
   const [godRulesSaved, setGodRulesSaved] = useState(false);
 
-  const filtered = spots.filter((s) => (s.godName || '').includes(search) || s.name.includes(search) || s.category.includes(search));
+  // エージェント（AI人格）が登録されている場のみ表示
+  const agentSpotIds = new Set(db.getAgents().map((a) => a.spotId));
+  const filtered = spots
+    .filter((s) => agentSpotIds.has(s.id))
+    .filter((s) => (s.godName || '').includes(search) || s.name.includes(search) || s.category.includes(search));
   const pageItems = filtered.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE);
 
   const openGod = (s: Spot) => {

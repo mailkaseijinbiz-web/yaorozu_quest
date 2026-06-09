@@ -45,7 +45,7 @@ export function SpotsManager({ spots, onChange }: { spots: Spot[]; onChange: () 
         />
       </div>
 
-      <Toolbar onAdd={() => setEditing(emptySpot())} search={search} setSearch={(v) => { setSearch(v); setPage(0); }} addLabel="場を追加" />
+      <Toolbar search={search} setSearch={(v) => { setSearch(v); setPage(0); }} />
       <p className="text-[11px] text-gray-400 mb-2">全 {filtered.length} 件</p>
       <div className="grid gap-2">
         {pageItems.map(s => (

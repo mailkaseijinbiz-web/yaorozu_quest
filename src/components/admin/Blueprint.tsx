@@ -113,6 +113,7 @@ export function Blueprint() {
         const data = await res.json();
         if (Array.isArray(data.quests) && data.quests.length) {
           db.saveGeneratedQuests(s.id, data.quests);
+          db.trackApiCall('ai_generate');
           ok++;
         }
       } catch {

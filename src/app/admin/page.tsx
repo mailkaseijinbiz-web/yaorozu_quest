@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Shield, MapPin, Users as UsersIcon, Lock, LogOut, RotateCcw, Flag, Network, Brain, Activity as ActivityIcon, LineChart } from 'lucide-react';
 import { db, Spot, User } from '../../lib/db';
+import { pullSnapshot } from '../../lib/cloud-sync';
 import { CHALLENGES } from '../../data/challenges';
 import { Blueprint } from '../../components/admin/Blueprint';
 import { Analytics } from '../../components/admin/Analytics';
@@ -38,17 +39,22 @@ export default function AdminPage() {
   // Data
   const [spots, setSpots] = useState<Spot[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [agentCount, setAgentCount] = useState(0);
 
   const refresh = () => {
     setSpots(db.getSpots());
     setUsers(db.getUsers());
+    setAgentCount(db.getAgents().length);
   };
 
   useEffect(() => {
     const ok = sessionStorage.getItem(AUTH_KEY) === '1';
     setAuthed(ok);
     setChecking(false);
-    if (ok) refresh();
+    if (ok) {
+      // Supabase からスナップショットを復元してから画面を更新
+      pullSnapshot().then(() => refresh());
+    }
   }, []);
 
   const handleLogin = (e: React.FormEvent) => {
@@ -144,7 +150,7 @@ export default function AdminPage() {
       <nav className="px-4 sm:px-6 pt-4 flex gap-2 flex-wrap">
         {TABS.map(({ key, label, icon: Icon }) => {
           const counts: Record<AdminTab, number | null> = {
-            blueprint: null, analytics: null, gods: spots.length, activity: db.getActivities().length,
+            blueprint: null, analytics: null, gods: agentCount, activity: db.getActivities().length,
             spots: spots.length, users: users.length,
             challenges: CHALLENGES.length,
           };

@@ -33,6 +33,7 @@ interface LeafletMapProps {
   controlsBottom?: number; // 現在地ボタンの下端からの位置（下部オーバーレイの上端+余白）
   focusGoalToken?: number; // 値が変わると目的地を地図中央へ寄せる
   hideControls?: boolean; // 導入表示中は現在地ボタンを隠し、解除時にふわっと出す
+  onMapMove?: (center: { lat: number; lng: number }) => void; // ユーザーが地図を移動させたとき（スロットル済み）
 }
 
 export default function LeafletMap({
@@ -46,6 +47,7 @@ export default function LeafletMap({
   controlsBottom = 210,
   focusGoalToken,
   hideControls = false,
+  onMapMove,
 }: LeafletMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -57,6 +59,9 @@ export default function LeafletMap({
   // 最新の現在地を参照（再生成を避けつつ、ゴール演出で使う）
   const userLocationRef = useRef(userLocation);
   userLocationRef.current = userLocation;
+  // onMapMove を ref 化してクロージャ内から最新コールバックを呼べるようにする
+  const onMapMoveRef = useRef(onMapMove);
+  onMapMoveRef.current = onMapMove;
 
   // 地図の移動に追従して再描画するためのバージョン
   const [mapVersion, setMapVersion] = useState(0);
@@ -83,6 +88,17 @@ export default function LeafletMap({
     map.on('move', bump);
     map.on('zoomend', bump);
     setMapVersion((v) => v + 1);
+
+    // 地図移動をアクティビティログへ（60秒スロットル）
+    let lastMoveLog = 0;
+    map.on('moveend', () => {
+      const now = Date.now();
+      if (now - lastMoveLog > 60_000) {
+        lastMoveLog = now;
+        const c = map.getCenter();
+        onMapMoveRef.current?.({ lat: c.lat, lng: c.lng });
+      }
+    });
 
     // コンテナの実寸が確定/変化したら投影をやり直す。
     // PWA（standalone）ではセーフエリアやビューポート高がブラウザと異なり、

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, Clock, Share2, X, Stamp } from 'lucide-react';
 import { db, Spot, Agent, User as UserType, UserContribution, Activity } from '../lib/db';
 import { getGoShuinList, Goshuin } from '../lib/goshuin';
@@ -30,6 +30,7 @@ const FALLBACK_CURRENT_USER: UserType = {
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<TabType>('home');
+  const [isRevoked, setIsRevoked] = useState(false); // 管理者削除によるアカウント失効
   const [spots, setSpots] = useState<Spot[]>([]);
   const [activeSpot, setActiveSpot] = useState<Spot | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -77,6 +78,31 @@ export default function HomePage() {
   // 達成クエストの振り返り modal
   const [reviewQuest, setReviewQuest] = useState<Challenge | null>(null);
 
+  // GPS 場の自動生成（最後に生成した座標と時刻を保持 — 近すぎる・頻度高すぎる場合はスキップ）
+  const lastGenRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
+
+  const generateSpotNearby = useCallback(async (lat: number, lng: number) => {
+    const now = Date.now();
+    const prev = lastGenRef.current;
+    // 5 分以内かつ 500 m 以内なら重複生成しない
+    if (prev && now - prev.at < 5 * 60_000 && distanceKm(lat, lng, prev.lat, prev.lng) < 0.5) return;
+    lastGenRef.current = { lat, lng, at: now };
+    try {
+      const res = await fetch('/api/generate-spot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat, lng }),
+      });
+      if (!res.ok) return;
+      const { spot, agent } = await res.json() as { spot: Spot; agent: Agent };
+      db.adminSaveSpot(spot);
+      db.adminSaveAgent(agent);
+      db.trackApiCall('ai_generate');
+      db.logActivity({ type: 'spot_generate', userId: 'system', source: 'system', spotId: spot.id, detail: spot.name });
+      refreshDatabaseStates();
+    } catch { /* ネットワークエラーは無視 */ }
+  }, []);
+
   // Initial load
   useEffect(() => {
     setSpots(db.getSpots());
@@ -88,6 +114,11 @@ export default function HomePage() {
     const initialSpot = db.getSpots()[0];
     setActiveSpot(initialSpot);
 
+    // 管理者に削除されたユーザーは再ログイン画面へ
+    if (db.isRevoked('user-self')) {
+      setIsRevoked(true);
+      return;
+    }
     const self = db.getUser('user-self');
     if (self) {
       setCurrentUser(self);
@@ -235,6 +266,30 @@ export default function HomePage() {
     { key: 'mypage' as TabType, label: 'マイページ', icon: UserCircle2 },
   ];
 
+  // アカウント削除 → 再ログイン画面
+  if (isRevoked) {
+    return (
+      <div className="flex-1 min-h-dvh bg-[#eaecef] flex items-center justify-center p-6">
+        <div className="bg-white rounded-3xl shadow-xl p-8 max-w-xs w-full text-center">
+          <div className="text-5xl mb-4">⛩️</div>
+          <h1 className="text-lg font-black text-gray-900 mb-2">アカウントが削除されました</h1>
+          <p className="text-sm text-gray-500 mb-6 leading-relaxed">管理者によってアカウントが削除されました。<br />再度ご利用には再登録が必要です。</p>
+          <button
+            onClick={() => {
+              db.reinstateUser('user-self');
+              // ユーザーデータをクリアして再スタート
+              ['yaorozu_users','yaorozu_user_stats','yaorozu_challenge_progress','yaorozu_challenge_photos','yaorozu_goshuin_user-self'].forEach(k => localStorage.removeItem(k));
+              window.location.reload();
+            }}
+            className="w-full bg-shrine-red text-white font-black py-3 rounded-xl hover:opacity-90 cursor-pointer"
+          >
+            新たな巡礼者として始める
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 min-h-dvh bg-[#eaecef] flex items-center justify-center font-sans overflow-hidden p-0 sm:p-4 md:p-8 relative">
       {/* Background glows */}
@@ -304,6 +359,10 @@ export default function HomePage() {
                   onStartChallenge={(cid) => { db.setActiveChallenge(cid); setActiveChallengeId(cid); }}
                   activeChallenge={activeChallengeId ? db.getQuest(activeChallengeId) ?? null : null}
                   onClearChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
+                  onMapMove={(center) => {
+                    if (currentUser) db.logActivity({ type: 'map_move', userId: currentUser.id, source: 'human' });
+                    generateSpotNearby(center.lat, center.lng);
+                  }}
                   onAdvanceChallenge={(stepId, photo) => {
                     if (!activeChallengeId || !currentUser) return;
                     const ch = db.getQuest(activeChallengeId);
@@ -469,6 +528,9 @@ export default function HomePage() {
                       task:           { icon: '⭐', bg: 'bg-violet-50', text: 'text-violet-700', label: (a) => `${db.getSpot(a.spotId ?? '')?.name ?? '場所'} で${TASK_LABEL[a.detail ?? ''] ?? '依頼'}を達成` },
                       photo:          { icon: '📸', bg: 'bg-rose-50',   text: 'text-rose-700',   label: (a) => `${db.getSpot(a.spotId ?? '')?.name ?? '場所'} に写真を奉納` },
                       ugc:            { icon: '💬', bg: 'bg-sky-50',    text: 'text-sky-700',    label: (a) => `${db.getSpot(a.spotId ?? '')?.name ?? '場所'} に口コミを投稿` },
+                      home_view:      { icon: '🏠', bg: 'bg-slate-50',  text: 'text-slate-700',  label: () => 'ホームタブを表示' },
+                      map_move:       { icon: '🗺️', bg: 'bg-teal-50',   text: 'text-teal-700',   label: () => '地図を移動' },
+                      spot_generate:  { icon: '✨', bg: 'bg-purple-50', text: 'text-purple-700', label: (a) => `場を生成：${a.detail ?? '新しい場所'}` },
                     };
 
                     if (activities.length === 0) return (
@@ -631,7 +693,11 @@ export default function HomePage() {
               <button
                 key={key}
                 onClick={() => {
-                  if (key === 'home') setHomeResetSignal(s => s + 1);
+                  if (key === 'home') {
+                    setHomeResetSignal(s => s + 1);
+                    if (currentUser) db.logActivity({ type: 'home_view', userId: currentUser.id, source: 'human' });
+                    generateSpotNearby(userLocation.lat, userLocation.lng);
+                  }
                   setActiveTab(key);
                 }}
                 className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-xl transition-all cursor-pointer relative ${
