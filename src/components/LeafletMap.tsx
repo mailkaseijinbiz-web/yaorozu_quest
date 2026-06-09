@@ -347,7 +347,9 @@ export default function LeafletMap({
         flipDown = nearX && userAbove;
       }
 
-      const bubbleBox = `
+      const spotHtml = showBubble
+        ? `
+        <div class="relative flex flex-col items-center">
           <div class="relative flex items-start gap-1.5 rounded-2xl px-2.5 py-1.5 shadow-lg ${isActive ? 'border-2' : 'border'} ${borderCls}" style="max-width:190px;background:#ffffff;">
             <span style="font-size:15px;line-height:1.15;flex-shrink:0;">${iconEmoji}</span>
             <span class="spot-voice text-[11px] font-bold leading-snug text-gray-800" data-spotid="${spot.id}" data-vi="${voiceIdx}" style="word-break:break-word;transition:opacity 0.3s ease;">${voice}</span>
