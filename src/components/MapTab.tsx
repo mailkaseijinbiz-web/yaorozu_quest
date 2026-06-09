@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Compass, ChevronRight, Flag, X, Camera, Check, MapPin, Clock, Navigation2, MessageCircle, Send, Volume2, VolumeX } from 'lucide-react';
+import { Compass, ChevronRight, Flag, X, Camera, Check, MapPin, Clock, Navigation2, MessageCircle, Send } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { Spot, User, db } from '../lib/db';
 import { uploadImage } from '../lib/upload';
@@ -182,7 +182,7 @@ export default function MapTab({
   // 上部ガイドのフキダシ本文（3行＋スクロール）の自動スクロール用
   const guideScrollRef = useRef<HTMLDivElement | null>(null);
   // 読み上げ（TTS）：ElevenLabs（自然な音声）を優先し、失敗/キー無しは Web Speech にフォールバック
-  const [ttsOn, setTtsOn] = useState(false);
+  const [ttsOn] = useState(false); // TTS は UI 非表示・常時 OFF
   const ttsOnRef = useRef(false);
   const briefFullRef = useRef(''); // 現在のガイド全文（トグルON時に読み上げる）
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -203,18 +203,9 @@ export default function MapTab({
       speakJa(text); // フォールバック（端末内蔵）
     }
   };
-  useEffect(() => { try { setTtsOn(localStorage.getItem('yaorozu_tts') === '1'); } catch {} }, []);
+  // TTS（読み上げ）は UI から非表示。常に OFF（自動再生しない）。機能コードは残置。
   useEffect(() => { ttsOnRef.current = ttsOn; }, [ttsOn]);
   useEffect(() => () => { stopSpeak(); }, []);
-  const toggleTts = () => {
-    setTtsOn((prev) => {
-      const next = !prev;
-      try { localStorage.setItem('yaorozu_tts', next ? '1' : '0'); } catch {}
-      if (next) speak(briefFullRef.current);
-      else stopSpeak();
-      return next;
-    });
-  };
 
   const onPickProof = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -302,7 +293,9 @@ export default function MapTab({
   const activeToku = activeSpot ? db.getSpotToku(activeSpot.id) : 0;
   const activeGodEmoji = activeSpot ? (activeSpot.godEmoji || (activeSpot.category === '神社' ? '⛩️' : '🙏')) : '⛩️';
 
-  // クエスト未参加時に下部へ出す「近くのクエスト」（未達成・解放優先・近い順）
+  // ── インタラクティブカード（Interactive Card） ──
+  // マップ下部に出る「近くのクエスト」カードの領域。クエスト未参加時に表示し、
+  // タップでクエストを開始できる（未達成・解放優先・近い順で1件選ぶ）。
   const userLevel = getLevelInfo(currentUser.totalToku).current.level;
   const completedChIds = db.getChallengeProgress().completed;
   const nearChallenge = db.getAllQuests()
@@ -493,13 +486,7 @@ export default function MapTab({
             <div className="relative flex-1 bg-white rounded-2xl rounded-tl-sm shadow-xl px-4 py-3">
               <div className="flex items-center justify-between">
                 <p className="text-[11px] font-black tracking-wider text-amber-600">道案内の精霊</p>
-                <button
-                  onClick={toggleTts}
-                  aria-label={ttsOn ? '読み上げを止める' : '読み上げる'}
-                  className="pointer-events-auto -mr-1.5 -mt-0.5 w-7 h-7 rounded-full flex items-center justify-center hover:bg-gray-100 cursor-pointer"
-                >
-                  {ttsOn ? <Volume2 className="w-4 h-4 text-[#2563eb]" /> : <VolumeX className="w-4 h-4 text-gray-400" />}
-                </button>
+                {/* TTS（読み上げ）UI は非表示。機能コードは残置。 */}
               </div>
               <div ref={guideScrollRef} className="mt-0.5 max-h-[4.4rem] overflow-y-auto pointer-events-auto pr-1">
                 <p className="text-sm text-gray-800 leading-relaxed">{briefTyped}<span className="animate-pulse text-amber-500">▌</span></p>
@@ -573,6 +560,7 @@ export default function MapTab({
           ) : null}
         </div>
       ) : !activeChallenge && !celebrate && nearChallenge ? (() => {
+        // ▼ インタラクティブカード（Interactive Card）：近くのクエストを提示し、タップで開始
         const ch = nearChallenge;
         const diff = difficultyLabel(ch.difficulty);
         const d = distanceKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng);

@@ -427,11 +427,8 @@ export default function SpotDetail({
         flashToast(`🔴 ${spot.name} の御朱印を授かった！`);
         onGoShuinGranted?.();
       }
-      // スポットごとに1度だけ読み上げる（StrictMode の二重呼び出し防止）
-      if (greetSpokenRef.current !== spot.id) {
-        greetSpokenRef.current = spot.id;
-        speak(greet);
-      }
+      // TTS（読み上げ）は UI から非表示の方針につき自動再生しない。機能コードは残置。
+      // if (greetSpokenRef.current !== spot.id) { greetSpokenRef.current = spot.id; speak(greet); }
     }
     return () => { stopAudio(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
