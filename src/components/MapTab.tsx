@@ -152,8 +152,14 @@ export default function MapTab({
   const [celebrate, setCelebrate] = useState<
     { title: string; icon: string; complete: boolean; trivia?: string; triviaCategory?: TriviaCategory } | null
   >(null);
-  // 導入（プロローグ）を見せたチャレンジID
-  const [introSeenId, setIntroSeenId] = useState<string | null>(null);
+  // 導入（プロローグ）を見せたチャレンジID。タブ切替でアンマウントされても消えないよう localStorage に永続化。
+  const [introSeenId, setIntroSeenId] = useState<string | null>(() => {
+    try { return localStorage.getItem('yaorozu_intro_seen'); } catch { return null; }
+  });
+  const markIntroSeen = (id: string) => {
+    try { localStorage.setItem('yaorozu_intro_seen', id); } catch {}
+    setIntroSeenId(id);
+  };
   // 導入の段階：0=精霊のセリフ（フキダシ）→ 1=ミッション情報（PROLOGUE）。同時には出さない
   const [introStep, setIntroStep] = useState(0);
   useEffect(() => { setIntroStep(0); }, [activeChallenge?.id]);
@@ -347,7 +353,7 @@ export default function MapTab({
   // フェーズ1（PROLOGUE）：ボタンを押さなくても3秒で自動的に冒険開始
   useEffect(() => {
     if (!(introShowing && introStep === 1 && activeChallenge)) return;
-    const id = setTimeout(() => setIntroSeenId(activeChallenge.id), 3000);
+    const id = setTimeout(() => markIntroSeen(activeChallenge.id), 3000);
     return () => clearTimeout(id);
   }, [introShowing, introStep, activeChallenge?.id]);
 
@@ -676,7 +682,7 @@ export default function MapTab({
       {/* 導入（プロローグ）：案内役の精霊がフキダシで物語を語ってから冒険へ */}
       {activeChallenge && !celebrate && (chDone?.size ?? 0) === 0 && introSeenId !== activeChallenge.id && (
         <div className="absolute inset-0 z-[2050] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/55" onClick={() => setIntroSeenId(activeChallenge.id)} />
+          <div className="absolute inset-0 bg-black/55" onClick={() => markIntroSeen(activeChallenge.id)} />
           <div className="relative w-full max-w-sm celebrate-pop">
             {introStep === 0 ? (
               /* フェーズ0：案内役の精霊がフキダシでシナリオを一文字ずつ語る（中央センタリング・カードは出さない） */
