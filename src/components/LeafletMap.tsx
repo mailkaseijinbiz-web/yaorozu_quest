@@ -232,7 +232,7 @@ export default function LeafletMap({
     const goalHtml = `
       <div style="position:relative;display:flex;flex-direction:column;align-items:center;padding-bottom:4px;">
         <div style="background:#2563eb;color:#fff;font-weight:900;font-size:11px;white-space:nowrap;padding:3px 11px;border-radius:9999px;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);">📸 ここで写真を撮る！</div>
-        <div style="width:10px;height:10px;background:#2563eb;transform:rotate(45deg);margin-top:-10px;border-right:2px solid #fff;border-bottom:2px solid #fff;"></div>
+        <div style="width:10px;height:10px;background:#2563eb;transform:rotate(45deg);margin-top:-6px;border-right:2px solid #fff;border-bottom:2px solid #fff;"></div>
       </div>`;
     goalMarkerRef.current = L.marker([goalLat, goalLng], {
       icon: L.divIcon({ html: goalHtml, className: 'custom-goal-icon', iconSize: [180, 44], iconAnchor: [90, 40] }),
