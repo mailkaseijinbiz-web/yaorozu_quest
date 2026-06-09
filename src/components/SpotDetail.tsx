@@ -619,10 +619,10 @@ export default function SpotDetail({
               <div className="flex flex-wrap gap-1.5">
                 {nearbyChallenge && onStartChallenge && (
                   <button onClick={() => onStartChallenge(nearbyChallenge.id)} className="whitespace-nowrap bg-shrine-red text-white px-3 py-1.5 rounded-full text-[13px] font-black flex items-center gap-1 cursor-pointer active:scale-95 transition-transform">
-                    <Flag className="w-3 h-3" />クエストに挑戦
+                    <Flag className="w-3 h-3" />このクエストに挑戦する
                   </button>
                 )}
-                <button onClick={() => setTab('requests')} className="whitespace-nowrap bg-indigo-600 text-white px-3 py-1.5 rounded-full text-[13px] font-black flex items-center gap-1 cursor-pointer active:scale-95 transition-transform">
+                <button onClick={() => setTab('requests')} className="whitespace-nowrap bg-white border border-gray-200 text-gray-700 px-3 py-1.5 rounded-full text-[13px] font-black flex items-center gap-1 cursor-pointer active:scale-95 transition-transform">
                   ⭐ クエストを見る
                 </button>
               </div>
