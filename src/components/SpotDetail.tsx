@@ -181,7 +181,7 @@ export default function SpotDetail({
       if (task.type === 'visit') db.recordVisit(currentUser.id, spot.id);
       db.completeGodTask(currentUser.id, spot.id, task.reward);
       db.recordTaskDone(currentUser.id, task.type, spot.id, task.reward);
-      flashToast(`${task.icon} 依頼を達成！ +${task.reward}徳`);
+      flashToast(`${task.icon} クエストを達成！ +${task.reward}徳`);
       onChanged?.();
     }
     setDoneTasks((prev) => ({ ...prev, [task.id]: true }));
@@ -336,7 +336,7 @@ export default function SpotDetail({
       <div className="flex border-b border-black/5 bg-white flex-shrink-0">
         {([
           { key: 'chat', label: '会話', icon: MessageCircle },
-          { key: 'requests', label: '依頼', icon: Flag },
+          { key: 'requests', label: 'クエスト', icon: Flag },
           { key: 'photos', label: '写真', icon: Camera },
         ] as const).map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setTab(key)} className={`flex-1 py-3 flex flex-row items-center justify-center gap-1.5 text-[13px] font-black transition-all cursor-pointer border-b-2 ${tab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
@@ -394,9 +394,9 @@ export default function SpotDetail({
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-black/5">
             <h3 className="text-lg font-black text-gray-800 mb-1 flex items-center gap-2">
               <span className="text-2xl">{godEmoji}</span>
-              {agent.name} からの依頼
+              {agent.name} からのクエスト
             </h3>
-            <p className="text-[13px] text-gray-400 mb-3">達成すると徳を授かり、この地の神が育っていく。依頼は神の3つの働き（情報収集・理解判断・操作）で分かれる。</p>
+            <p className="text-[13px] text-gray-400 mb-3">達成すると徳を授かり、この地の神が育っていく。クエストは神の3つの働き（情報収集・理解判断・操作）で分かれる。</p>
             <div className="space-y-4">
               {GOD_FUNCTIONS.map((fn) => {
                 const groupTasks = tasks.filter((t) => t.kind === fn.key);
@@ -486,7 +486,7 @@ export default function SpotDetail({
                   </button>
                 )}
                 <button onClick={() => setTab('requests')} className="whitespace-nowrap bg-indigo-600 text-white px-3 py-1.5 rounded-full text-[13px] font-black flex items-center gap-1 cursor-pointer active:scale-95 transition-transform">
-                  ⭐ 依頼を見る
+                  ⭐ クエストを見る
                 </button>
               </div>
               {/* 質問プリセット */}
