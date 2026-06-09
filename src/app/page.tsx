@@ -95,10 +95,10 @@ export default function HomePage() {
   // state との同期（毎レンダリング更新）
   activeSpotRef.current = activeSpot;
 
-  /** 指定した場のクエストを generate-quest API で生成して保存する */
-  const generateQuestsForSpot = useCallback(async (spot: Spot, spotAgent: Agent | null) => {
+  /** 指定した場のクエストを generate-quest API で生成して保存する（force でクールダウン無視） */
+  const generateQuestsForSpot = useCallback(async (spot: Spot, spotAgent: Agent | null, force = false) => {
     const now = Date.now();
-    if (now - lastQuestGenRef.current < 30_000) return; // 30 秒クールダウン
+    if (!force && now - lastQuestGenRef.current < 30_000) return; // 30 秒クールダウン
     lastQuestGenRef.current = now;
     setIsGeneratingQuests(true);
     try {
@@ -133,11 +133,11 @@ export default function HomePage() {
     finally { setIsGeneratingQuests(false); }
   }, []);
 
-  const generateSpotNearby = useCallback(async (lat: number, lng: number) => {
+  const generateSpotNearby = useCallback(async (lat: number, lng: number, force = false) => {
     const now = Date.now();
     const prev = lastGenRef.current;
-    // 5 分以内かつ 500 m 以内なら重複生成しない
-    if (prev && now - prev.at < 5 * 60_000 && distanceKm(lat, lng, prev.lat, prev.lng) < 0.5) return;
+    // 5 分以内かつ 500 m 以内なら重複生成しない（force 時は無視）
+    if (!force && prev && now - prev.at < 5 * 60_000 && distanceKm(lat, lng, prev.lat, prev.lng) < 0.5) return;
     lastGenRef.current = { lat, lng, at: now };
     try {
       const res = await fetch('/api/generate-spot', {
@@ -161,12 +161,18 @@ export default function HomePage() {
       if (!activeSpotRef.current) {
         setActiveSpot(spot);
       }
-      // 場を生成後、クエストがなければこの場のクエストも生成する
-      if (db.getAllQuests().length === 0) {
-        generateQuestsForSpot(spot, agent);
+      // 場を生成後、クエストが無い or force 時はこの場のクエストも生成する
+      if (force || db.getAllQuests().length === 0) {
+        generateQuestsForSpot(spot, agent, force);
       }
     } catch { /* ネットワークエラーは無視 */ }
   }, [generateQuestsForSpot]);
+
+  /** 「他のクエストを探す」：現在地周辺に新しい場を生成し、そのクエストを必ず追加する（複数追加） */
+  const findMoreQuests = useCallback(() => {
+    const jitter = () => (Math.random() - 0.5) * 0.012; // 約 ±0.6km
+    generateSpotNearby(userLocation.lat + jitter(), userLocation.lng + jitter(), true);
+  }, [generateSpotNearby, userLocation]);
 
   // Initial load
   useEffect(() => {
@@ -432,6 +438,7 @@ export default function HomePage() {
                 currentUser={currentUser || FALLBACK_CURRENT_USER}
                 userLocation={userLocation}
                 isGeneratingQuests={isGeneratingQuests}
+                onFindMore={findMoreQuests}
                 onStartChallenge={(cid) => {
                   db.setActiveChallenge(cid);
                   setActiveChallengeId(cid);

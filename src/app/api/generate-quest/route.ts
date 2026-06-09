@@ -140,6 +140,7 @@ function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '
 - value_ask / issue_ask は、価値・課題がまだ薄い場で特に有効（人間から集めて充実させる）。
 - bonnou_ask は人間の内面が対象で場に依存しない。bonnou_resolve は bonnou_ask の後に意味を持つ。
 - 価値タスクは「楽しみ方」から、操作タスクは「課題」から作ってください。
+- 参拝・信仰の所作（goshuin 御朱印をもらう / donate お賽銭を捧げる / gratitude 感謝を捧げる）や、覚りを高める所作（bonnou_resolve 煩悩を手放す / meditate 瞑想する）も適宜織り交ぜてください。特に神社・寺院など霊的な場では積極的に取り入れます。
 
 場の名前: ${spot.name}
 カテゴリ: ${spot.category}
