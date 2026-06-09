@@ -6,6 +6,7 @@ import { Spot, Agent, User, db, isVerifiedSpot } from '../lib/db';
 import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
 import { uploadImage } from '../lib/upload';
+import { shareToSns } from '../lib/share';
 import { grantGoShuin } from '../lib/goshuin';
 
 // ── TTS（神の声）──────────────────────────────────────────
@@ -233,7 +234,7 @@ export default function SpotDetail({
   const POST_TYPES = new Set(['context', 'review', 'event', 'eat', 'buy', 'resolveIssue']);
 
   // ── 神の依頼タスク達成 ──
-  const handleTask = (task: GodTask) => {
+  const handleTask = async (task: GodTask) => {
     if (doneTasks[task.id]) return;
 
     if (task.type === 'photo') {
@@ -244,12 +245,29 @@ export default function SpotDetail({
       setEvalIdx(0);
       setEvaluating(true); // 評価し終えたら done にする
       return;
+    } else if (task.type === 'sns') {
+      // 実際に共有：OSの共有シート（Web Share API）を開く。未対応ならリンクをコピー。
+      const result = await shareToSns({
+        title: 'YAOROZU QUEST',
+        text: `${spot.name}（${spot.godName || agent.name}）を巡礼中！この地の神からの依頼に挑戦中です。 #ヤオロズクエスト #YAOROZUQUEST`,
+        url: `${window.location.origin}/?spot=${spot.id}`,
+        imageUrl: db.getPrimaryPhoto(spot.id) || undefined,
+      });
+      if (result === 'cancelled') { flashToast('共有をキャンセルしました'); return; }     // 達成にしない
+      if (result === 'unavailable') { flashToast('この環境では共有できません'); return; } // 達成にしない
+      // 共有 or コピー成功 → 達成として記録（徳付与は他タスクと同じく completeGodTask に一本化）
+      db.completeGodTask(currentUser.id, spot.id, task.reward);
+      db.recordTaskDone(currentUser.id, task.type, spot.id, task.reward);
+      setDoneTasks((prev) => ({ ...prev, [task.id]: true }));
+      flashToast(result === 'copied' ? `🔗 リンクをコピー！ +${task.reward}徳` : `📣 シェアしました！ +${task.reward}徳`);
+      onChanged?.();
+      return;
     } else if (POST_TYPES.has(task.type)) {
       // 実際に投稿（口コミ・できごと・実食・買物・課題解決の報告）→ 入力モーダルを開く
       setPostingTask(task);
       return; // 投稿完了時に done にする
     } else {
-      // SNS / 清掃確認 / 来訪 など：その場で達成
+      // 清掃確認 / 来訪 など：その場で達成
       if (task.type === 'visit') db.recordVisit(currentUser.id, spot.id);
       db.completeGodTask(currentUser.id, spot.id, task.reward);
       db.recordTaskDone(currentUser.id, task.type, spot.id, task.reward);
