@@ -230,12 +230,6 @@ export default function HomePage() {
     );
   }, [generateSpotAt]);
 
-  /** 「他のクエストを探す」：現在地周辺に近・中・遠の場とクエストをまとめて追加する。 */
-  const findMoreQuests = useCallback(() => {
-    subscribePush(); // ユーザー操作のタイミングで通知購読（以降サーバ自動プッシュが届く）
-    generateVariedSpots(userLocation.lat, userLocation.lng, true);
-  }, [generateVariedSpots, userLocation]);
-
   // Initial load
   useEffect(() => {
     const initSpots = db.getSpots();
@@ -619,8 +613,8 @@ export default function HomePage() {
                 currentUser={currentUser || FALLBACK_CURRENT_USER}
                 userLocation={userLocation}
                 isGeneratingQuests={isGeneratingQuests}
-                onFindMore={findMoreQuests}
                 onStartChallenge={(cid) => {
+                  subscribePush(); // クエスト参加を機に通知購読（以降サーバ自動プッシュが届く）
                   db.setActiveChallenge(cid);
                   setActiveChallengeId(cid);
                   setActiveTab('quest');
@@ -673,7 +667,7 @@ export default function HomePage() {
                   creatorProfiles={creatorProfiles}
                   onOpenDetail={setDetailSpot}
                   currentUser={currentUser || FALLBACK_CURRENT_USER}
-                  onStartChallenge={(cid) => { db.setActiveChallenge(cid); setActiveChallengeId(cid); }}
+                  onStartChallenge={(cid) => { subscribePush(); db.setActiveChallenge(cid); setActiveChallengeId(cid); }}
                   activeChallenge={activeChallengeId ? db.getQuest(activeChallengeId) ?? null : null}
                   onClearChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
                   onMapMove={(center) => {

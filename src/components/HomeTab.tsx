@@ -15,10 +15,9 @@ interface HomeTabProps {
   onEndChallenge?: () => void;
   onChanged?: () => void;
   onNeedSpots?: () => void;
-  onFindMore?: () => void; // 「他のクエストを探す」→ 新しいクエストを複数追加
 }
 
-export default function HomeTab({ currentUser, userLocation, isGeneratingQuests, onStartChallenge, onEndChallenge, onNeedSpots, onFindMore }: HomeTabProps) {
+export default function HomeTab({ currentUser, userLocation, isGeneratingQuests, onStartChallenge, onEndChallenge, onNeedSpots }: HomeTabProps) {
   // localStorage 依存のため、マウント後にのみ動的レンダリング（ハイドレーション不一致回避）
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -215,24 +214,6 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
             </button>
           )}
         </div>
-        )}
-
-        {/* 他のクエストを探す（新しい場とクエストを複数追加） */}
-        {mounted && onFindMore && (
-          <button
-            onClick={onFindMore}
-            disabled={isGeneratingQuests}
-            className="mt-4 w-full flex items-center justify-center gap-2 bg-white border-2 border-dashed border-shrine-red/40 text-shrine-red text-sm font-black py-3 rounded-2xl hover:border-shrine-red hover:bg-shrine-red/5 active:scale-[0.99] transition-all cursor-pointer disabled:opacity-50"
-          >
-            {isGeneratingQuests ? (
-              <>
-                <span className="w-4 h-4 border-2 border-shrine-red border-t-transparent rounded-full animate-spin" />
-                クエストを生成中…
-              </>
-            ) : (
-              <>🧭 他のクエストを探す</>
-            )}
-          </button>
         )}
       </div>
 
