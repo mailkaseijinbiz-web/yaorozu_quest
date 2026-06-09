@@ -299,13 +299,32 @@ export default function MapTab({
 
   // ── インタラクティブカード（Interactive Card） ──
   // マップ下部に出る「近くのクエスト」カードの領域。クエスト未参加時に表示し、
-  // タップでクエストを開始できる（未達成・解放優先・近い順で1件選ぶ）。
+  // 横スワイプで次の候補へ切替、タップでクエストを開始できる（未達成・解放優先・近い順）。
   const userLevel = getLevelInfo(currentUser.totalToku).current.level;
   const completedChIds = db.getChallengeProgress().completed;
-  const nearChallenge = db.getAllQuests()
+  const nearChallengeList = db.getAllQuests()
     .filter((c) => !completedChIds.includes(c.id))
     .map((c) => ({ c, d: distanceKm(userLocation.lat, userLocation.lng, c.goalLat, c.goalLng), ok: userLevel >= c.minLevel }))
-    .sort((a, b) => (a.ok !== b.ok ? (a.ok ? -1 : 1) : a.d - b.d))[0]?.c ?? null;
+    .sort((a, b) => (a.ok !== b.ok ? (a.ok ? -1 : 1) : a.d - b.d))
+    .slice(0, 10)
+    .map((x) => x.c);
+  // 表示中のカード位置（スワイプで移動）
+  const [cardIndex, setCardIndex] = useState(0);
+  // 候補数が変わったら範囲内に収める
+  useEffect(() => { setCardIndex((i) => Math.min(i, Math.max(0, nearChallengeList.length - 1))); }, [nearChallengeList.length]);
+  const nearChallenge = nearChallengeList[Math.min(cardIndex, nearChallengeList.length - 1)] ?? null;
+  // 横スワイプ検出（スワイプ直後のタップで誤って開始しないよう swipedRef でガード）
+  const swipeStartXRef = useRef<number | null>(null);
+  const swipedRef = useRef(false);
+  const onCardTouchStart = (e: React.TouchEvent) => { swipeStartXRef.current = e.touches[0]?.clientX ?? null; swipedRef.current = false; };
+  const onCardTouchEnd = (e: React.TouchEvent) => {
+    const start = swipeStartXRef.current;
+    swipeStartXRef.current = null;
+    if (start == null || nearChallengeList.length <= 1) return;
+    const dx = (e.changedTouches[0]?.clientX ?? start) - start;
+    if (dx < -40) { swipedRef.current = true; setCardIndex((i) => Math.min(i + 1, nearChallengeList.length - 1)); }
+    else if (dx > 40) { swipedRef.current = true; setCardIndex((i) => Math.max(i - 1, 0)); }
+  };
 
   // 導入（プロローグ）表示中か。表示中はヘッダー/下部オーバーレイ/現在地ボタンを隠す。
   const introShowing = !!activeChallenge && !celebrate && (chDone?.size ?? 0) === 0 && introSeenId !== activeChallenge.id;
@@ -573,17 +592,26 @@ export default function MapTab({
         const levelOk = userLevel >= ch.minLevel;
         const godSpot = ch.spotId ? db.getSpot(ch.spotId) : null; // このクエストを鋳造した神
         return (
-          <button
+          <div
             ref={(el) => { overlayElRef.current = el; }}
-            onClick={() => onStartChallenge?.(ch.id)}
-            className="absolute bottom-3 left-3 right-3 z-[1000] text-left bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-black/5 overflow-hidden cursor-pointer active:scale-[0.99] transition-all"
+            role="button"
+            tabIndex={0}
+            onTouchStart={onCardTouchStart}
+            onTouchEnd={onCardTouchEnd}
+            onClick={() => { if (swipedRef.current) { swipedRef.current = false; return; } onStartChallenge?.(ch.id); }}
+            className="absolute bottom-3 left-3 right-3 z-[1000] text-left bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-black/5 overflow-hidden cursor-pointer active:scale-[0.99] transition-all touch-pan-y"
           >
             <div className="flex items-stretch gap-3">
               <div className={`w-20 self-stretch rounded-l-2xl flex items-center justify-center text-4xl flex-shrink-0 ${!levelOk ? 'bg-gray-200 grayscale' : 'bg-gradient-to-br from-blue-100 to-amber-100'}`}>
                 {!levelOk ? '🔒' : ch.badgeIcon}
               </div>
               <div className="flex-1 min-w-0 py-3">
-                <span className="text-[10px] font-black tracking-wider text-[#2563eb]/70">近くのクエスト</span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-black tracking-wider text-[#2563eb]/70">近くのクエスト{nearChallengeList.length > 1 ? ` ${cardIndex + 1}/${nearChallengeList.length}` : ''}</span>
+                  {nearChallengeList.length > 1 && (
+                    <span className="text-[10px] text-gray-400 flex items-center gap-0.5">← スワイプ →</span>
+                  )}
+                </div>
                 <h4 className="text-sm font-black text-gray-900 truncate">{ch.title}</h4>
                 {godSpot?.godName && (
                   <p className="text-[11px] font-bold text-gray-400 truncate mt-0.5">
@@ -598,10 +626,18 @@ export default function MapTab({
                     <MapPin className="w-3 h-3" /><span className="tabular-nums">{distVal}</span><span className="text-[11px]">{distUnit}</span>
                   </span>
                 </div>
+                {/* ページインジケータ（ドット） */}
+                {nearChallengeList.length > 1 && (
+                  <div className="flex items-center gap-1 mt-1.5">
+                    {nearChallengeList.map((_, i) => (
+                      <span key={i} className={`h-1 rounded-full transition-all ${i === cardIndex ? 'w-3 bg-[#2563eb]' : 'w-1 bg-gray-300'}`} />
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="self-center pr-3 flex-shrink-0 text-[#2563eb]"><ChevronRight className="w-5 h-5" /></div>
             </div>
-          </button>
+          </div>
         );
       })() : null}
 
