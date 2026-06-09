@@ -60,6 +60,9 @@ export interface SpotPhoto {
   createdAt: string;
 }
 
+/** 投稿の公開範囲。'all'=みんなに公開 / 'self'=あなただけ（本人のみ閲覧・AIの参照対象外） */
+export type UgcVisibility = 'all' | 'self';
+
 export interface UgcPost {
   id: string;
   userId: string;
@@ -67,6 +70,7 @@ export interface UgcPost {
   spotId: string;
   content: string;
   imageUrl?: string;
+  visibility?: UgcVisibility; // 未設定は 'all' とみなす
   likesCount: number;
   likedBy: string[]; // List of userIds who liked this post
   createdAt: string;
@@ -929,7 +933,7 @@ class MockDatabase {
   }
 
   // Write operations
-  addUgcPost(userId: string, spotId: string, content: string): UgcPost {
+  addUgcPost(userId: string, spotId: string, content: string, opts?: { imageUrl?: string; visibility?: UgcVisibility }): UgcPost {
     const users = this.getUsers();
     const user = users.find(u => u.id === userId);
     if (!user) throw new Error('User not found');
@@ -941,6 +945,8 @@ class MockDatabase {
       userDisplayName: user.displayName,
       spotId,
       content,
+      imageUrl: opts?.imageUrl,
+      visibility: opts?.visibility ?? 'all',
       likesCount: 0,
       likedBy: [],
       createdAt: new Date().toISOString(),

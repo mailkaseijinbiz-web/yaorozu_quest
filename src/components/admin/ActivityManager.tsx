@@ -12,7 +12,7 @@ const META: Record<ActivityType, { icon: string; label: string; color: string }>
   quest_step: { icon: '✅', label: 'クエストのステップ達成', color: 'text-emerald-600' },
   quest_complete: { icon: '🏆', label: 'クエストを制覇', color: 'text-amber-600' },
   visit: { icon: '📍', label: '場所を訪問', color: 'text-rose-600' },
-  task: { icon: '⭐', label: '依頼を達成', color: 'text-indigo-600' },
+  task: { icon: '⭐', label: 'クエストを達成', color: 'text-indigo-600' },
   photo: { icon: '📸', label: '写真を奉納', color: 'text-pink-600' },
   ugc: { icon: '💬', label: '口コミを投稿', color: 'text-violet-600' },
   home_view:     { icon: '🏠', label: 'ホームタブを表示', color: 'text-slate-600' },
@@ -36,10 +36,15 @@ export function ActivityManager({ spots }: { spots: Spot[] }) {
   const [sourceFilter, setSourceFilter] = useState<'all' | ActivitySource>('all');
   const [all, setAll] = useState<Activity[]>(() => db.getActivities());
 
-  // 3秒ごとに自動同期（アプリ側でログされたアクティビティをリアルタイム反映）
+  // リアルタイム同期：同タブ（カスタムイベント）＋別タブ（storage イベント）
   useEffect(() => {
-    const id = setInterval(() => setAll(db.getActivities()), 3000);
-    return () => clearInterval(id);
+    const refresh = () => setAll(db.getActivities());
+    window.addEventListener('yaorozu:activity', refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener('yaorozu:activity', refresh);
+      window.removeEventListener('storage', refresh);
+    };
   }, []);
 
   const challengeTitle = (id?: string) => (id ? (CHALLENGES.find((c) => c.id === id)?.title ?? id) : '');

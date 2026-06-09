@@ -20,7 +20,7 @@ function fallbackSpot(lat: number, lng: number) {
       latitude: lat,
       longitude: lng,
       creatorId: null,
-      imageUrl: 'https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=800&q=80',
+      imageUrl: '', // 画像は自動設定しない（ユーザーが写真を奉納するまで NO IMAGE）
       category: '史跡',
       tokuRequirement: 0,
       enjoyments: ['その場の空気を感じる'],
@@ -115,7 +115,7 @@ export async function POST(request: Request) {
       latitude: lat,
       longitude: lng,
       creatorId: null,
-      imageUrl: 'https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=800&q=80',
+      imageUrl: '', // 画像は自動設定しない（ユーザーが写真を奉納するまで NO IMAGE）
       category: CATEGORIES.includes(g.category) ? g.category : '史跡',
       tokuRequirement: 0,
       enjoyments: Array.isArray(g.enjoyments) ? g.enjoyments.slice(0, 5).map(String) : [],

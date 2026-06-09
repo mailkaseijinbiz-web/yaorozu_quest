@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark } from 'lucide-react';
-import { Spot, Agent, User, db, isVerifiedSpot } from '../lib/db';
+import { Spot, Agent, User, db, isVerifiedSpot, type UgcVisibility } from '../lib/db';
 import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
 import { uploadImage } from '../lib/upload';
@@ -130,6 +130,10 @@ export default function SpotDetail({
   const [ugcTick, setUgcTick] = useState(0); // 口コミいいね後の再読込
   const [postingTask, setPostingTask] = useState<GodTask | null>(null); // 投稿モーダル
   const [postText, setPostText] = useState('');
+  const [postPhoto, setPostPhoto] = useState<string | null>(null); // 投稿に添付する写真
+  const [postPhotoUploading, setPostPhotoUploading] = useState(false);
+  const [postVisibility, setPostVisibility] = useState<UgcVisibility>('all'); // 公開範囲
+  const postPhotoInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false); // 写真アップロード中
   const photoInputRef = useRef<HTMLInputElement>(null);
   // クエスト写真の評価タスク
@@ -161,7 +165,11 @@ export default function SpotDetail({
     }
   };
 
-  const ugc = useMemo(() => db.getUgcBySpot(spot.id), [spot.id, ugcTick]);
+  // 「あなただけ」の投稿は本人以外には見せない（AIの参照対象からも除外）
+  const ugc = useMemo(
+    () => db.getUgcBySpot(spot.id).filter((p) => (p.visibility ?? 'all') === 'all' || p.userId === currentUser.id),
+    [spot.id, ugcTick, currentUser.id]
+  );
   const affiliates = db.getAffiliatesBySpot(spot.name);
 
   const godEmoji = spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏');
@@ -223,6 +231,30 @@ export default function SpotDetail({
     }
   };
 
+  // 投稿モーダル：添付写真を選んで圧縮・アップロード
+  const onPickPostPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setPostPhotoUploading(true);
+    try {
+      const url = await uploadImage(file, `ugc-${spot.id}`);
+      setPostPhoto(url);
+    } catch {
+      flashToast('写真の処理に失敗しました');
+    } finally {
+      setPostPhotoUploading(false);
+    }
+  };
+
+  // 投稿モーダルを閉じて入力をリセット
+  const closePostModal = () => {
+    setPostingTask(null);
+    setPostText('');
+    setPostPhoto(null);
+    setPostVisibility('all');
+  };
+
   const handleRejectPhoto = (url: string) => {
     db.rejectSpotPhoto(spot.id, url);
     setPhotos(db.getSpotPhotos(spot.id));
@@ -277,10 +309,15 @@ export default function SpotDetail({
     setDoneTasks((prev) => ({ ...prev, [task.id]: true }));
   };
 
-  // 投稿モーダルの送信（実際に口コミ等を投稿）
+  // 投稿モーダルの送信（テキストまたは写真で投稿。課題解決はどちらか一方でも可）
   const submitPost = () => {
-    if (!postingTask || !postText.trim()) return;
-    db.addUgcPost(currentUser.id, spot.id, postText.trim()); // UGC投稿（+50徳）
+    if (!postingTask) return;
+    if (!postText.trim() && !postPhoto) return; // テキストも写真も無ければ送信しない
+    if (postPhotoUploading) return;
+    db.addUgcPost(currentUser.id, spot.id, postText.trim(), {
+      imageUrl: postPhoto || undefined,
+      visibility: postVisibility,
+    }); // UGC投稿（+50徳）
     db.recordTaskDone(currentUser.id, postingTask.type, spot.id, postingTask.reward);
     const grow = enjoymentForTask(postingTask, spot.name);
     if (grow) {
@@ -291,8 +328,7 @@ export default function SpotDetail({
     setUgcTick((t) => t + 1);
     flashToast(`${postingTask.icon} 投稿しました！ +徳`);
     onChanged?.();
-    setPostingTask(null);
-    setPostText('');
+    closePostModal();
   };
 
   // クエスト写真の評価：1枚ずつ👍/👎で評価し、規定枚数で達成
@@ -331,6 +367,16 @@ export default function SpotDetail({
       setMessages([
         { id: `greet-${Date.now()}`, sender: 'agent', text: greet, createdAt: new Date().toISOString() },
       ]);
+      // はじめて会話を始めた（チャットを開いた）瞬間に御朱印を授ける（スポットごとに1度）
+      const stamp = grantGoShuin(
+        currentUser.id,
+        { id: spot.id, name: spot.name, category: spot.category, godEmoji: spot.godEmoji },
+        agent.name
+      );
+      if (stamp) {
+        flashToast(`🔴 ${spot.name} の御朱印を授かった！`);
+        onGoShuinGranted?.();
+      }
       // スポットごとに1度だけ読み上げる（StrictMode の二重呼び出し防止）
       if (greetSpokenRef.current !== spot.id) {
         greetSpokenRef.current = spot.id;
@@ -347,19 +393,7 @@ export default function SpotDetail({
 
   const handleSend = async (textToSend: string) => {
     if (!textToSend.trim() || isLoading) return;
-    // 初回メッセージ送信 → 御朱印を授ける
-    const isFirstMessage = messages.filter((m) => m.sender === 'user').length === 0;
-    if (isFirstMessage) {
-      const stamp = grantGoShuin(
-        currentUser.id,
-        { id: spot.id, name: spot.name, category: spot.category, godEmoji: spot.godEmoji },
-        agent.name
-      );
-      if (stamp) {
-        flashToast(`🔴 ${spot.name} の御朱印を授かった！`);
-        onGoShuinGranted?.();
-      }
-    }
+    // 御朱印はチャットを開いた時点（初回あいさつ）で授与済み
     const userMessage: Message = { id: `u-${Date.now()}`, sender: 'user', text: textToSend, createdAt: new Date().toISOString() };
     setMessages((prev) => [...prev, userMessage]);
     setInputText('');
@@ -403,8 +437,6 @@ export default function SpotDetail({
       )
     );
   };
-
-  const PRESETS = ['この場所の歴史は？', '見どころを教えて', '近くのおすすめは？'];
 
   return (
     <div className="fixed sm:absolute inset-0 z-[3000] bg-[#f5f7fa] flex flex-col">
@@ -553,7 +585,7 @@ export default function SpotDetail({
               <span className="text-2xl">{godEmoji}</span>
               {agent.name} からのクエスト
             </h3>
-            <p className="text-[13px] text-gray-400 mb-3">達成すると徳を授かり、この地の神が育っていく。クエストは神の3つの働き（情報収集・理解判断・操作）で分かれる。</p>
+            <p className="text-[13px] text-gray-400 mb-3">達成すると徳を授かり、この地の神が育っていく。</p>
             <div className="space-y-4">
               {GOD_FUNCTIONS.map((fn) => {
                 const groupTasks = tasks.filter((t) => t.kind === fn.key);
@@ -633,25 +665,11 @@ export default function SpotDetail({
             )}
             <div ref={messagesEndRef} />
           </div>
-          {messages.length <= 3 && !isLoading && (
-            <div className="px-3 pb-2 flex-shrink-0 space-y-1.5">
-              {/* 能動的アクション：クエストに挑戦 / 依頼を見る */}
-              <div className="flex flex-wrap gap-1.5">
-                {nearbyChallenge && onStartChallenge && (
-                  <button onClick={() => onStartChallenge(nearbyChallenge.id)} className="whitespace-nowrap bg-shrine-red text-white px-3 py-1.5 rounded-full text-[13px] font-black flex items-center gap-1 cursor-pointer active:scale-95 transition-transform">
-                    <Flag className="w-3 h-3" />このクエストに挑戦する
-                  </button>
-                )}
-                <button onClick={() => setTab('requests')} className="whitespace-nowrap bg-white border border-gray-200 text-gray-700 px-3 py-1.5 rounded-full text-[13px] font-black flex items-center gap-1 cursor-pointer active:scale-95 transition-transform">
-                  ⭐ クエストを見る
-                </button>
-              </div>
-              {/* 質問プリセット */}
-              <div className="flex flex-wrap gap-1.5">
-                {PRESETS.map((p, i) => (
-                  <button key={i} onClick={() => handleSend(p)} className="whitespace-nowrap bg-white border border-gray-200 px-3 py-1.5 rounded-full text-[13px] text-gray-600 hover:border-gold hover:text-amber-700 transition-all cursor-pointer">{p}</button>
-                ))}
-              </div>
+          {messages.length <= 3 && !isLoading && nearbyChallenge && onStartChallenge && (
+            <div className="px-3 pb-2 flex-shrink-0">
+              <button onClick={() => onStartChallenge(nearbyChallenge.id)} className="whitespace-nowrap bg-shrine-red text-white px-3 py-1.5 rounded-full text-[13px] font-black flex items-center gap-1 cursor-pointer active:scale-95 transition-transform">
+                <Flag className="w-3 h-3" />このクエストに挑戦する
+              </button>
             </div>
           )}
           <form onSubmit={(e) => { e.preventDefault(); handleSend(inputText); }} className="flex gap-2 p-3 border-t border-black/5 bg-white flex-shrink-0">
@@ -663,15 +681,18 @@ export default function SpotDetail({
         </div>
       )}
 
-      {/* 投稿モーダル（実際に口コミ・できごと等を投稿） */}
+      {/* 投稿モーダル（テキストまたは写真で投稿。公開範囲を選べる） */}
       {postingTask && (
-        <div className="absolute inset-0 z-[3200] bg-black/40 flex items-end" onClick={() => { setPostingTask(null); setPostText(''); }}>
+        <div className="absolute inset-0 z-[3200] bg-black/40 flex items-end" onClick={closePostModal}>
           <div className="w-full bg-white rounded-t-3xl p-4 pb-6 animate-in" onClick={(e) => e.stopPropagation()}>
             <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-3" />
             <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5">
               <span className="text-lg">{postingTask.icon}</span>{postingTask.title}
             </h3>
             <p className="text-[13px] text-gray-500 mt-0.5">{postingTask.call?.(spot.name)}</p>
+            {postingTask.type === 'resolveIssue' && (
+              <p className="text-[11px] text-gray-400 mt-1">テキスト・写真のどちらか（または両方）で報告できます。</p>
+            )}
             <textarea
               value={postText}
               onChange={(e) => setPostText(e.target.value)}
@@ -682,13 +703,58 @@ export default function SpotDetail({
                 : postingTask.type === 'review' ? `${spot.name}の良さを書いて投稿…`
                 : postingTask.type === 'eat' ? '食べた感想を書いて投稿…'
                 : postingTask.type === 'buy' ? '買ったものを書いて投稿…'
+                : postingTask.type === 'resolveIssue' ? '解決の様子をテキストで報告（写真だけでも可）…'
                 : '今のできごとを書いて投稿…'
               }
               className="w-full mt-3 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-xs text-gray-800 focus:outline-none focus:border-shrine-red transition-all resize-none"
             />
+
+            {/* 写真の添付 */}
+            <input ref={postPhotoInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickPostPhoto} />
+            {postPhoto ? (
+              <div className="relative mt-3 rounded-xl overflow-hidden border border-gray-200">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={postPhoto} alt="添付写真" className="w-full max-h-44 object-cover" />
+                <button
+                  onClick={() => setPostPhoto(null)}
+                  aria-label="写真を外す"
+                  className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white hover:bg-shrine-red transition-all cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => postPhotoInputRef.current?.click()}
+                disabled={postPhotoUploading}
+                className="mt-3 w-full flex items-center justify-center gap-1.5 bg-gray-50 border border-dashed border-gray-300 text-gray-600 text-xs font-black py-2.5 rounded-xl hover:border-shrine-red hover:text-shrine-red transition-all cursor-pointer disabled:opacity-50"
+              >
+                <ImagePlus className="w-4 h-4" />{postPhotoUploading ? '処理中…' : '写真を添付（任意）'}
+              </button>
+            )}
+
+            {/* 公開範囲 */}
+            <div className="mt-3">
+              <p className="text-[11px] font-black text-gray-400 mb-1">公開範囲</p>
+              <div className="flex gap-1.5">
+                {([
+                  { v: 'all' as UgcVisibility, label: 'すべて', icon: '🌐' },
+                  { v: 'self' as UgcVisibility, label: 'あなただけ', icon: '🔒' },
+                ]).map(({ v, label, icon }) => (
+                  <button
+                    key={v}
+                    onClick={() => setPostVisibility(v)}
+                    className={`flex-1 text-[12px] font-black py-2 rounded-xl border transition-all cursor-pointer ${postVisibility === v ? 'bg-shrine-red text-white border-shrine-red' : 'bg-white text-gray-500 border-gray-200 hover:border-shrine-red/40'}`}
+                  >
+                    {icon} {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="flex gap-2 mt-3">
-              <button onClick={() => { setPostingTask(null); setPostText(''); }} className="flex-1 bg-gray-100 text-gray-500 text-xs font-black py-2.5 rounded-xl cursor-pointer">やめる</button>
-              <button onClick={submitPost} disabled={!postText.trim()} className="flex-1 bg-shrine-red text-white text-xs font-black py-2.5 rounded-xl disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5">
+              <button onClick={closePostModal} className="flex-1 bg-gray-100 text-gray-500 text-xs font-black py-2.5 rounded-xl cursor-pointer">やめる</button>
+              <button onClick={submitPost} disabled={(!postText.trim() && !postPhoto) || postPhotoUploading} className="flex-1 bg-shrine-red text-white text-xs font-black py-2.5 rounded-xl disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5">
                 <Send className="w-3.5 h-3.5" />投稿する
               </button>
             </div>
