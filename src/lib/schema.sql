@@ -199,3 +199,13 @@ create table if not exists public.push_subscriptions (
   subscription jsonb not null,
   created_at timestamptz not null default now()
 );
+
+-- ─────────────────────────────────────────────
+-- iOS ネイティブ(APNs)デバイストークン。/api/push/* がサービスロールで読み書きする。
+-- ─────────────────────────────────────────────
+create table if not exists public.apns_tokens (
+  token text primary key,
+  created_at timestamptz not null default now()
+);
+alter table public.apns_tokens enable row level security;
+-- ポリシー無し＝匿名/認証ユーザーからは不可。サーバ(サービスロール)のみが RLS をバイパスして読み書きする。

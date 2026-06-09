@@ -13,6 +13,13 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 export type SubscribeResult = 'subscribed' | 'denied' | 'unsupported' | 'unconfigured' | 'error';
 
 export async function subscribePush(): Promise<SubscribeResult> {
+  // ネイティブ(iOS Capacitor)アプリ内では Web Push が使えないため APNs を使う。
+  if (typeof window !== 'undefined') {
+    try {
+      const { isNativePush, subscribeNativePush } = await import('./native-push');
+      if (isNativePush()) return await subscribeNativePush();
+    } catch { /* プラグイン未解決などは Web Push へフォールバック */ }
+  }
   if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
     return 'unsupported';
   }

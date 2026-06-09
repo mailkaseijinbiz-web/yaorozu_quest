@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 開発ビルドは Sandbox APNs。App Store/TestFlight 配布時は Xcode の
+	     Push Notifications capability が production に切り替える。 -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

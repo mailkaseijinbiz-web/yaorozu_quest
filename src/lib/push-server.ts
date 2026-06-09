@@ -2,6 +2,14 @@
 // 購読の保存は Supabase テーブル push_subscriptions を優先、無効/失敗時はメモリ（単一インスタンス）にフォールバック。
 import webpush, { type PushSubscription } from 'web-push';
 import { getSupabaseAdmin, isSupabaseEnabled } from './supabase';
+import { sendApnsToAll, isApnsConfigured } from './apns-server';
+
+export { isApnsConfigured };
+
+/** Web Push(VAPID) か APNs のいずれかが設定されているか。 */
+export function isAnyPushConfigured(): boolean {
+  return isPushConfigured() || isApnsConfigured();
+}
 
 let configured = false;
 function configure(): boolean {
@@ -58,20 +66,33 @@ async function removeSubscription(endpoint: string): Promise<void> {
   mem.delete(endpoint);
 }
 
-/** 登録済みの全端末へプッシュ送信。失効した購読(404/410)は削除する。 */
+/** 登録済みの全端末へプッシュ送信（Web Push + iOS APNs）。失効した購読/トークンは削除する。 */
 export async function sendToAll(payload: { title: string; body: string; url?: string }): Promise<{ sent: number; failed: number; total: number }> {
-  if (!configure()) return { sent: 0, failed: 0, total: 0 };
-  const subs = await listSubscriptions();
-  let sent = 0, failed = 0;
-  await Promise.all(subs.map(async (s) => {
-    try {
-      await webpush.sendNotification(s, JSON.stringify(payload));
-      sent++;
-    } catch (e: unknown) {
-      failed++;
-      const code = (e as { statusCode?: number })?.statusCode;
-      if (code === 404 || code === 410) await removeSubscription(s.endpoint);
-    }
-  }));
-  return { sent, failed, total: subs.length };
+  let sent = 0, failed = 0, total = 0;
+
+  // Web Push（VAPID 設定時）
+  if (configure()) {
+    const subs = await listSubscriptions();
+    total += subs.length;
+    await Promise.all(subs.map(async (s) => {
+      try {
+        await webpush.sendNotification(s, JSON.stringify(payload));
+        sent++;
+      } catch (e: unknown) {
+        failed++;
+        const code = (e as { statusCode?: number })?.statusCode;
+        if (code === 404 || code === 410) await removeSubscription(s.endpoint);
+      }
+    }));
+  }
+
+  // iOS ネイティブ（APNs 設定時）
+  if (isApnsConfigured()) {
+    const a = await sendApnsToAll(payload);
+    sent += a.sent;
+    failed += a.failed;
+    total += a.total;
+  }
+
+  return { sent, failed, total };
 }
