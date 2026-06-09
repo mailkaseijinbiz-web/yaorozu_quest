@@ -211,7 +211,7 @@ export function Blueprint() {
         <Arrow label="場のデータを、その地の神が受け取る" />
 
         {/* ② 鋳造（神・工房） */}
-        <Stage tag="八百万神" sub="場に宿る神が、価値・課題・魂から クエスト を鋳造する" color="#d97706">
+        <Stage tag="神" sub="場に宿る神が、価値・課題・魂から クエスト を鋳造する" color="#d97706">
           {/* 大日如来（根源・一者） */}
           <Node icon="☸️" name="大日如来" count={1} />
           {/* 場に宿る神（Agent）＝ 工房の主 */}
