@@ -9,6 +9,8 @@ import { distanceKm } from '../lib/geo';
 import HomeTab from '../components/HomeTab';
 import MapTab from '../components/MapTab';
 import SpotDetail from '../components/SpotDetail';
+import DebugPanel from '../components/DebugPanel';
+import { isDebugEnabled, getDebugLocation, setDebugLocation, type DebugLatLng } from '../lib/debug';
 import { getLevelInfo } from '../data/levels';
 import { getBadgeStates, godAvatarEmoji } from '../data/badges';
 import { Challenge } from '../data/challenges';
@@ -60,6 +62,9 @@ export default function HomePage() {
   const [userLocation, setUserLocation] = useState({ lat: 35.6580, lng: 139.7514 });
   // GPS 取得状態（失敗時にユーザーへ明示する）
   const [geoStatus, setGeoStatus] = useState<'locating' | 'ok' | 'denied' | 'error'>('locating');
+  // デバッグモード（位置情報が許可されない環境でも現在地を手動指定してテストできる）
+  const [debugMode, setDebugMode] = useState(false);
+  useEffect(() => { setDebugMode(isDebugEnabled()); }, []);
   // GPS バナーをタップで薄く（透明度10%）して地図を見やすくする
   const [bannerDimmed, setBannerDimmed] = useState(false);
 
@@ -192,10 +197,12 @@ export default function HomePage() {
       setGoShuinList(getGoShuinList('user-self'));
     }
 
+    // 初回生成のシード座標：デバッグ位置があればそれ、無ければ東京デフォルト（GPS取得前）
+    const seed = (isDebugEnabled() && getDebugLocation()) || { lat: 35.6580, lng: 139.7514 };
     // 初回表示時：場が無ければ生成（クエスト有無に関係なく）。場があってクエストが無ければクエストだけ生成
     if (initSpots.length === 0) {
       // 場も無い → 場を生成（場の生成後にクエストも自動チェーンされる）
-      generateSpotNearby(35.6580, 139.7514); // GPS取得前は東京デフォルト座標
+      generateSpotNearby(seed.lat, seed.lng);
     } else if (db.getAllQuests().length === 0) {
       // 場はあるがクエストが無い → クエストを生成
       const agentSpotIds = new Set(db.getAgents().map(a => a.spotId));
@@ -203,7 +210,7 @@ export default function HomePage() {
       if (spotWithAgent) {
         generateQuestsForSpot(spotWithAgent, db.getAgentBySpot(spotWithAgent.id) ?? null);
       } else {
-        generateSpotNearby(35.6580, 139.7514);
+        generateSpotNearby(seed.lat, seed.lng);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -221,6 +228,13 @@ export default function HomePage() {
 
   // 実際のGPS現在地を取得して反映
   const requestLocation = useCallback(() => {
+    // デバッグモード：実 GPS を使わず、手動設定した座標（無ければ既定の東京中心）を現在地にする
+    if (isDebugEnabled()) {
+      const dbg = getDebugLocation();
+      if (dbg) setUserLocation(dbg);
+      setGeoStatus('ok'); // 不許可バナーを出さず、距離計算などの機能を有効化
+      return;
+    }
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setGeoStatus('error');
       return;
@@ -240,6 +254,16 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => { requestLocation(); }, [requestLocation]);
+
+  // デバッグ：指定座標を現在地として設定し、その地点の場を生成する
+  const applyDebugLocation = useCallback((loc: DebugLatLng) => {
+    setDebugLocation(loc);       // localStorage に保持（リロードしても維持）
+    setUserLocation(loc);
+    setGeoStatus('ok');
+    lastGenRef.current = null;   // スロットルを解除し、ジャンプ先で確実に生成
+    generateSpotNearby(loc.lat, loc.lng);
+    if (currentUser) db.logActivity({ type: 'map_move', userId: currentUser.id, source: 'human' });
+  }, [generateSpotNearby, currentUser]);
 
   // 場が0件かつ位置情報が確定したら自動生成（初回起動・全期限切れ後）
   useEffect(() => {
@@ -382,6 +406,16 @@ export default function HomePage() {
 
         {/* iOS Dynamic Island */}
         <div className="hidden sm:block absolute top-0 left-1/2 -translate-x-1/2 w-28 h-5.5 bg-[#1E2024] rounded-b-2xl z-50 pointer-events-none" />
+
+        {/* デバッグパネル（?debug=1 で有効化。位置情報なしでも現在地を手動指定してテスト可能） */}
+        {debugMode && (
+          <DebugPanel
+            location={userLocation}
+            geoStatus={geoStatus}
+            onApply={applyDebugLocation}
+            onDisable={() => setDebugMode(false)}
+          />
+        )}
 
         {/* Viewport */}
         <div className="flex-1 relative overflow-hidden bg-[#f5f7fa] flex flex-col">
