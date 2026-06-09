@@ -431,9 +431,8 @@ export default function SpotDetail({
           { key: 'photos',      label: '写真',   icon: Camera },
           { key: 'leaderboard', label: '石碑',   icon: Landmark },
         ] as const).map(({ key, label, icon: Icon }) => (
-          <button key={key} onClick={() => setTab(key)} className={`flex-1 py-2.5 flex flex-col items-center justify-center gap-0.5 text-[10px] font-black transition-all cursor-pointer border-b-2 ${tab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
-            <Icon className="w-4 h-4" />
-            <span>{label}</span>
+          <button key={key} onClick={() => setTab(key)} className={`flex-1 py-3 flex flex-row items-center justify-center gap-1.5 text-[12px] font-black transition-all cursor-pointer border-b-2 ${tab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
+            <Icon className="w-3.5 h-3.5" />{label}
           </button>
         ))}
       </div>
