@@ -285,8 +285,6 @@ export default function LeafletMap({
       const iconEmoji = spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏');
       // 最も近い神（と選択中）だけフキダシを表示。クエスト中は青のフキダシを出さない。
       const showBubble = !questMode && (spot.id === nearestId || isActive);
-      // 未検証スポットは淡く表示して信頼性を区別
-      const dim = isVerifiedSpot(spot) ? '' : 'opacity:0.5;';
       // フキダシの中身は「ここの神のつぶやき（心の声）」。スポット毎に変化させ、一定間隔で動的に切り替える
       let voice = '';
       let voiceIdx = 0;
@@ -311,7 +309,7 @@ export default function LeafletMap({
         </div>
       `
         : `
-        <div class="relative flex flex-col items-center" style="${dim}">
+        <div class="relative flex flex-col items-center">
           <div class="w-3 h-3 rounded-full bg-[#2563eb]/70 border-2 border-white shadow-sm"></div>
         </div>
       `;
