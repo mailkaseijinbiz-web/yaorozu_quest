@@ -4,6 +4,7 @@
 // プロバイダ: Gemini 優先 → OpenAI → ルールベース fallback（いずれも raw fetch）。
 import { NextResponse } from 'next/server';
 import { TASK_CATALOG, kindOfType, type TaskType, type Task, type Quest } from '../../../data/tasks';
+import { isPushConfigured, sendToAll } from '../../../lib/push-server';
 
 interface SpotInput {
   id?: string;
@@ -190,6 +191,20 @@ export async function POST(request: Request) {
       return quests.length ? quests : null;
     };
 
+    // 生成成功時：サーバから購読端末へ自動プッシュ（VAPID 設定時のみ）してから返す
+    const respond = async (quests: Quest[], source: string) => {
+      if (isPushConfigured() && quests.length) {
+        try {
+          await sendToAll({
+            title: '新しいクエストが登場',
+            body: `${spot.name}に「${quests[0].title}」など${quests.length}件のクエストが現れました。`,
+            url: '/',
+          });
+        } catch { /* プッシュ失敗は生成結果に影響させない */ }
+      }
+      return NextResponse.json({ quests, source });
+    };
+
     // ── Gemini 優先 ──
     if (geminiKey) {
       try {
@@ -213,7 +228,7 @@ export async function POST(request: Request) {
           const data = await res.json();
           const text: string = data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text || '').join('') ?? '';
           const quests = finalize(extractJson(text));
-          if (quests) return NextResponse.json({ quests, source: 'gemini' });
+          if (quests) return respond(quests, 'gemini');
         }
       } catch {
         /* fall through */
@@ -237,7 +252,7 @@ export async function POST(request: Request) {
           const data = await res.json();
           const text: string = data.choices?.[0]?.message?.content ?? '';
           const quests = finalize(extractJson(text));
-          if (quests) return NextResponse.json({ quests, source: 'openai' });
+          if (quests) return respond(quests, 'openai');
         }
       } catch {
         /* fall through */
@@ -245,7 +260,7 @@ export async function POST(request: Request) {
     }
 
     // ── ルールベース fallback ──
-    return NextResponse.json({ quests: buildFallbackQuest(spot, count, ts), source: 'fallback' });
+    return respond(buildFallbackQuest(spot, count, ts), 'fallback');
   } catch {
     return NextResponse.json({ error: 'generation failed' }, { status: 500 });
   }

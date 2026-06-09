@@ -15,7 +15,7 @@ import { getLevelInfo } from '../data/levels';
 import { getBadgeStates, godAvatarEmoji } from '../data/badges';
 import { Challenge } from '../data/challenges';
 import type { Quest } from '../data/tasks';
-import { ensureNotifyPermission, notifyNewQuest } from '../lib/notify';
+import { subscribePush } from '../lib/push-client';
 
 type TabType = 'home' | 'quest' | 'mypage';
 
@@ -130,8 +130,7 @@ export default function HomePage() {
           db.saveGeneratedQuests(spot.id, data.quests);
           db.trackApiCall('ai_generate');
           refreshDatabaseStates();
-          // 新しいクエストを端末通知（許可済みのときのみ）
-          notifyNewQuest('新しいクエストが追加されました', `${spot.name}に「${data.quests[0].title}」など${data.quests.length}件のクエストが現れました。`);
+          // 通知はサーバ自動プッシュ（/api/generate-quest）が担うため、ここでは出さない
         }
       }
     } catch { /* ネットワークエラーは無視 */ }
@@ -175,7 +174,7 @@ export default function HomePage() {
 
   /** 「他のクエストを探す」：現在地周辺に新しい場を生成し、そのクエストを必ず追加する（複数追加） */
   const findMoreQuests = useCallback(() => {
-    ensureNotifyPermission(); // ユーザー操作のタイミングで通知許可を求める
+    subscribePush(); // ユーザー操作のタイミングで通知購読（以降サーバ自動プッシュが届く）
     const jitter = () => (Math.random() - 0.5) * 0.012; // 約 ±0.6km
     generateSpotNearby(userLocation.lat + jitter(), userLocation.lng + jitter(), true);
   }, [generateSpotNearby, userLocation]);
