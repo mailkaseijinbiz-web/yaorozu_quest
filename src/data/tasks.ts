@@ -365,9 +365,9 @@ export const COMMON_TASK_TYPES: TaskType[] = ['context', 'photo', 'evaluate', 'e
 
 /** 神の3機能（管理画面のグルーピング表示用） */
 export const GOD_FUNCTIONS: { key: TaskKind; icon: string; label: string; desc: string; tasks: TaskType[] }[] = [
-  { key: 'sense', icon: '👁️', label: '情報収集', desc: '世界の値を調整するためのコンテキストを集める（価値・課題・煩悩・今の様子）', tasks: ['context', 'event', 'photo', 'cleaning', 'visit', 'value_ask', 'issue_ask', 'bonnou_ask', 'avatar_photo', 'goshuin'] },
-  { key: 'understand', icon: '🧠', label: '理解判断', desc: '集めた情報・投稿をジャッジし、価値と課題を読み解く', tasks: ['review', 'eat', 'evaluate', 'judge'] },
-  { key: 'act', icon: '✋', label: '操作', desc: '世界の値を直接動かす（価値を広げ、課題・煩悩を解決する）', tasks: ['resolveIssue', 'cleanup', 'buy', 'sns', 'bonnou_resolve', 'walk'] },
+  { key: 'sense', icon: '👁️', label: '情報収集タスク', desc: '世界の値を調整するためのコンテキストを集める（価値・課題・煩悩・今の様子）', tasks: ['context', 'event', 'photo', 'cleaning', 'visit', 'value_ask', 'issue_ask', 'bonnou_ask', 'avatar_photo', 'goshuin'] },
+  { key: 'understand', icon: '🧠', label: '理解判断タスク', desc: '集めた情報・投稿をジャッジし、価値と課題を読み解く', tasks: ['review', 'eat', 'evaluate', 'judge'] },
+  { key: 'act', icon: '✋', label: '操作タスク', desc: '世界の値を直接動かす（価値を広げ、課題・煩悩を解決する）', tasks: ['resolveIssue', 'cleanup', 'buy', 'sns', 'bonnou_resolve', 'walk'] },
 ];
 
 /** タスクの対象（第2の分類軸）。場の活気を動かすか、人間の覚りを動かすか。 */
