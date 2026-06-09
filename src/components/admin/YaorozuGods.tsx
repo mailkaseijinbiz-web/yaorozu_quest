@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Brain } from 'lucide-react';
+import { Brain, Pencil, Trash2 } from 'lucide-react';
 import { Card, Field, inputCls, PER_PAGE, Pager, Modal, ModalActions } from './ui';
 import { RulesPanel } from './RulesPanel';
 import { db, Spot, Agent } from '../../lib/db';
@@ -159,9 +159,14 @@ export function YaorozuGods({ spots, onChange }: { spots: Spot[]; onChange: () =
                     </div>
                   )}
                 </div>
-                <button onClick={() => openGod(s)} className="shrink-0 flex items-center gap-1 text-[12px] font-black text-white bg-indigo-600 px-3 py-2 rounded-lg hover:opacity-90 transition-all cursor-pointer">
-                  <Brain className="w-3.5 h-3.5" />知性を調整
-                </button>
+                <div className="shrink-0 flex items-center gap-1">
+                  <button onClick={() => openGod(s)} title="知性を調整" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer">
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => { if (confirm(`「${s.godName || s.name}」を削除しますか？`)) { db.adminDeleteSpot(s.id); db.adminDeleteAgent(db.getAgentBySpot(s.id)?.id || ''); } }} title="削除" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </Card>
           );
