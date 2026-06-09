@@ -721,7 +721,13 @@ class MockDatabase {
   private load<T>(key: string, defaultValue: T): T {
     if (!this.isBrowser) return defaultValue;
     const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : defaultValue;
+    if (data == null) return defaultValue;
+    // 破損した JSON でも getter 全体が壊れないよう、パース失敗は既定値にフォールバック
+    try {
+      return JSON.parse(data) as T;
+    } catch {
+      return defaultValue;
+    }
   }
 
   private save<T>(key: string, data: T): void {
@@ -733,7 +739,11 @@ class MockDatabase {
 
   // Getters
   getUsers(): User[] {
-    return this.load(KEYS.USERS, INITIAL_USERS);
+    const users = this.load<User[]>(KEYS.USERS, INITIAL_USERS);
+    // 退化・破損したユーザーリスト（空配列・非配列）は初期ユーザーへフォールバック。
+    // クラウド同期で空の yaorozu_users が書き込まれても getUser('user-self') が壊れないようにする。
+    if (!Array.isArray(users) || users.length === 0) return INITIAL_USERS;
+    return users;
   }
 
   getSpots(): Spot[] {

@@ -177,11 +177,10 @@ export default function HomePage() {
       setIsRevoked(true);
       return;
     }
-    const self = db.getUser('user-self');
-    if (self) {
-      setCurrentUser(self);
-      setEditName(self.displayName);
-    }
+    // getUser が null でも currentUser を必ず非 null にする（マイページが空白になるのを防ぐ）
+    const self = db.getUser('user-self') ?? FALLBACK_CURRENT_USER;
+    setCurrentUser(self);
+    setEditName(self.displayName);
     setUserStats(db.getUserStats('user-self'));
     setActiveChallengeId(db.getChallengeProgress().activeId);
 
@@ -261,8 +260,9 @@ export default function HomePage() {
     const profiles: { [userId: string]: UserType } = {};
     users.forEach(u => { profiles[u.id] = u; });
     setCreatorProfiles(profiles);
-    const self = db.getUser('user-self');
-    if (self) setCurrentUser(self);
+    // クラウド復元後に getUser が null でも currentUser を非 null に保つ（マイページの空白防止）
+    const self = db.getUser('user-self') ?? FALLBACK_CURRENT_USER;
+    setCurrentUser(self);
     setUserStats(db.getUserStats('user-self'));
     if (activeSpot) {
       const refreshedSpot = db.getSpot(activeSpot.id);

@@ -45,10 +45,13 @@ export async function pullSnapshot(): Promise<boolean> {
     suspendPush = true;
     let applied = false;
     for (const key of SYNC_KEYS) {
-      if (key in json.data && json.data[key] != null) {
-        localStorage.setItem(key, JSON.stringify(json.data[key]));
-        applied = true;
-      }
+      if (!(key in json.data) || json.data[key] == null) continue;
+      const v = json.data[key];
+      // 空（または非配列）のユーザーリストでローカルを上書きしない。
+      // user-self を失うと currentUser が null になりマイページが空白化するため。
+      if (key === 'yaorozu_users' && (!Array.isArray(v) || v.length === 0)) continue;
+      localStorage.setItem(key, JSON.stringify(v));
+      applied = true;
     }
     suspendPush = false;
     return applied;
@@ -71,9 +74,13 @@ async function pushNow(): Promise<void> {
   const data: Record<string, unknown> = {};
   for (const key of SYNC_KEYS) {
     const raw = localStorage.getItem(key);
-    if (raw != null) {
-      try { data[key] = JSON.parse(raw); } catch { /* skip */ }
-    }
+    if (raw == null) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      // 空のユーザーリストはクラウドへ送らない（退化状態が同期で伝播するのを防ぐ）
+      if (key === 'yaorozu_users' && (!Array.isArray(parsed) || parsed.length === 0)) continue;
+      data[key] = parsed;
+    } catch { /* skip */ }
   }
   try {
     const res = await fetch('/api/persist', {
