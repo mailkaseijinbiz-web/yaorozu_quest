@@ -148,6 +148,7 @@ export default function MapTab({
   const [msgIdx, setMsgIdx] = useState(0);
 
   // チャレンジ：証拠写真モーダル & 達成演出
+  const [confirmQuest, setConfirmQuest] = useState<Challenge | null>(null); // インタラクティブカードの内容確認モーダル
   const [proofStep, setProofStep] = useState<ChallengeStep | null>(null);
   const [proofPhoto, setProofPhoto] = useState<string | null>(null);
   const [proofComment, setProofComment] = useState(''); // 証拠写真に添えるコメント
@@ -624,7 +625,7 @@ export default function MapTab({
             tabIndex={0}
             onTouchStart={onCardTouchStart}
             onTouchEnd={onCardTouchEnd}
-            onClick={() => { if (swipedRef.current) { swipedRef.current = false; return; } onStartChallenge?.(ch.id); }}
+            onClick={() => { if (swipedRef.current) { swipedRef.current = false; return; } setConfirmQuest(ch); }}
             className="absolute bottom-3 left-3 right-3 z-[1000] text-left bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-black/5 overflow-hidden cursor-pointer active:scale-[0.99] transition-all touch-pan-y"
           >
             <div className="flex items-stretch gap-3">
@@ -666,6 +667,61 @@ export default function MapTab({
           </div>
         );
       })() : null}
+
+      {/* インタラクティブカード：クエスト内容を確認してから参加 */}
+      {confirmQuest && (() => {
+        const q = confirmQuest;
+        const diff = difficultyLabel(q.difficulty);
+        const levelOk = userLevel >= q.minLevel;
+        const godName = q.spotId ? db.getSpot(q.spotId)?.godName : null;
+        return (
+          <div className="absolute inset-0 z-[2200] bg-black/50 flex items-center justify-center p-6" onClick={() => setConfirmQuest(null)}>
+            <div className="w-full max-w-[320px] max-h-[85vh] overflow-y-auto bg-white rounded-3xl p-5 text-center animate-in" onClick={(e) => e.stopPropagation()}>
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-100 to-amber-100 flex items-center justify-center text-4xl mx-auto mb-3">{q.badgeIcon}</div>
+              <h3 className="text-lg font-black text-gray-900">{q.title}</h3>
+              {godName && <p className="text-[11px] font-bold text-gray-400 mt-0.5">by {godName}</p>}
+              <p className="text-[13px] text-gray-500 mt-1 leading-relaxed">{q.description}</p>
+              <div className="flex items-center justify-center gap-2 mt-3 text-[13px] text-gray-500 flex-wrap">
+                <span className={`font-black ${diff.text}`}>{diff.stars} {diff.label}</span>
+                <span>・</span>
+                <span className={levelOk ? '' : 'text-rose-600 font-black'}>{levelOk ? '' : '🔒 '}Lv.{q.minLevel}〜</span>
+                <span>・</span>
+                <span className="flex items-center gap-0.5"><Clock className="w-3 h-3" />約{q.estMinutes}分</span>
+              </div>
+
+              {q.tasks.length > 0 && (
+                <div className="mt-4 text-left">
+                  <p className="text-[11px] font-black text-gray-500 mb-1.5">クエストの内容（全{q.tasks.length}タスク）</p>
+                  <div className="space-y-1.5">
+                    {q.tasks.map((t, i) => (
+                      <div key={t.id} className="flex items-center gap-2 bg-gray-50 rounded-xl px-2.5 py-2">
+                        <span className="w-5 h-5 rounded-full bg-shrine-red text-white text-[11px] font-black flex items-center justify-center flex-shrink-0">{i + 1}</span>
+                        <span className="text-base flex-shrink-0">{t.icon}</span>
+                        <span className="flex-1 min-w-0 text-[12px] font-bold text-gray-800 truncate">{t.title}</span>
+                        <span className="text-[11px] font-black text-amber-600 flex-shrink-0">+{t.reward}徳</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2 mt-4">
+                <button onClick={() => setConfirmQuest(null)} className="flex-1 bg-gray-100 text-gray-500 text-sm font-black py-3 rounded-xl cursor-pointer">やめる</button>
+                {levelOk ? (
+                  <button
+                    onClick={() => { const id = q.id; setConfirmQuest(null); onStartChallenge?.(id); }}
+                    className="flex-1 bg-shrine-red text-white text-sm font-black py-3 rounded-xl hover:opacity-90 cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Flag className="w-4 h-4" />参加
+                  </button>
+                ) : (
+                  <div className="flex-1 bg-gray-100 text-gray-400 text-[12px] font-black py-3 rounded-xl flex items-center justify-center">🔒 Lv.{q.minLevel}以上</div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 証拠写真モーダル（この目的地を達成するには写真が必要） */}
       {proofStep && (
