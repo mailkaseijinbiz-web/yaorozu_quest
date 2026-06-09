@@ -10,12 +10,14 @@ import { distanceKm } from '../lib/geo';
 interface HomeTabProps {
   currentUser: User;
   userLocation: { lat: number; lng: number };
+  isGeneratingQuests?: boolean;
   onStartChallenge: (challengeId: string) => void;
   onEndChallenge?: () => void;
   onChanged?: () => void;
+  onNeedSpots?: () => void;
 }
 
-export default function HomeTab({ currentUser, userLocation, onStartChallenge, onEndChallenge }: HomeTabProps) {
+export default function HomeTab({ currentUser, userLocation, isGeneratingQuests, onStartChallenge, onEndChallenge, onNeedSpots }: HomeTabProps) {
   // localStorage 依存のため、マウント後にのみ動的レンダリング（ハイドレーション不一致回避）
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -59,6 +61,14 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
     .map((x) => x.ch);
   const visibleChallenges = nearChallenges.slice(0, visibleCount);
 
+  // クエストが表示されていないとき（'done'フィルタ除く）、場の生成をリクエスト
+  useEffect(() => {
+    if (!mounted) return;
+    if (filter === 'done') return;
+    if (nearChallenges.length === 0) onNeedSpots?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted, nearChallenges.length, filter]);
+
   return (
     <div className="flex flex-col h-full overflow-y-auto bg-[#f5f7fa]">
       {/* ── ブランドヘッダー ── */}
@@ -98,8 +108,18 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
         {!mounted ? (
           <div className="text-center py-10 text-xs text-gray-400">読み込み中…</div>
         ) : nearChallenges.length === 0 ? (
-          <div className="text-center py-12 text-sm text-gray-400">
-            {filter === 'done' ? 'まだ達成したクエストがありません。' : '該当するクエストがありません。'}
+          <div className="text-center py-12">
+            {filter !== 'done' && isGeneratingQuests ? (
+              <>
+                <div className="mx-auto mb-3 w-8 h-8 border-2 border-shrine-red border-t-transparent rounded-full animate-spin" />
+                <p className="text-sm font-bold text-shrine-red">近くの場からクエストを生成中…</p>
+                <p className="text-xs text-gray-400 mt-1">しばらくお待ちください</p>
+              </>
+            ) : (
+              <p className="text-sm text-gray-400">
+                {filter === 'done' ? 'まだ達成したクエストがありません。' : '該当するクエストがありません。'}
+              </p>
+            )}
           </div>
         ) : (
         <div className="flex flex-col gap-3">

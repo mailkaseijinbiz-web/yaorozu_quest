@@ -37,6 +37,7 @@ export interface Spot {
   verified?: boolean; // 実在を手作業で検証済みか（生成スポットは false 相当）
   // ※ Identity.md / Soul.md は「場」ではなく八百万神（Agent）が持つ
   issues?: string[]; // 課題（この場が解決すべき課題。神の知識へ反映）
+  expiresAt?: string; // ISO 8601 — 設定されていると期限切れで自動削除（GPS 生成スポット用）
 }
 
 /**
@@ -736,8 +737,19 @@ class MockDatabase {
   }
 
   getSpots(): Spot[] {
-    return this.load(KEYS.SPOTS, INITIAL_SPOTS);
+    const all = this.load<Spot[]>(KEYS.SPOTS, INITIAL_SPOTS);
+    const now = Date.now();
+    const expired = all.filter(s => s.expiresAt && new Date(s.expiresAt).getTime() <= now);
+    const live = all.filter(s => !s.expiresAt || new Date(s.expiresAt).getTime() > now);
+    // 期限切れがあればスポット＋対応エージェントをまとめて掃除
+    if (expired.length > 0) {
+      this.save(KEYS.SPOTS, live);
+      const expiredIds = new Set(expired.map(s => s.id));
+      this.save(KEYS.AGENTS, this.getAgents().filter(a => !expiredIds.has(a.spotId)));
+    }
+    return live;
   }
+
 
   getAgents(): Agent[] {
     return this.load(KEYS.AGENTS, INITIAL_AGENTS);
@@ -1266,8 +1278,11 @@ class MockDatabase {
   logActivity(a: Omit<Activity, 'id' | 'createdAt'>): void {
     if (!this.isBrowser) return;
     const all = this.load<Activity[]>(KEYS.ACTIVITIES, []);
-    all.unshift({ ...a, id: `act-${Date.now()}-${Math.floor(Math.random() * 10000)}`, createdAt: new Date().toISOString() });
+    const activity: Activity = { ...a, id: `act-${Date.now()}-${Math.floor(Math.random() * 10000)}`, createdAt: new Date().toISOString() };
+    all.unshift(activity);
     this.save(KEYS.ACTIVITIES, all.slice(0, 500));
+    // 同タブ内のリスナーへリアルタイム通知
+    window.dispatchEvent(new CustomEvent('yaorozu:activity', { detail: activity }));
   }
   getActivities(): Activity[] {
     return this.load<Activity[]>(KEYS.ACTIVITIES, []);
@@ -1469,3 +1484,6 @@ class MockDatabase {
 }
 
 export const db = new MockDatabase();
+
+/** GPS 生成スポットの TTL（ミリ秒）。30 日。 */
+export const SPOT_TTL_MS = 30 * 24 * 60 * 60 * 1000;

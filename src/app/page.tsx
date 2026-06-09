@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, Clock, Share2, X, Stamp } from 'lucide-react';
-import { db, Spot, Agent, User as UserType, UserContribution, Activity } from '../lib/db';
+import { db, Spot, Agent, User as UserType, UserContribution, Activity, SPOT_TTL_MS } from '../lib/db';
 import { getGoShuinList, Goshuin } from '../lib/goshuin';
 import { pullSnapshot } from '../lib/cloud-sync';
 import { distanceKm } from '../lib/geo';
@@ -12,6 +12,7 @@ import SpotDetail from '../components/SpotDetail';
 import { getLevelInfo } from '../data/levels';
 import { getBadgeStates, godAvatarEmoji } from '../data/badges';
 import { Challenge } from '../data/challenges';
+import type { Quest } from '../data/tasks';
 
 type TabType = 'home' | 'quest' | 'mypage';
 
@@ -80,6 +81,48 @@ export default function HomePage() {
 
   // GPS 場の自動生成（最後に生成した座標と時刻を保持 — 近すぎる・頻度高すぎる場合はスキップ）
   const lastGenRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
+  // クエスト生成のクールダウン（最後に生成した時刻）
+  const lastQuestGenRef = useRef<number>(0);
+  // クエスト生成中フラグ（HomeTab のスピナー表示用）
+  const [isGeneratingQuests, setIsGeneratingQuests] = useState(false);
+
+  /** 指定した場のクエストを generate-quest API で生成して保存する */
+  const generateQuestsForSpot = useCallback(async (spot: Spot, spotAgent: Agent | null) => {
+    const now = Date.now();
+    if (now - lastQuestGenRef.current < 30_000) return; // 30 秒クールダウン
+    lastQuestGenRef.current = now;
+    setIsGeneratingQuests(true);
+    try {
+      const res = await fetch('/api/generate-quest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          count: 2,
+          ts: now,
+          spot: {
+            id: spot.id,
+            name: spot.name,
+            category: spot.category,
+            description: spot.description,
+            enjoyments: spot.enjoyments,
+            issues: spot.issues,
+            soulMd: spotAgent?.soulMd,
+            latitude: spot.latitude,
+            longitude: spot.longitude,
+          },
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json() as { quests?: Quest[] };
+        if (Array.isArray(data.quests) && data.quests.length) {
+          db.saveGeneratedQuests(spot.id, data.quests);
+          db.trackApiCall('ai_generate');
+          refreshDatabaseStates();
+        }
+      }
+    } catch { /* ネットワークエラーは無視 */ }
+    finally { setIsGeneratingQuests(false); }
+  }, []);
 
   const generateSpotNearby = useCallback(async (lat: number, lng: number) => {
     const now = Date.now();
@@ -94,25 +137,32 @@ export default function HomePage() {
         body: JSON.stringify({ lat, lng }),
       });
       if (!res.ok) return;
-      const { spot, agent } = await res.json() as { spot: Spot; agent: Agent };
+      const { spot: rawSpot, agent } = await res.json() as { spot: Spot; agent: Agent };
+      // TTL を付与（30 日後に自動期限切れ）
+      const spot: Spot = { ...rawSpot, expiresAt: new Date(Date.now() + SPOT_TTL_MS).toISOString() };
       db.adminSaveSpot(spot);
       db.adminSaveAgent(agent);
       db.trackApiCall('ai_generate');
       db.logActivity({ type: 'spot_generate', userId: 'system', source: 'system', spotId: spot.id, detail: spot.name });
       refreshDatabaseStates();
+      // 場を生成後、クエストがなければこの場のクエストも生成する
+      if (db.getAllQuests().length === 0) {
+        generateQuestsForSpot(spot, agent);
+      }
     } catch { /* ネットワークエラーは無視 */ }
-  }, []);
+  }, [generateQuestsForSpot]);
 
   // Initial load
   useEffect(() => {
-    setSpots(db.getSpots());
+    const initSpots = db.getSpots();
+    setSpots(initSpots);
     const users = db.getUsers();
     const profiles: { [userId: string]: UserType } = {};
     users.forEach(u => { profiles[u.id] = u; });
     setCreatorProfiles(profiles);
 
-    const initialSpot = db.getSpots()[0];
-    setActiveSpot(initialSpot);
+    const initialSpot = initSpots[0];
+    setActiveSpot(initialSpot ?? null);
 
     // 管理者に削除されたユーザーは再ログイン画面へ
     if (db.isRevoked('user-self')) {
@@ -134,6 +184,23 @@ export default function HomePage() {
       setHasTakenPhoto(localStorage.getItem('yaorozu_quest_photo') === 'true');
       setGoShuinList(getGoShuinList('user-self'));
     }
+
+    // 初回表示時にクエストが無ければバックグラウンドで生成（場が無い場合は場も生成）
+    if (db.getAllQuests().length === 0) {
+      if (initSpots.length === 0) {
+        // 場も無い → 場を生成（場の生成後にクエストも自動生成される）
+        generateSpotNearby(35.6580, 139.7514); // 取得前は東京デフォルト座標を使用
+      } else {
+        const agentSpotIds = new Set(db.getAgents().map(a => a.spotId));
+        const spotWithAgent = initSpots.find(s => agentSpotIds.has(s.id));
+        if (spotWithAgent) {
+          generateQuestsForSpot(spotWithAgent, db.getAgentBySpot(spotWithAgent.id) ?? null);
+        } else {
+          generateSpotNearby(35.6580, 139.7514);
+        }
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // クラウド永続化：起動時にスナップショットを復元（鍵未設定なら no-op）
@@ -167,6 +234,13 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => { requestLocation(); }, [requestLocation]);
+
+  // 場が0件かつ位置情報が確定したら自動生成（初回起動・全期限切れ後）
+  useEffect(() => {
+    if (spots.length > 0) return;
+    if (geoStatus === 'locating') return;
+    generateSpotNearby(userLocation.lat, userLocation.lng);
+  }, [spots.length, geoStatus, userLocation, generateSpotNearby]);
 
   useEffect(() => {
     if (activeSpot) {
@@ -313,6 +387,7 @@ export default function HomePage() {
               <HomeTab
                 currentUser={currentUser || FALLBACK_CURRENT_USER}
                 userLocation={userLocation}
+                isGeneratingQuests={isGeneratingQuests}
                 onStartChallenge={(cid) => {
                   db.setActiveChallenge(cid);
                   setActiveChallengeId(cid);
@@ -320,6 +395,16 @@ export default function HomePage() {
                 }}
                 onEndChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
                 onChanged={refreshDatabaseStates}
+                onNeedSpots={() => {
+                  const existingSpots = db.getSpots();
+                  if (existingSpots.length === 0) {
+                    generateSpotNearby(userLocation.lat, userLocation.lng);
+                  } else {
+                    const agentIds = new Set(db.getAgents().map(a => a.spotId));
+                    const target = existingSpots.find(s => agentIds.has(s.id)) ?? existingSpots[0];
+                    generateQuestsForSpot(target, db.getAgentBySpot(target.id) ?? null);
+                  }
+                }}
               />
             )}
 
@@ -696,6 +781,23 @@ export default function HomePage() {
                   if (key === 'home') {
                     setHomeResetSignal(s => s + 1);
                     if (currentUser) db.logActivity({ type: 'home_view', userId: currentUser.id, source: 'human' });
+                    generateSpotNearby(userLocation.lat, userLocation.lng);
+                    // クエストが無い場合は最近の場からクエストを生成
+                    if (db.getAllQuests().length === 0) {
+                      const nearSpots = db.getSpots();
+                      if (nearSpots.length > 0) {
+                        const agentSpotIds = new Set(db.getAgents().map(a => a.spotId));
+                        const spotWithAgent = nearSpots.find(s => agentSpotIds.has(s.id));
+                        if (spotWithAgent) {
+                          generateQuestsForSpot(spotWithAgent, db.getAgentBySpot(spotWithAgent.id) ?? null);
+                        }
+                        // 場はあるが agent が無い場合は generateSpotNearby 内でクエスト生成がチェーンされる
+                      }
+                      // 場が無い場合は generateSpotNearby が内部でクエストも生成する
+                    }
+                  }
+                  if (key === 'quest' && spots.length === 0) {
+                    // マップに場が表示されていない場合は生成する
                     generateSpotNearby(userLocation.lat, userLocation.lng);
                   }
                   setActiveTab(key);
