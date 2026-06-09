@@ -206,7 +206,7 @@ export function Blueprint() {
           {/* アマテラス（根源・一者） */}
           <Node icon="☸️" name="アマテラス" count={1} />
           {/* 場に宿る神（Agent）＝ 工房の主 */}
-          <Node icon="🦊" name="八百万の神 (Agent)" count={spots} />
+          <Node icon="🦊" name="神" count={spots} />
           <div className="flex items-center gap-2 pl-6 text-[11px] font-bold text-gray-400">└─ が鋳造する ─▶</div>
           {/* 鋳造される本体 = クエスト。3種のタスクを「内包」するコンテナとして表現する */}
           <div className="rounded-xl border-2 border-amber-400 bg-amber-50/50 p-3 shadow-sm">
