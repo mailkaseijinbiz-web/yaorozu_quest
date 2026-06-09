@@ -1,5 +1,6 @@
 // 御朱印ストア
 // 神と対話した（初回メッセージ送信）スポットの御朱印を localStorage に保存する。
+import { schedulePush } from './cloud-sync';
 
 export interface Goshuin {
   id: string;
@@ -52,6 +53,8 @@ export function grantGoShuin(
   try {
     const list = getGoShuinList(userId);
     localStorage.setItem(storageKey(userId), JSON.stringify([...list, stamp]));
+    // user-self の御朱印キーは SYNC_KEYS 対象。クラウド同期を予約して同期漏れを防ぐ。
+    schedulePush();
   } catch {
     return null;
   }
