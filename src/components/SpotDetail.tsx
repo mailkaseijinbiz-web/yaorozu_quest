@@ -6,6 +6,7 @@ import { Spot, Agent, User, db, isVerifiedSpot } from '../lib/db';
 import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
 import { uploadImage } from '../lib/upload';
+import { grantGoShuin } from '../lib/goshuin';
 
 // ── TTS（神の声）──────────────────────────────────────────
 const _ttsCache = new Map<string, string>();
@@ -73,6 +74,7 @@ interface SpotDetailProps {
   onChanged?: () => void; // 写真/楽しみ方/徳が変化した時に親へ通知
   onMessageSent?: () => void;
   onStartChallenge?: (challengeId: string) => void; // クエストタブから挑戦開始
+  onGoShuinGranted?: () => void; // 御朱印を授かったとき親へ通知
 }
 
 // タスク達成時に「楽しみ方」へ追加されるテキスト（神がUGCで成長する）
@@ -113,6 +115,7 @@ export default function SpotDetail({
   onChanged,
   onMessageSent,
   onStartChallenge,
+  onGoShuinGranted,
 }: SpotDetailProps) {
   const [tab, setTab] = useState<'chat' | 'requests' | 'photos'>('chat');
   const [agent] = useState<Agent>(() => resolveAgent(spot));
@@ -313,6 +316,19 @@ export default function SpotDetail({
 
   const handleSend = async (textToSend: string) => {
     if (!textToSend.trim() || isLoading) return;
+    // 初回メッセージ送信 → 御朱印を授ける
+    const isFirstMessage = messages.filter((m) => m.sender === 'user').length === 0;
+    if (isFirstMessage) {
+      const stamp = grantGoShuin(
+        currentUser.id,
+        { id: spot.id, name: spot.name, category: spot.category, godEmoji: spot.godEmoji },
+        agent.name
+      );
+      if (stamp) {
+        flashToast(`🔴 ${spot.name} の御朱印を授かった！`);
+        onGoShuinGranted?.();
+      }
+    }
     const userMessage: Message = { id: `u-${Date.now()}`, sender: 'user', text: textToSend, createdAt: new Date().toISOString() };
     setMessages((prev) => [...prev, userMessage]);
     setInputText('');

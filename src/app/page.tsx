@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, Clock, Share2, X } from 'lucide-react';
+import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, Clock, Share2, X, Stamp } from 'lucide-react';
 import { db, Spot, Agent, User as UserType, UserContribution, Activity } from '../lib/db';
+import { getGoShuinList, Goshuin } from '../lib/goshuin';
 import { pullSnapshot } from '../lib/cloud-sync';
 import { distanceKm } from '../lib/geo';
 import HomeTab from '../components/HomeTab';
@@ -71,7 +72,8 @@ export default function HomePage() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
-  const [mypageTab, setMypageTab] = useState<'activity' | 'badges' | 'quests'>('activity');
+  const [mypageTab, setMypageTab] = useState<'activity' | 'goshuin' | 'badges' | 'quests'>('activity');
+  const [goShuinList, setGoShuinList] = useState<Goshuin[]>([]);
   // 達成クエストの振り返り modal
   const [reviewQuest, setReviewQuest] = useState<Challenge | null>(null);
 
@@ -99,6 +101,7 @@ export default function HomePage() {
       if (claimed) setClaimedQuests(JSON.parse(claimed));
       setHasChatted(localStorage.getItem('yaorozu_quest_chatted') === 'true');
       setHasTakenPhoto(localStorage.getItem('yaorozu_quest_photo') === 'true');
+      setGoShuinList(getGoShuinList('user-self'));
     }
   }, []);
 
@@ -446,10 +449,11 @@ export default function HomePage() {
                 <div className="flex border-b border-black/5 bg-white sticky top-0 z-10">
                   {([
                     { key: 'activity', label: 'アクティビティ', icon: Clock },
-                    { key: 'quests', label: '達成クエスト', icon: Flag },
-                    { key: 'badges', label: 'バッジ', icon: Trophy },
+                    { key: 'goshuin',  label: '御朱印',         icon: Stamp },
+                    { key: 'quests',   label: '達成クエスト',   icon: Flag },
+                    { key: 'badges',   label: 'バッジ',         icon: Trophy },
                   ] as const).map(({ key, label, icon: Icon }) => (
-                    <button key={key} onClick={() => setMypageTab(key)} className={`flex-1 py-3 flex items-center justify-center gap-1.5 text-xs font-black transition-all cursor-pointer border-b-2 ${mypageTab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
+                    <button key={key} onClick={() => setMypageTab(key)} className={`flex-1 py-2.5 flex flex-col items-center justify-center gap-0.5 text-[10px] font-black transition-all cursor-pointer border-b-2 ${mypageTab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
                       <Icon className="w-3.5 h-3.5" />{label}
                     </button>
                   ))}
@@ -507,6 +511,47 @@ export default function HomePage() {
                             </div>
                           );
                         })}
+                      </div>
+                    );
+                  })()}
+
+                  {/* 御朱印帳 */}
+                  {mypageTab === 'goshuin' && (() => {
+                    if (goShuinList.length === 0) {
+                      return (
+                        <div className="text-center py-14">
+                          <div className="text-5xl mb-3">📖</div>
+                          <p className="text-sm font-black text-gray-500">御朱印帳が空です</p>
+                          <p className="text-xs text-gray-400 mt-1">神と対話すると御朱印を授かります</p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div>
+                        <p className="text-[11px] text-gray-400 mb-3 text-right">{goShuinList.length} 社寺</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          {[...goShuinList].reverse().map((g) => {
+                            const d = new Date(g.receivedAt);
+                            const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
+                            const timeStr = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                            return (
+                              <div key={g.id} className="bg-white rounded-2xl border border-red-100 shadow-sm overflow-hidden flex flex-col items-center py-4 px-2 gap-1.5">
+                                {/* 朱印円 */}
+                                <div className="relative w-20 h-20 flex-shrink-0">
+                                  <div className="absolute inset-0 rounded-full border-4 border-red-600/80" />
+                                  <div className="absolute inset-1.5 rounded-full border-2 border-red-600/40" />
+                                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5">
+                                    <span className="text-2xl leading-none">{g.godEmoji}</span>
+                                    <span className="text-[8px] font-black text-red-700 text-center leading-tight px-1" style={{ maxWidth: 64 }}>{g.godName}</span>
+                                  </div>
+                                </div>
+                                {/* スポット名 */}
+                                <p className="text-[11px] font-black text-gray-800 text-center leading-tight line-clamp-2">{g.spotName}</p>
+                                <p className="text-[9px] text-gray-400">{dateStr} {timeStr}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     );
                   })()}
@@ -636,6 +681,9 @@ export default function HomePage() {
                 setHasChatted(true);
                 localStorage.setItem('yaorozu_quest_chatted', 'true');
               }
+            }}
+            onGoShuinGranted={() => {
+              if (currentUser) setGoShuinList(getGoShuinList(currentUser.id));
             }}
           />
         )}
