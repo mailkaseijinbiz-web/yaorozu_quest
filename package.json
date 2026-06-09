@@ -14,6 +14,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@capacitor/core": "^6.2.1",
+    "@capacitor/push-notifications": "^6.0.5",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.1",
     "@supabase/supabase-js": "^2.107.0",
@@ -41,7 +43,6 @@
     "vitest": "^1.6.1"
   },
   "optionalDependencies": {
-    "@capacitor/core": "^6.1.2",
     "@capacitor/ios": "^6.1.2"
   }
 }

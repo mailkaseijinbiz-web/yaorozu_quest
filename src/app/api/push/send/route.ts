@@ -1,12 +1,12 @@
-// 登録済みの全端末へ Web Push を送信する（管理・通知用）。
+// 登録済みの全端末へプッシュ送信する（Web Push + iOS APNs。管理・通知用）。
 import { NextResponse } from 'next/server';
-import { isPushConfigured, sendToAll } from '../../../../lib/push-server';
+import { isAnyPushConfigured, sendToAll } from '../../../../lib/push-server';
 import { isAdminAuthed } from '../../../../lib/admin-auth';
 
 export async function POST(request: Request) {
   // 管理者のみ全端末への一斉送信を許可する（無認可ブロードキャスト防止）。
   if (!(await isAdminAuthed())) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
-  if (!isPushConfigured()) return NextResponse.json({ ok: false, error: 'push not configured' }, { status: 503 });
+  if (!isAnyPushConfigured()) return NextResponse.json({ ok: false, error: 'push not configured' }, { status: 503 });
   let body: { title?: string; body?: string; url?: string };
   try {
     body = await request.json();

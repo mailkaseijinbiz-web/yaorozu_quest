@@ -4,7 +4,7 @@
 // プロバイダ: Gemini 優先 → OpenAI → ルールベース fallback（いずれも raw fetch）。
 import { NextResponse } from 'next/server';
 import { TASK_CATALOG, kindOfType, type TaskType, type Task, type Quest } from '../../../data/tasks';
-import { isPushConfigured, sendToAll } from '../../../lib/push-server';
+import { isAnyPushConfigured, sendToAll } from '../../../lib/push-server';
 
 interface SpotInput {
   id?: string;
@@ -191,9 +191,9 @@ export async function POST(request: Request) {
       return quests.length ? quests : null;
     };
 
-    // 生成成功時：サーバから購読端末へ自動プッシュ（VAPID 設定時のみ）してから返す
+    // 生成成功時：サーバから購読端末へ自動プッシュ（Web Push/APNs 設定時のみ）してから返す
     const respond = async (quests: Quest[], source: string) => {
-      if (isPushConfigured() && quests.length) {
+      if (isAnyPushConfigured() && quests.length) {
         try {
           await sendToAll({
             title: '新しいクエストが登場',
