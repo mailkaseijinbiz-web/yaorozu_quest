@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Settings, Bug, Cloud, Database, RotateCcw, FileText } from 'lucide-react';
+import { Settings, Bug, Cloud, Database, RotateCcw, FileText, Bell } from 'lucide-react';
 import { db } from '../../lib/db';
 import { isCloudEnabled, schedulePush, pullSnapshot } from '../../lib/cloud-sync';
+import { subscribePush } from '../../lib/push-client';
 import { isDebugEnabled, setDebugEnabled, getDebugLocation, setDebugLocation, DEBUG_PRESETS } from '../../lib/debug';
 import { GOD_FUNCTIONS, TASK_CATALOG, TASK_TARGET_META, TASK_TARGET, type TaskType } from '../../data/tasks';
 import { buildDainichiIdentityMd } from '../../lib/dainichi';
@@ -27,11 +28,16 @@ export function SystemPanel({ onChange }: { onChange: () => void }) {
   const [ttlDays, setTtlDays] = useState(30);
   const [cloud, setCloud] = useState<boolean | null>(null);
   const [savedMsg, setSavedMsg] = useState('');
+  // プッシュ
+  const [pushConfigured, setPushConfigured] = useState<boolean | null>(null);
+  const [pushTitle, setPushTitle] = useState('新しいクエストが登場');
+  const [pushBody, setPushBody] = useState('近くに新しいクエストが現れました。確かめに行きましょう。');
 
   useEffect(() => {
     setDebug(isDebugEnabled());
     setTtlDays(db.getAppSettings().spotTtlDays);
     setCloud(isCloudEnabled());
+    fetch('/api/push/subscribe').then((r) => r.json()).then((j) => setPushConfigured(!!j.configured)).catch(() => setPushConfigured(false));
   }, []);
 
   const flash = (m: string) => { setSavedMsg(m); setTimeout(() => setSavedMsg(''), 2000); };
@@ -91,6 +97,31 @@ export function SystemPanel({ onChange }: { onChange: () => void }) {
           <button onClick={() => { schedulePush(); flash('クラウドへ保存をスケジュールしました'); }} className="text-[12px] font-bold text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-1.5 hover:bg-sky-100 cursor-pointer">今すぐ保存</button>
           <button onClick={() => { pullSnapshot().then((a) => { setCloud(isCloudEnabled()); if (a) { onChange(); flash('クラウドから復元しました'); } else flash('復元対象なし'); }); }} className="text-[12px] font-bold text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-1.5 hover:bg-sky-100 cursor-pointer">復元</button>
         </div>
+      </Section>
+
+      <Section icon={<Bell className="w-4 h-4 text-amber-600" />} title="プッシュ通知（Web Push / VAPID）">
+        <p className="text-[13px] text-gray-700">状態: <b className={pushConfigured === true ? 'text-emerald-600' : pushConfigured === false ? 'text-rose-600' : 'text-gray-400'}>{pushConfigured === true ? '設定済み（VAPID鍵あり）' : pushConfigured === false ? '未設定（VAPID鍵なし）' : '確認中…'}</b></p>
+        <div className="flex flex-wrap gap-2 mt-2">
+          <button
+            onClick={async () => { const r = await subscribePush(); flash(r === 'subscribed' ? 'この端末で通知を有効化しました' : r === 'denied' ? '通知が許可されませんでした' : r === 'unconfigured' ? 'VAPID鍵が未設定です' : r === 'unsupported' ? 'この環境は未対応です' : '購読に失敗しました'); }}
+            className="text-[12px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 hover:bg-amber-100 cursor-pointer"
+          >この端末で受信を有効化</button>
+        </div>
+        <div className="mt-3 space-y-1.5">
+          <input value={pushTitle} onChange={(e) => setPushTitle(e.target.value)} placeholder="通知タイトル" className="w-full bg-gray-50 border border-gray-300 rounded-lg px-2.5 py-1.5 text-[13px] text-gray-900 focus:outline-none focus:border-amber-500" />
+          <textarea value={pushBody} onChange={(e) => setPushBody(e.target.value)} rows={2} placeholder="本文" className="w-full bg-gray-50 border border-gray-300 rounded-lg px-2.5 py-1.5 text-[13px] text-gray-900 focus:outline-none focus:border-amber-500 resize-none" />
+          <button
+            onClick={async () => {
+              try {
+                const r = await fetch('/api/push/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: pushTitle, body: pushBody, url: '/' }) });
+                const j = await r.json();
+                flash(j.ok ? `送信：${j.sent}件成功 / ${j.failed}件失敗（登録${j.total}件）` : `送信失敗：${j.error ?? ''}`);
+              } catch { flash('送信に失敗しました'); }
+            }}
+            className="w-full bg-amber-600 text-white text-[12px] font-black py-2 rounded-lg hover:bg-amber-700 cursor-pointer"
+          >登録端末全員に送信</button>
+        </div>
+        <p className="text-[10px] text-gray-400 mt-2">※ 端末ごとに「受信を有効化」が必要です。本番では .env に VAPID 鍵、Supabase に push_subscriptions テーブルが必要（docs/PUSH.md 参照）。</p>
       </Section>
 
       <Section icon={<Database className="w-4 h-4 text-gray-600" />} title="データ件数">
