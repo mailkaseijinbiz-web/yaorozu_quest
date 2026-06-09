@@ -78,6 +78,7 @@ export function Blueprint() {
   const enlightenment = totalToku - 0;
   const happiness = activeness + enlightenment;
   const quests = db.getAllQuests().length; // 静的＋生成クエスト
+  const agents = db.getAgents().length; // 神（Agent）の実数
 
   // システムの一括更新：生成ルール＋神の魂を反映して、神・クエストを生成AIでアップデートする
   const [updating, setUpdating] = useState(false);
@@ -206,7 +207,7 @@ export function Blueprint() {
           {/* アマテラス（根源・一者） */}
           <Node icon="☸️" name="アマテラス" count={1} />
           {/* 場に宿る神（Agent）＝ 工房の主 */}
-          <Node icon="🦊" name="神" count={spots} />
+          <Node icon="🦊" name="神" count={agents} />
           <div className="flex items-center gap-2 pl-6 text-[11px] font-bold text-gray-400">└─ が鋳造する ─▶</div>
           {/* 鋳造される本体 = クエスト。3種のタスクを「内包」するコンテナとして表現する */}
           <div className="rounded-xl border-2 border-amber-400 bg-amber-50/50 p-3 shadow-sm">
