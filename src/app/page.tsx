@@ -2,16 +2,21 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, Clock, Share2, X, Stamp } from 'lucide-react';
-import { db, Spot, Agent, User as UserType, UserContribution, Activity } from '../lib/db';
+import { db, Spot, Agent, User as UserType, UserContribution, Activity, SPOT_TTL_MS } from '../lib/db';
 import { getGoShuinList, Goshuin } from '../lib/goshuin';
-import { pullSnapshot } from '../lib/cloud-sync';
-import { distanceKm } from '../lib/geo';
+import { pullSnapshot, setSyncUser } from '../lib/cloud-sync';
+import { isAuthConfigured, getSupabaseBrowser, signInWithProvider, signOutAuth, profileFromUser, type AuthProfile } from '../lib/supabase-browser';
+import { distanceKm, destinationPoint } from '../lib/geo';
 import HomeTab from '../components/HomeTab';
 import MapTab from '../components/MapTab';
 import SpotDetail from '../components/SpotDetail';
+import DebugPanel from '../components/DebugPanel';
+import { isDebugEnabled, getDebugLocation, setDebugLocation, type DebugLatLng } from '../lib/debug';
 import { getLevelInfo } from '../data/levels';
-import { getBadgeStates, godAvatarEmoji } from '../data/badges';
+import { getBadgeStates, godAvatarEmoji, type BadgeState } from '../data/badges';
 import { Challenge } from '../data/challenges';
+import type { Quest } from '../data/tasks';
+import { subscribePush } from '../lib/push-client';
 
 type TabType = 'home' | 'quest' | 'mypage';
 
@@ -19,6 +24,28 @@ type TabType = 'home' | 'quest' | 'mypage';
 const MEDALLION_FRAME =
   'polygon(50% 0%, 79.4% 9.5%, 97.6% 34.5%, 97.6% 65.5%, 79.4% 90.5%, 50% 100%, 20.6% 90.5%, 2.4% 65.5%, 2.4% 34.5%, 20.6% 9.5%)';
 const XP_SHIELD = 'polygon(0% 0%, 100% 0%, 100% 58%, 50% 100%, 0% 58%)';
+
+// 場・クエストを「近い / 中くらい / 遠い」が混ざるように散らす距離（km）。約 500m / 1000m / 3000m。
+const VARIED_SPOT_DISTANCES_KM = [0.5, 1.0, 3.0];
+
+// 新たに獲得したバッジを検出（既読は localStorage で管理。初回は既存を既読化して演出しない）。
+function detectNewBadges(stats: UserContribution, user: UserType): BadgeState[] {
+  if (typeof window === 'undefined') return [];
+  const states = getBadgeStates(stats, user);
+  const earnedIds = states.filter((b) => b.earned).map((b) => b.id);
+  let seen: string[];
+  try {
+    const raw = localStorage.getItem('yaorozu_badges_earned');
+    if (raw === null) { localStorage.setItem('yaorozu_badges_earned', JSON.stringify(earnedIds)); return []; }
+    seen = JSON.parse(raw);
+  } catch { return []; }
+  const seenSet = new Set(seen);
+  const fresh = states.filter((b) => b.earned && !seenSet.has(b.id));
+  if (fresh.length) {
+    try { localStorage.setItem('yaorozu_badges_earned', JSON.stringify([...seenSet, ...fresh.map((b) => b.id)])); } catch {}
+  }
+  return fresh;
+}
 
 const FALLBACK_CURRENT_USER: UserType = {
   id: 'user-self',
@@ -31,6 +58,10 @@ const FALLBACK_CURRENT_USER: UserType = {
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [isRevoked, setIsRevoked] = useState(false); // 管理者削除によるアカウント失効
+  const [needsOnboard, setNeedsOnboard] = useState(false); // 初回起動の登録（オンボーディング）
+  const [onboardName, setOnboardName] = useState(''); // オンボーディングの名前入力
+  const [authProfile, setAuthProfile] = useState<AuthProfile | null>(null); // OAuthログイン中のユーザー
+  const [earnedBadge, setEarnedBadge] = useState<BadgeState | null>(null); // 新規獲得バッジの演出
   const [spots, setSpots] = useState<Spot[]>([]);
   const [activeSpot, setActiveSpot] = useState<Spot | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -59,6 +90,9 @@ export default function HomePage() {
   const [userLocation, setUserLocation] = useState({ lat: 35.6580, lng: 139.7514 });
   // GPS 取得状態（失敗時にユーザーへ明示する）
   const [geoStatus, setGeoStatus] = useState<'locating' | 'ok' | 'denied' | 'error'>('locating');
+  // デバッグモード（位置情報が許可されない環境でも現在地を手動指定してテストできる）
+  const [debugMode, setDebugMode] = useState(false);
+  useEffect(() => { setDebugMode(isDebugEnabled()); }, []);
   // GPS バナーをタップで薄く（透明度10%）して地図を見やすくする
   const [bannerDimmed, setBannerDimmed] = useState(false);
 
@@ -80,49 +114,170 @@ export default function HomePage() {
 
   // GPS 場の自動生成（最後に生成した座標と時刻を保持 — 近すぎる・頻度高すぎる場合はスキップ）
   const lastGenRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
+  // クエスト生成のクールダウン（最後に生成した時刻）
+  const lastQuestGenRef = useRef<number>(0);
+  // クエスト生成中フラグ（HomeTab のスピナー表示用）
+  const [isGeneratingQuests, setIsGeneratingQuests] = useState(false);
+  // useCallback 内から最新の activeSpot を参照するための ref
+  const activeSpotRef = useRef<Spot | null>(null);
+  // state との同期（毎レンダリング更新）
+  activeSpotRef.current = activeSpot;
 
-  const generateSpotNearby = useCallback(async (lat: number, lng: number) => {
+  /** 指定した場のクエストを generate-quest API で生成して保存する（force でクールダウン無視） */
+  const generateQuestsForSpot = useCallback(async (spot: Spot, spotAgent: Agent | null, force = false) => {
     const now = Date.now();
-    const prev = lastGenRef.current;
-    // 5 分以内かつ 500 m 以内なら重複生成しない
-    if (prev && now - prev.at < 5 * 60_000 && distanceKm(lat, lng, prev.lat, prev.lng) < 0.5) return;
-    lastGenRef.current = { lat, lng, at: now };
+    if (!force && now - lastQuestGenRef.current < 30_000) return; // 30 秒クールダウン
+    lastQuestGenRef.current = now;
+    setIsGeneratingQuests(true);
     try {
+      const res = await fetch('/api/generate-quest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          count: 2,
+          ts: now,
+          spot: {
+            id: spot.id,
+            name: spot.name,
+            category: spot.category,
+            description: spot.description,
+            enjoyments: spot.enjoyments,
+            issues: spot.issues,
+            soulMd: spotAgent?.soulMd,
+            latitude: spot.latitude,
+            longitude: spot.longitude,
+          },
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json() as { quests?: Quest[] };
+        if (Array.isArray(data.quests) && data.quests.length) {
+          db.saveGeneratedQuests(spot.id, data.quests);
+          db.trackApiCall('ai_generate');
+          refreshDatabaseStates();
+          // 通知はサーバ自動プッシュ（/api/generate-quest）が担うため、ここでは出さない
+        }
+      }
+    } catch { /* ネットワークエラーは無視 */ }
+    finally { setIsGeneratingQuests(false); }
+  }, []);
+
+  /**
+   * 指定座標に場と神を1件生成・保存する（スロットルなし・低レベル）。
+   * selectActive: アクティブスポット未設定なら生成した場を選択する。
+   * chainQuests: その場のクエストも続けて生成する（クールダウン無視）。
+   */
+  const generateSpotAt = useCallback(async (
+    lat: number,
+    lng: number,
+    opts: { selectActive?: boolean; chainQuests?: boolean } = {},
+  ) => {
+    // 既存スポットを再利用するときの共通処理：アクティブ選択し、クエストが無ければ生成する
+    // （chainQuests を取りこぼさない＝場はあるがクエスト0、を防ぐ）。
+    const reuseExisting = (existing: Spot) => {
+      if (opts.selectActive && !activeSpotRef.current) setActiveSpot(existing);
+      if (opts.chainQuests && db.getQuestsForSpot(existing.id).length === 0) {
+        generateQuestsForSpot(existing, db.getAgentBySpot(existing.id) ?? null, true);
+      }
+    };
+    try {
+      // 実在優先：既に近く（~120m）に場があれば再生成しない（重複・無駄な API 呼び出しを防ぐ）。
+      const near = db.getSpots().find(s => distanceKm(lat, lng, s.latitude, s.longitude) < 0.12);
+      if (near) {
+        reuseExisting(near);
+        return;
+      }
       const res = await fetch('/api/generate-spot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lat, lng }),
       });
       if (!res.ok) return;
-      const { spot, agent } = await res.json() as { spot: Spot; agent: Agent };
+      const { spot: rawSpot, agent } = await res.json() as { spot: Spot; agent: Agent };
+      // 管理者が削除した実在スポット（安定 ID）は、再訪しても復活させない（削除を尊重）。
+      if (db.getDeletedSpots().some(s => s.id === rawSpot.id)) return;
+      // 同一 ID（実在スポットは安定 ID）の場が既にあれば上書きしない＝蓄積した写真・口コミを守る。
+      const dup = db.getSpots().find(s => s.id === rawSpot.id);
+      if (dup) {
+        reuseExisting(dup);
+        return;
+      }
+      // 実在(verified)スポットは TTL を付けない＝期限切れで消えない。
+      // AI 生成スポットだけ TTL を付与（System タブの spotTtlDays。未設定は既定 SPOT_TTL_MS）。
+      const ttlMs = (db.getAppSettings().spotTtlDays || (SPOT_TTL_MS / 86_400_000)) * 86_400_000;
+      const spot: Spot = rawSpot.verified
+        ? rawSpot
+        : { ...rawSpot, expiresAt: new Date(Date.now() + ttlMs).toISOString() };
       db.adminSaveSpot(spot);
       db.adminSaveAgent(agent);
       db.trackApiCall('ai_generate');
       db.logActivity({ type: 'spot_generate', userId: 'system', source: 'system', spotId: spot.id, detail: spot.name });
+      db.logActivity({ type: 'god_generate', userId: 'system', source: 'system', spotId: spot.id, detail: agent.name || spot.godName });
       refreshDatabaseStates();
+      // アクティブスポットが未設定なら生成した場を選択（地図がその位置にパンされる）
+      if (opts.selectActive && !activeSpotRef.current) {
+        setActiveSpot(spot);
+      }
+      if (opts.chainQuests) {
+        generateQuestsForSpot(spot, agent, true);
+      }
     } catch { /* ネットワークエラーは無視 */ }
-  }, []);
+  }, [generateQuestsForSpot]);
+
+  /** 現在地周辺に1件だけ場を生成する（スロットルつき・地図移動などの逐次生成用）。 */
+  const generateSpotNearby = useCallback(async (lat: number, lng: number, force = false) => {
+    const now = Date.now();
+    const prev = lastGenRef.current;
+    // 5 分以内かつ 500 m 以内なら重複生成しない（force 時は無視）
+    if (!force && prev && now - prev.at < 5 * 60_000 && distanceKm(lat, lng, prev.lat, prev.lng) < 0.5) return;
+    lastGenRef.current = { lat, lng, at: now };
+    // 場を生成後、クエストが無い or force 時はこの場のクエストも生成する
+    await generateSpotAt(lat, lng, { selectActive: true, chainQuests: force || db.getAllQuests().length === 0 });
+  }, [generateSpotAt]);
+
+  /**
+   * 現在地周辺に「近い・中くらい・遠い」が混ざるよう、約 500m / 1000m / 3000m の3地点へ
+   * 場とクエストをまとめて生成する。地図に場が無いとき・「他のクエストを探す」で使う。
+   */
+  const generateVariedSpots = useCallback(async (centerLat: number, centerLng: number, force = false) => {
+    const now = Date.now();
+    const prev = lastGenRef.current;
+    // 同じ場所での 5 分以内の連続バッチ生成は抑止（force 時は無視）
+    if (!force && prev && now - prev.at < 5 * 60_000 && distanceKm(centerLat, centerLng, prev.lat, prev.lng) < 0.5) return;
+    lastGenRef.current = { lat: centerLat, lng: centerLng, at: now };
+    // 各距離帯にランダムな方位で1件ずつ。最初の1件だけアクティブにする。
+    // 直列実行：Overpass を同一 IP から同時多発で叩いて「busy/429」を自分で誘発しないため。
+    for (let i = 0; i < VARIED_SPOT_DISTANCES_KM.length; i++) {
+      const { lat, lng } = destinationPoint(centerLat, centerLng, VARIED_SPOT_DISTANCES_KM[i], Math.random() * 360);
+      await generateSpotAt(lat, lng, { selectActive: i === 0, chainQuests: true });
+    }
+  }, [generateSpotAt]);
 
   // Initial load
   useEffect(() => {
-    setSpots(db.getSpots());
+    const initSpots = db.getSpots();
+    setSpots(initSpots);
     const users = db.getUsers();
     const profiles: { [userId: string]: UserType } = {};
     users.forEach(u => { profiles[u.id] = u; });
     setCreatorProfiles(profiles);
 
-    const initialSpot = db.getSpots()[0];
-    setActiveSpot(initialSpot);
+    const initialSpot = initSpots[0];
+    setActiveSpot(initialSpot ?? null);
 
     // 管理者に削除されたユーザーは再ログイン画面へ
     if (db.isRevoked('user-self')) {
       setIsRevoked(true);
       return;
     }
-    const self = db.getUser('user-self');
-    if (self) {
-      setCurrentUser(self);
-      setEditName(self.displayName);
+    // getUser が null でも currentUser を必ず非 null にする（マイページが空白になるのを防ぐ）
+    const self = db.getUser('user-self') ?? FALLBACK_CURRENT_USER;
+    setCurrentUser(self);
+    setEditName(self.displayName);
+    // 初回起動：未登録ならオンボーディング（名前・アバター設定）へ
+    if (typeof window !== 'undefined' && localStorage.getItem('yaorozu_registered') !== '1') {
+      setNeedsOnboard(true);
+      setOnboardName(self.displayName && self.displayName !== '巡礼者' ? self.displayName : '');
     }
     setUserStats(db.getUserStats('user-self'));
     setActiveChallengeId(db.getChallengeProgress().activeId);
@@ -134,6 +289,24 @@ export default function HomePage() {
       setHasTakenPhoto(localStorage.getItem('yaorozu_quest_photo') === 'true');
       setGoShuinList(getGoShuinList('user-self'));
     }
+
+    // 初回生成のシード座標：デバッグ位置があればそれ、無ければ東京デフォルト（GPS取得前）
+    const seed = (isDebugEnabled() && getDebugLocation()) || { lat: 35.6580, lng: 139.7514 };
+    // 初回表示時：場が無ければ生成（クエスト有無に関係なく）。場があってクエストが無ければクエストだけ生成
+    if (initSpots.length === 0) {
+      // 場も無い → 近・中・遠の場を複数生成（場の生成後にクエストも自動チェーンされる）
+      generateVariedSpots(seed.lat, seed.lng);
+    } else if (db.getAllQuests().length === 0) {
+      // 場はあるがクエストが無い → クエストを生成
+      const agentSpotIds = new Set(db.getAgents().map(a => a.spotId));
+      const spotWithAgent = initSpots.find(s => agentSpotIds.has(s.id));
+      if (spotWithAgent) {
+        generateQuestsForSpot(spotWithAgent, db.getAgentBySpot(spotWithAgent.id) ?? null);
+      } else {
+        generateSpotNearby(seed.lat, seed.lng);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // クラウド永続化：起動時にスナップショットを復元（鍵未設定なら no-op）
@@ -146,8 +319,45 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 認証ユーザー（OAuth）をアプリのプロフィール＋同期ユーザーに反映する
+  const applyAuthUser = useCallback((u: import('@supabase/supabase-js').User) => {
+    const p = profileFromUser(u);
+    setAuthProfile(p);
+    setSyncUser(p.id); // クラウドデータを認証ユーザー単位に分離
+    // ローカルプロフィールを認証アイデンティティで更新
+    db.updateUserProfile('user-self', p.displayName);
+    db.setUserAvatar('user-self', p.avatarUrl);
+    try { localStorage.setItem('yaorozu_registered', '1'); } catch {}
+    setNeedsOnboard(false);
+    // 認証ユーザーのクラウドデータを復元
+    pullSnapshot().then(() => refreshDatabaseStates());
+    const self = db.getUser('user-self');
+    if (self) { setCurrentUser(self); setEditName(self.displayName); }
+  }, []);
+
+  // Supabase Auth セッション監視（OAuth リダイレクト復帰・サインイン/アウト）
+  useEffect(() => {
+    if (!isAuthConfigured()) return;
+    const sb = getSupabaseBrowser();
+    if (!sb) return;
+    sb.auth.getSession().then(({ data }) => { if (data.session?.user) applyAuthUser(data.session.user); });
+    const { data: sub } = sb.auth.onAuthStateChange((_e, session) => {
+      if (session?.user) applyAuthUser(session.user);
+      else { setAuthProfile(null); setSyncUser(null); }
+    });
+    return () => { sub.subscription.unsubscribe(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyAuthUser]);
+
   // 実際のGPS現在地を取得して反映
   const requestLocation = useCallback(() => {
+    // デバッグモード：実 GPS を使わず、手動設定した座標（無ければ既定の東京中心）を現在地にする
+    if (isDebugEnabled()) {
+      const dbg = getDebugLocation();
+      if (dbg) setUserLocation(dbg);
+      setGeoStatus('ok'); // 不許可バナーを出さず、距離計算などの機能を有効化
+      return;
+    }
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setGeoStatus('error');
       return;
@@ -187,6 +397,24 @@ export default function HomePage() {
     return () => navigator.geolocation.clearWatch(watchId);
   }, []);
 
+  // デバッグ：指定座標を現在地として設定し、その地点の場を生成する
+  const applyDebugLocation = useCallback((loc: DebugLatLng) => {
+    setDebugLocation(loc);       // localStorage に保持（リロードしても維持）
+    setUserLocation(loc);
+    setGeoStatus('ok');
+    // ジャンプ先は周囲に場が無いので、近・中・遠を確実に生成（force でスロットル無視）
+    generateVariedSpots(loc.lat, loc.lng, true);
+    if (currentUser) db.logActivity({ type: 'map_move', userId: currentUser.id, source: 'human' });
+  }, [generateVariedSpots, currentUser]);
+
+  // 場が0件かつ位置情報が確定したら自動生成（初回起動・全期限切れ後）。
+  // 地図に場が無いので、近・中・遠が混ざるよう複数生成する。
+  useEffect(() => {
+    if (spots.length > 0) return;
+    if (geoStatus === 'locating') return;
+    generateVariedSpots(userLocation.lat, userLocation.lng);
+  }, [spots.length, geoStatus, userLocation, generateVariedSpots]);
+
   useEffect(() => {
     if (activeSpot) {
       setAgent(db.getAgentBySpot(activeSpot.id) || null);
@@ -199,14 +427,26 @@ export default function HomePage() {
     const profiles: { [userId: string]: UserType } = {};
     users.forEach(u => { profiles[u.id] = u; });
     setCreatorProfiles(profiles);
-    const self = db.getUser('user-self');
-    if (self) setCurrentUser(self);
-    setUserStats(db.getUserStats('user-self'));
+    // クラウド復元後に getUser が null でも currentUser を非 null に保つ（マイページの空白防止）
+    const self = db.getUser('user-self') ?? FALLBACK_CURRENT_USER;
+    setCurrentUser(self);
+    const stats = db.getUserStats('user-self');
+    setUserStats(stats);
     if (activeSpot) {
       const refreshedSpot = db.getSpot(activeSpot.id);
       if (refreshedSpot) setActiveSpot(refreshedSpot);
     }
+    // 新たに条件を満たしたバッジがあれば獲得演出
+    const fresh = detectNewBadges(stats, self);
+    if (fresh.length) setEarnedBadge(fresh[0]);
   };
+
+  // バッジ獲得演出を数秒で自動的に閉じる
+  useEffect(() => {
+    if (!earnedBadge) return;
+    const t = setTimeout(() => setEarnedBadge(null), 4500);
+    return () => clearTimeout(t);
+  }, [earnedBadge]);
 
   // 達成クエストを写真とともに振り返りシェア（Web Share API、非対応時はクリップボード）
   const shareQuest = async (title: string, badgeName: string, badgeIcon: string, photos: string[]) => {
@@ -296,13 +536,85 @@ export default function HomePage() {
           <button
             onClick={() => {
               db.reinstateUser('user-self');
-              // ユーザーデータをクリアして再スタート
-              ['yaorozu_users','yaorozu_user_stats','yaorozu_challenge_progress','yaorozu_challenge_photos','yaorozu_goshuin_user-self'].forEach(k => localStorage.removeItem(k));
+              // ユーザーデータをクリアして再スタート（登録もリセットしてオンボーディングへ）
+              ['yaorozu_users','yaorozu_user_stats','yaorozu_challenge_progress','yaorozu_challenge_photos','yaorozu_goshuin_user-self','yaorozu_registered'].forEach(k => localStorage.removeItem(k));
               window.location.reload();
             }}
             className="w-full bg-shrine-red text-white font-black py-3 rounded-xl hover:opacity-90 cursor-pointer"
           >
             新たな巡礼者として始める
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 初回起動：巡礼者登録（オンボーディング）
+  if (needsOnboard) {
+    const previewName = onboardName.trim() || 'あなた';
+    const avatarUrl = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(previewName)}`;
+    const register = () => {
+      const name = onboardName.trim();
+      if (!name) return;
+      const updated = db.updateUserProfile('user-self', name); // displayName + avatar を設定
+      setCurrentUser(updated);
+      setEditName(updated.displayName);
+      try { localStorage.setItem('yaorozu_registered', '1'); } catch {}
+      if (currentUser) db.logActivity({ type: 'home_view', userId: 'user-self', source: 'human', detail: '登録' });
+      setNeedsOnboard(false);
+      refreshDatabaseStates();
+    };
+    return (
+      <div className="flex-1 min-h-dvh bg-[#eaecef] flex items-center justify-center p-6">
+        <div className="bg-white rounded-3xl shadow-xl p-8 max-w-xs w-full text-center">
+          <div className="text-2xl font-black tracking-tight leading-none mb-1">
+            <span className="text-shrine-red">YAOROZU</span><span className="text-gray-900"> QUEST</span>
+          </div>
+          <p className="text-[13px] text-gray-500 mb-5">巡礼者として、名前を授かりましょう。</p>
+
+          {/* アカウントでログイン（OAuth 設定時のみ表示） */}
+          {isAuthConfigured() && (
+            <div className="mb-5">
+              <button
+                onClick={() => signInWithProvider('google')}
+                className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 text-gray-800 font-black py-3 rounded-xl hover:bg-gray-50 active:scale-[0.99] transition-all cursor-pointer mb-2"
+              >
+                <span className="text-base">🔵</span> Google で続ける
+              </button>
+              <button
+                onClick={() => signInWithProvider('apple')}
+                className="w-full flex items-center justify-center gap-2 bg-black text-white font-black py-3 rounded-xl hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer"
+              >
+                <span className="text-base"></span> Apple で続ける
+              </button>
+              <div className="flex items-center gap-2 my-4">
+                <span className="flex-1 h-px bg-gray-200" />
+                <span className="text-[11px] text-gray-400">または</span>
+                <span className="flex-1 h-px bg-gray-200" />
+              </div>
+              <p className="text-[12px] font-bold text-gray-500 mb-2">ゲストとして始める</p>
+            </div>
+          )}
+
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={avatarUrl} alt="アバター" className="w-24 h-24 mx-auto rounded-full border-4 border-shrine-red/30 bg-sky-50 mb-4" />
+          <input
+            type="text"
+            value={onboardName}
+            onChange={(e) => setOnboardName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') register(); }}
+            maxLength={12}
+            autoFocus
+            placeholder="巡礼者の名前"
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-center text-base text-gray-900 focus:outline-none focus:border-shrine-red mb-2"
+          />
+          <p className="text-[11px] text-gray-400 mb-4">アバターは名前から自動生成されます（後でクエストの「アバターを撮る」で写真にできます）。</p>
+          <button
+            onClick={register}
+            disabled={!onboardName.trim()}
+            className="w-full bg-shrine-red text-white font-black py-3 rounded-xl hover:opacity-90 disabled:opacity-40 cursor-pointer"
+          >
+            巡礼をはじめる
           </button>
         </div>
       </div>
@@ -321,6 +633,16 @@ export default function HomePage() {
         {/* iOS Dynamic Island */}
         <div className="hidden sm:block absolute top-0 left-1/2 -translate-x-1/2 w-28 h-5.5 bg-[#1E2024] rounded-b-2xl z-50 pointer-events-none" />
 
+        {/* デバッグパネル（?debug=1 で有効化。位置情報なしでも現在地を手動指定してテスト可能） */}
+        {debugMode && (
+          <DebugPanel
+            location={userLocation}
+            geoStatus={geoStatus}
+            onApply={applyDebugLocation}
+            onDisable={() => setDebugMode(false)}
+          />
+        )}
+
         {/* Viewport */}
         <div className="flex-1 relative overflow-hidden bg-[#f5f7fa] flex flex-col">
 
@@ -332,13 +654,25 @@ export default function HomePage() {
               <HomeTab
                 currentUser={currentUser || FALLBACK_CURRENT_USER}
                 userLocation={userLocation}
+                isGeneratingQuests={isGeneratingQuests}
                 onStartChallenge={(cid) => {
+                  subscribePush(); // クエスト参加を機に通知購読（以降サーバ自動プッシュが届く）
                   db.setActiveChallenge(cid);
                   setActiveChallengeId(cid);
                   setActiveTab('quest');
                 }}
                 onEndChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
                 onChanged={refreshDatabaseStates}
+                onNeedSpots={() => {
+                  const existingSpots = db.getSpots();
+                  if (existingSpots.length === 0) {
+                    generateVariedSpots(userLocation.lat, userLocation.lng);
+                  } else {
+                    const agentIds = new Set(db.getAgents().map(a => a.spotId));
+                    const target = existingSpots.find(s => agentIds.has(s.id)) ?? existingSpots[0];
+                    generateQuestsForSpot(target, db.getAgentBySpot(target.id) ?? null);
+                  }
+                }}
               />
             )}
 
@@ -375,7 +709,7 @@ export default function HomePage() {
                   creatorProfiles={creatorProfiles}
                   onOpenDetail={setDetailSpot}
                   currentUser={currentUser || FALLBACK_CURRENT_USER}
-                  onStartChallenge={(cid) => { db.setActiveChallenge(cid); setActiveChallengeId(cid); }}
+                  onStartChallenge={(cid) => { subscribePush(); db.setActiveChallenge(cid); setActiveChallengeId(cid); }}
                   activeChallenge={activeChallengeId ? db.getQuest(activeChallengeId) ?? null : null}
                   onClearChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
                   onMapMove={(center) => {
@@ -408,7 +742,6 @@ export default function HomePage() {
                     {(() => {
                       const lvInfo = getLevelInfo(currentUser.totalToku);
                       const pct = Math.round(lvInfo.progress * 100);
-                      const nextMin = lvInfo.next ? lvInfo.next.minToku : currentUser.totalToku;
                       return (
                         <>
                           {/* メダリオン（アバター＋装飾フレーム＋PILGRIMリボン） */}
@@ -473,9 +806,9 @@ export default function HomePage() {
                             <div className="text-left">
                               <div className="flex items-baseline gap-1">
                                 <span className="text-2xl font-black text-gray-900 tabular-nums leading-none">{currentUser.totalToku}</span>
-                                <span className="text-sm font-black text-gold">徳</span>
+                                <span className="text-sm font-black text-gray-900">徳</span>
                               </div>
-                              <div className="relative mt-1.5">
+                              <div className="relative mt-1.5 pr-2">
                                 <div className="h-5 rounded-full bg-slate-200 overflow-hidden border border-slate-300/60">
                                   <div
                                     className="h-full rounded-full bg-gradient-to-r from-sky-400 via-blue-500 to-blue-600 relative transition-all duration-700"
@@ -483,15 +816,8 @@ export default function HomePage() {
                                   >
                                   </div>
                                 </div>
-                                {lvInfo.next && (
-                                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                    <span className="text-[10px] font-black text-white tabular-nums" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.45)' }}>
-                                      {currentUser.totalToku} / {nextMin} 徳
-                                    </span>
-                                  </div>
-                                )}
-                                {/* ゴール旗 */}
-                                <Flag className="absolute -right-1 -top-1.5 w-3.5 h-3.5 text-shrine-red fill-shrine-red drop-shadow-sm" />
+                                {/* ゴール旗（大きめ） */}
+                                <Flag className="absolute -right-1 -top-2.5 w-6 h-6 text-shrine-red fill-shrine-red drop-shadow-sm" />
                               </div>
                               <div className="flex items-center justify-between mt-1.5">
                                 {lvInfo.next ? (
@@ -509,6 +835,26 @@ export default function HomePage() {
                       );
                     })()}
                   </div>
+
+                  {/* ログイン状態（OAuth） */}
+                  {isAuthConfigured() && (
+                    <div className="relative mt-4 flex items-center justify-center gap-2 text-[12px]">
+                      {authProfile ? (
+                        <>
+                          <span className="text-gray-500 truncate max-w-[180px]">🔓 {authProfile.email ?? authProfile.displayName}</span>
+                          <button
+                            onClick={async () => { await signOutAuth(); setSyncUser(null); setAuthProfile(null); window.location.reload(); }}
+                            className="font-black text-shrine-red hover:underline cursor-pointer"
+                          >ログアウト</button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-gray-400">ゲストでプレイ中</span>
+                          <button onClick={() => signInWithProvider('google')} className="font-black text-shrine-red hover:underline cursor-pointer">Googleでログイン</button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* タブ */}
@@ -529,8 +875,10 @@ export default function HomePage() {
                 <div className="p-4">
                   {/* アクティビティ（訪問・クエスト参加・依頼達成などの履歴） */}
                   {mypageTab === 'activity' && (() => {
+                    // ユーザーのアクティビティでは「ホームタブを表示」「地図を移動」などの操作ログは出さない
+                    const HIDDEN_USER_ACTS = new Set(['home_view', 'map_move', 'spot_generate', 'god_generate', 'spot_delete']);
                     const activities = db.getActivities()
-                      .filter((a) => a.userId === currentUser.id)
+                      .filter((a) => a.userId === currentUser.id && !HIDDEN_USER_ACTS.has(a.type))
                       .slice(0, 60);
 
                     const TASK_LABEL: Record<string, string> = {
@@ -550,6 +898,8 @@ export default function HomePage() {
                       home_view:      { icon: '🏠', bg: 'bg-slate-50',  text: 'text-slate-700',  label: () => 'ホームタブを表示' },
                       map_move:       { icon: '🗺️', bg: 'bg-teal-50',   text: 'text-teal-700',   label: () => '地図を移動' },
                       spot_generate:  { icon: '✨', bg: 'bg-purple-50', text: 'text-purple-700', label: (a) => `場を生成：${a.detail ?? '新しい場所'}` },
+                      god_generate:   { icon: '🪷', bg: 'bg-fuchsia-50',text: 'text-fuchsia-700',label: (a) => `神を生成：${a.detail ?? '新しい神'}` },
+                      spot_delete:    { icon: '🗑️', bg: 'bg-rose-50',   text: 'text-rose-700',   label: (a) => `場を削除：${a.detail ?? '場所'}` },
                     };
 
                     if (activities.length === 0) return (
@@ -715,7 +1065,25 @@ export default function HomePage() {
                   if (key === 'home') {
                     setHomeResetSignal(s => s + 1);
                     if (currentUser) db.logActivity({ type: 'home_view', userId: currentUser.id, source: 'human' });
-                    generateSpotNearby(userLocation.lat, userLocation.lng);
+                    // 場が無ければ近・中・遠を複数生成。あれば現在地に1件だけ追加（スロットルつき）。
+                    if (db.getSpots().length === 0) {
+                      generateVariedSpots(userLocation.lat, userLocation.lng);
+                    } else {
+                      generateSpotNearby(userLocation.lat, userLocation.lng);
+                      // 場はあるがクエストが無い場合は最近の場からクエストを生成
+                      if (db.getAllQuests().length === 0) {
+                        const agentSpotIds = new Set(db.getAgents().map(a => a.spotId));
+                        const spotWithAgent = db.getSpots().find(s => agentSpotIds.has(s.id));
+                        if (spotWithAgent) {
+                          generateQuestsForSpot(spotWithAgent, db.getAgentBySpot(spotWithAgent.id) ?? null);
+                        }
+                        // 場はあるが agent が無い場合は generateSpotNearby 内でクエスト生成がチェーンされる
+                      }
+                    }
+                  }
+                  if (key === 'quest' && spots.length === 0) {
+                    // マップに場が表示されていない場合は近・中・遠を複数生成する
+                    generateVariedSpots(userLocation.lat, userLocation.lng);
                   }
                   setActiveTab(key);
                 }}
@@ -758,6 +1126,15 @@ export default function HomePage() {
             onGoShuinGranted={() => {
               if (currentUser) setGoShuinList(getGoShuinList(currentUser.id));
             }}
+            activeChallenge={activeChallengeId ? db.getQuest(activeChallengeId) ?? null : null}
+            onAdvanceChallenge={(stepId, photo) => {
+              if (!activeChallengeId || !currentUser) return;
+              const ch = db.getQuest(activeChallengeId);
+              if (!ch) return;
+              if (photo) db.saveChallengePhoto(activeChallengeId, stepId, photo);
+              db.completeChallengeStep(currentUser.id, activeChallengeId, stepId, ch.tasks.length);
+              refreshDatabaseStates();
+            }}
           />
         )}
 
@@ -765,6 +1142,7 @@ export default function HomePage() {
         {reviewQuest && (() => {
           const ch = reviewQuest;
           const photoMap = db.getChallengePhotos(ch.id);
+          const commentMap = db.getChallengeComments(ch.id);
           const photos = ch.tasks.map((s) => photoMap[s.id]).filter((p): p is string => !!p);
           return (
             <div className="absolute inset-0 z-[4000] bg-black/50 flex items-end sm:items-center justify-center" onClick={() => setReviewQuest(null)}>
@@ -795,6 +1173,7 @@ export default function HomePage() {
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-black text-gray-900">{s.title}</p>
                           {s.trivia && <p className="text-[13px] text-gray-600 leading-snug mt-0.5">{s.triviaCategory ? `${s.triviaCategory}｜` : ''}{s.trivia}</p>}
+                          {commentMap[s.id] && <p className="text-[12px] text-gray-700 leading-snug mt-1 bg-white border border-gray-200 rounded-lg px-2 py-1">💬 {commentMap[s.id]}</p>}
                         </div>
                       </div>
                     ))}
@@ -815,6 +1194,29 @@ export default function HomePage() {
             </div>
           );
         })()}
+
+        {/* ── バッジ獲得演出 ── */}
+        {earnedBadge && (
+          <div className="absolute inset-0 z-[4500] flex items-center justify-center p-6" onClick={() => setEarnedBadge(null)}>
+            <div className="absolute inset-0 bg-black/55" />
+            <div className="relative celebrate-pop w-full max-w-[300px] bg-white rounded-3xl shadow-2xl px-6 py-7 text-center">
+              <p className="text-[11px] font-black tracking-[0.25em] text-amber-500">BADGE GET!</p>
+              <div className="relative inline-block mt-3 mb-1">
+                <div className="badge-ring" />
+                <div className="badge-ring badge-ring-2" />
+                <div className="text-6xl badge-acquired leading-none">{earnedBadge.icon}</div>
+              </div>
+              <h3 className="text-lg font-black text-gray-900 mt-3">{earnedBadge.name}</h3>
+              <p className="text-[13px] text-gray-500 mt-1 leading-relaxed">{earnedBadge.desc}</p>
+              <button
+                onClick={() => setEarnedBadge(null)}
+                className="w-full mt-5 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[15px] font-black py-3 rounded-full shadow-lg shadow-amber-500/40 hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer"
+              >
+                やった！
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

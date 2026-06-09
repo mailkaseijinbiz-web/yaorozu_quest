@@ -1,10 +1,9 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Shield, MapPin, Users as UsersIcon, Lock, LogOut, RotateCcw, Flag, Network, Brain, Activity as ActivityIcon, LineChart } from 'lucide-react';
+import { Shield, MapPin, Users as UsersIcon, Lock, LogOut, RotateCcw, Flag, Network, Brain, Activity as ActivityIcon, LineChart, Settings } from 'lucide-react';
 import { db, Spot, User } from '../../lib/db';
 import { pullSnapshot } from '../../lib/cloud-sync';
-import { CHALLENGES } from '../../data/challenges';
 import { Blueprint } from '../../components/admin/Blueprint';
 import { Analytics } from '../../components/admin/Analytics';
 import { YaorozuGods } from '../../components/admin/YaorozuGods';
@@ -12,11 +11,12 @@ import { ActivityManager } from '../../components/admin/ActivityManager';
 import { SpotsManager } from '../../components/admin/SpotsManager';
 import { ChallengesManager } from '../../components/admin/ChallengesManager';
 import { UsersManager } from '../../components/admin/UsersManager';
+import { SystemPanel } from '../../components/admin/SystemPanel';
 
 const ADMIN_PASSWORD = 'Kaseijinbiz1';
 const AUTH_KEY = 'yaorozu_admin_auth';
 
-type AdminTab = 'blueprint' | 'analytics' | 'spots' | 'gods' | 'users' | 'challenges' | 'activity';
+type AdminTab = 'blueprint' | 'analytics' | 'spots' | 'gods' | 'users' | 'challenges' | 'activity' | 'system';
 
 const TABS: { key: AdminTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'blueprint', label: 'God', icon: Network },
@@ -26,6 +26,7 @@ const TABS: { key: AdminTab; label: string; icon: React.ComponentType<{ classNam
   { key: 'users', label: '人間', icon: UsersIcon },
   { key: 'challenges', label: 'クエスト', icon: Flag },
   { key: 'activity', label: 'アクティビティ', icon: ActivityIcon },
+  { key: 'system', label: 'システム', icon: Settings },
 ];
 
 export default function AdminPage() {
@@ -152,7 +153,8 @@ export default function AdminPage() {
           const counts: Record<AdminTab, number | null> = {
             blueprint: null, analytics: null, gods: agentCount, activity: db.getActivities().length,
             spots: spots.length, users: users.length,
-            challenges: CHALLENGES.length,
+            challenges: db.getAllQuests().length, // 生成クエストを含む実数（CHALLENGES は静的・空）
+            system: null,
           };
           const active = tab === key;
           return (
@@ -182,6 +184,7 @@ export default function AdminPage() {
         {tab === 'spots' && <SpotsManager spots={spots} onChange={refresh} />}
         {tab === 'challenges' && <ChallengesManager />}
         {tab === 'users' && <UsersManager users={users} spots={spots} onChange={refresh} />}
+        {tab === 'system' && <SystemPanel onChange={refresh} />}
       </main>
     </div>
   );

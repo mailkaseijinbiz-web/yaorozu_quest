@@ -1,9 +1,9 @@
 // Yaorozu God OS - Mock Database & State Management
-import { generateTokyoSpots } from '../data/tokyo-spots';
 import { generateTrivia } from '../data/trivia-seed';
 import { schedulePush } from './cloud-sync';
 import type { Quest } from '../data/tasks';
 import { CHALLENGES } from '../data/challenges';
+import { hasGoShuin } from './goshuin';
 
 export interface User {
   id: string;
@@ -37,6 +37,9 @@ export interface Spot {
   verified?: boolean; // 実在を手作業で検証済みか（生成スポットは false 相当）
   // ※ Identity.md / Soul.md は「場」ではなく八百万神（Agent）が持つ
   issues?: string[]; // 課題（この場が解決すべき課題。神の知識へ反映）
+  expiresAt?: string; // ISO 8601 — 設定されていると期限切れで自動削除（GPS 生成スポット用）
+  createdAt?: string; // ISO 8601 — 生成・作成日時。旧レコードは undefined（'—' 表示）。
+  deletedAt?: string; // ISO 8601 — ソフト削除日時。undefined = 生存。
 }
 
 /**
@@ -59,6 +62,9 @@ export interface SpotPhoto {
   createdAt: string;
 }
 
+/** 投稿の公開範囲。'all'=みんなに公開 / 'self'=あなただけ（本人のみ閲覧・AIの参照対象外） */
+export type UgcVisibility = 'all' | 'self';
+
 export interface UgcPost {
   id: string;
   userId: string;
@@ -66,9 +72,26 @@ export interface UgcPost {
   spotId: string;
   content: string;
   imageUrl?: string;
+  visibility?: UgcVisibility; // 未設定は 'all' とみなす
   likesCount: number;
   likedBy: string[]; // List of userIds who liked this post
   createdAt: string;
+}
+
+/** アプリ全体の設定（管理画面 System タブで編集）。 */
+export interface AppSettings {
+  spotTtlDays: number; // GPS生成スポットが自動削除されるまでの日数
+}
+
+/** 人間が神に打ち明けた煩悩（欲・執着）。解決すると覚りが上がる（覚り=徳−未解決煩悩）。 */
+export interface Bonnou {
+  id: string;
+  userId: string;
+  text: string;
+  spotId?: string;     // 打ち明けた場所
+  resolved: boolean;   // 浄化（手放した）済みか
+  createdAt: string;
+  resolvedAt?: string;
 }
 
 export interface Agent {
@@ -83,6 +106,8 @@ export interface Agent {
   voiceTone: '厳格' | '親しみやすい' | '神秘的' | '高飛車' | '賢者';
   identityMd?: string; // この神のアイデンティティ文書（事実・価値・課題）。未設定なら生成。
   soulMd?: string; // この神の魂文書（人格・語り口・世界観）。未設定なら生成。
+  createdAt?: string; // ISO 8601 — 生成・作成日時。旧レコードは undefined。
+  deletedAt?: string; // ISO 8601 — ソフト削除日時。undefined = 生存。
 }
 
 export interface AffiliateLink {
@@ -131,207 +156,6 @@ const INITIAL_USERS: User[] = [
 const INITIAL_SPOTS: Spot[] = [
   // リセット済み — 管理画面から追加してください
 ];
-const _UNUSED_SPOTS_ARCHIVE: Spot[] = [
-  {
-    id: 'spot-jukusen',
-    name: '成願寺',
-    description: '新中野駅から徒歩3分。中野区本町にある曹洞宗の寺院。静謐な境内に歴史ある本堂が佇む。',
-    latitude: 35.6945,
-    longitude: 139.6651,
-    creatorId: 'user-history-geek',
-    imageUrl: 'https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=800&q=80',
-    category: '寺院',
-    tokuRequirement: 50,
-    enjoyments: [
-      '静謐な境内で心を落ち着けて参拝する',
-      '歴史ある山門をくぐり本堂の建築美を眺める',
-      '周辺の住宅街と寺院のコントラストを楽しむ'
-    ],
-    difficulty: 1,
-    terrain: 1,
-    attributes: ['🏛️ 寺院', '🚶 散歩途中', '🍵 静謐', '👪 ファミリー向け'],
-    cacheType: 'Virtual',
-    godName: '成願の守り仏',
-    godEmoji: '🙏',
-    godRequests: [
-      '📸 本堂の写真を撮ってほしいのじゃ',
-      '📝 ここのクイズを作ってくれぬか？',
-      '🗣️ この寺の歴史を口コミで広めてくれ',
-      '🎨 境内の美しさを絵にしてみよ',
-    ]
-  },
-  {
-    id: 'spot-suzumori',
-    name: '鈴森公園',
-    description: '新中野駅近くの憩いの場。地元の子供たちが遊ぶ小さな公園で四季折々の緑が楽しめる。',
-    latitude: 35.6933,
-    longitude: 139.6625,
-    creatorId: null,
-    imageUrl: '', // 初期は写真なし。ユーザー投稿でセットされる
-    photos: [],
-    category: '公園',
-    tokuRequirement: 30,
-    enjoyments: [
-      '公園のベンチで休憩しながら四季の花を眺める',
-      '子供たちの遊ぶ姿を見ながらほっこりする',
-      '夕暮れ時の空と木々のシルエットを撮影する'
-    ],
-    difficulty: 1,
-    terrain: 1,
-    attributes: ['🌳 公園', '☀️ 散歩途中', '👪 ファミリー向け', '🌸 季節の花'],
-    cacheType: 'Virtual',
-    godName: '鈴の木の精霊',
-    godEmoji: '🌳',
-    godRequests: [
-      '📸 季節の花の写真が欲しいな～',
-      '🧩 公園の植物クイズを作ってくれない？',
-      '🗣️ みんなに鈴森の良さを伝えて！',
-      '🌅 夕焼けの美しい瞬間を撮ってほしいの',
-    ]
-  },
-  {
-    id: 'spot-nakano-broadway',
-    name: '中野ブロードウェイ',
-    description: '日本有数のサブカル聖地。アニメ・マンガ・フィギュアの専門店が集まる商業ビル。',
-    latitude: 35.7079,
-    longitude: 139.6655,
-    creatorId: 'user-guide-1',
-    imageUrl: 'https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=800&q=80',
-    category: '商業施設',
-    tokuRequirement: 80,
-    enjoyments: [
-      'まんだらけ本店で掘り出し物のレアアイテムを探す',
-      '隠れた名店の絶品ソフトクリームを味わう',
-      'レトロゲーム専門店でノスタルジーに浸る'
-    ],
-    difficulty: 1,
-    terrain: 1,
-    attributes: ['🎮 サブカル', '🛍️ ショッピング', '🍦 グルメ', '📚 マンガ'],
-    cacheType: 'Traditional',
-    godName: 'サブカルの神・オタクノカミ',
-    godEmoji: '🎮',
-    godRequests: [
-      '📸 推しフィギュアの写真を撮ってくれ！',
-      '🧩 ブロードウェイ通検定を作ろうぜ！',
-      '🗣️ 隠れた名店を口コミしてくれ！',
-      '🎨 ブロードウェイの魅力を世界に広めろ！',
-    ]
-  },
-  {
-    id: 'spot-arai-yakushi',
-    name: '新井薬師 梅照院',
-    description: '中野区新井にある真言宗の寺院。眼病平癒の御利益で知られ、地域に親しまれる。',
-    latitude: 35.7137,
-    longitude: 139.6669,
-    creatorId: null,
-    imageUrl: 'https://images.unsplash.com/photo-1545569341-9eb8b30979d9?w=800&q=80',
-    category: '寺院',
-    tokuRequirement: 100,
-    enjoyments: [
-      '眼病平癒の薬師如来に健康を祈願する',
-      '四季折々の花が彩る境内を散策する',
-      '毎月8日の縁日で賑わう参道を楽しむ'
-    ],
-    difficulty: 1,
-    terrain: 1,
-    attributes: ['🏛️ 寺院', '👁️ 眼病平癒', '🌸 花の寺', '🎪 縁日あり'],
-    cacheType: 'Virtual',
-    godName: '薬師の守り神',
-    godEmoji: '💊',
-    godRequests: [
-      '📸 季節の花と本堂を一緒に撮ってほしい',
-      '📝 薬師如来のクイズを作ってくれぬか',
-      '🗣️ 眼病平癒の御利益をみんなに伝えて',
-      '🙏 静かな気持ちで参拝した感想を聞かせて',
-    ]
-  },
-  {
-    id: 'spot-shinnakano-shotengai',
-    name: '新中野鍋屋横丁商店街',
-    description: '新中野駅前に広がる活気ある商店街。昔ながらの個人商店と新しい飲食店が共存する。',
-    latitude: 35.6925,
-    longitude: 139.6636,
-    creatorId: null,
-    imageUrl: 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800&q=80',
-    category: '商店街',
-    tokuRequirement: 40,
-    enjoyments: [
-      '地元の酒場で仕事後の一杯を楽しむ',
-      '商店街を散歩しながら隠れた名店を発見する',
-      '昔ながらの雰囲気を感じながら食べ歩きする'
-    ],
-    difficulty: 1,
-    terrain: 1,
-    attributes: ['🍺 居酒屋', '🚶 散歩向き', '🍽️ 食べ歩き', '🏮 下町情緒'],
-    cacheType: 'Traditional',
-    godName: '鍋横の商売神・ナベヨコ',
-    godEmoji: '🏮',
-    godRequests: [
-      '📸 お気に入りの店の写真を撮ってくれ！',
-      '🧩 商店街クイズを作って盛り上げてよ！',
-      '🗣️ 美味い店を口コミで教えてくれ！',
-      '🍺 夜の商店街の雰囲気を伝えてほしい！',
-    ]
-  },
-  {
-    id: 'spot-meijijingu',
-    name: '明治神宮',
-    description: '都会のオアシスとも言われる広大な人工の杜に囲まれた、明治天皇を祀る神社。',
-    latitude: 35.6764,
-    longitude: 139.6993,
-    creatorId: null,
-    imageUrl: 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800&q=80',
-    category: '神社',
-    tokuRequirement: 80,
-    enjoyments: [
-      '日本最大級の木造鳥居をくぐる際、鳥居の前で一礼してから真ん中を避けて歩く',
-      '都会の喧騒を忘れさせる、全国から寄進された10万本以上の人工林の森林浴を愉しむ',
-      '「明治神宮御苑」の奥深くにある「清正井（きよまさのいど）」の澄み渡る湧水を眺める'
-    ],
-    difficulty: 1,
-    terrain: 1,
-    attributes: ['🌲 森林浴', '⛩️ 神社', '♿ バリアフリー', '👪 ファミリー向け'],
-    cacheType: 'Virtual',
-    godName: '明治の杜の精霊・コダマ',
-    godEmoji: '🌲',
-    godRequests: [
-      '📸 杜の静けさが伝わる一枚を撮ってほしい',
-      '🧩 参拝の作法クイズを作ってくれませんか',
-      '🗣️ 都会の森の魅力を口コミで伝えて',
-      '🙏 清正井で感じたことを聞かせてください',
-    ]
-  },
-  {
-    id: 'spot-itsukushima',
-    name: '厳島神社',
-    description: '海上に浮かぶ大鳥居と寝殿造りの社殿。潮の満ち引きで異なる美しさを見せる。',
-    latitude: 34.2960,
-    longitude: 132.3199,
-    creatorId: null,
-    imageUrl: 'https://images.unsplash.com/photo-1516257984-b1b4d707412e?w=800&q=80',
-    category: '神社',
-    tokuRequirement: 200,
-    enjoyments: [
-      '潮が満ちた時に、まるで海に浮かんでいるかのように佇む朱塗りの回廊を散策する',
-      '干潮のタイミングに合わせて海床に降り、巨大な「大鳥居」の根元まで歩いて接近する',
-      '宮島島内で名物の「焼き牡蠣」や、できたての「もみじ饅頭」を食べ歩く'
-    ],
-    difficulty: 2,
-    terrain: 2,
-    attributes: ['🌊 海辺', '🦌 鹿あり', '⛩️ 神社', '🚢 フェリー必須'],
-    cacheType: 'EarthCache',
-    godName: '市杵島姫・イチカ',
-    godEmoji: '🌊',
-    godRequests: [
-      '📸 潮の満ち引きで変わる大鳥居を撮ってほしい',
-      '🧩 平清盛にまつわるクイズを作っておくれ',
-      '🗣️ 宮島の美しさを口コミで広めて',
-      '🍶 焼き牡蠣やもみじ饅頭の感想を聞かせて',
-    ]
-  },
-  // 東京周辺の手続き生成スポット（合計で約1000件になる）
-  ...generateTokyoSpots(),
-]; // _UNUSED_SPOTS_ARCHIVE end
 
 
 const INITIAL_AGENTS: Agent[] = [
@@ -519,13 +343,14 @@ const INITIAL_TRIVIA: TriviaEntry[] = [
 // Local Storage Keys
 const KEYS = {
   USERS: 'yaorozu_users',
-  SPOTS: 'yaorozu_spots_v3', // v3: リセット（空からスタート）
+  SPOTS: 'yaorozu_spots_v4', // v4: 実在(OSM)スポットへ移行。旧 AI 発明スポットを purge。
   AGENTS: 'yaorozu_agents_v2', // v2: リセット（空からスタート）
   UGC: 'yaorozu_ugc',
   AFFILIATE: 'yaorozu_affiliate',
   STATS: 'yaorozu_user_stats',
   CHALLENGE: 'yaorozu_challenge_progress',
   CHALLENGE_PHOTOS: 'yaorozu_challenge_photos',
+  CHALLENGE_COMMENTS: 'yaorozu_challenge_comments', // 証拠写真に添えるコメント
   QUESTS: 'yaorozu_quests_v2', // v2: リセット（空からスタート）
   QUEST_RULES: 'yaorozu_quest_rules', // クエスト生成のルール（方針）
   SPOT_RULES: 'yaorozu_spot_rules', // 場の生成のルール（方針）
@@ -537,26 +362,59 @@ const KEYS = {
   DAINICHI: 'yaorozu_dainichi_identity',
   API_CALLS: 'yaorozu_api_calls',     // AI / TTS API呼び出しログ（日別集計）
   REVOKED: 'yaorozu_revoked_users',   // 削除済みユーザーID（再ログイン強制用）
+  BONNOU: 'yaorozu_bonnou',           // 人間が打ち明けた煩悩（覚りの調整素材）
+  APP_SETTINGS: 'yaorozu_app_settings', // アプリ全体の設定（System タブ）
 };
 
 /** クエスト生成ルール（生成方針）の既定値。クエストタブで編集できる。 */
 export const DEFAULT_QUEST_RULES = `# クエスト生成ルール（生成方針）
 
 ## 原則
-- クエストはタスクから構成される。
-- タスクは「情報収集 / 理解判断 / 操作」の3種。
-- タスクは場の価値を増幅させ、場の課題を解決する。
-
-## 構成方針
-- 各クエストは 情報収集・理解判断・操作 を最低1つずつ含める（3〜5タスク）。
-- 価値（楽しみ方）から情報収集・理解判断のタスクを作る。
-- 課題があれば必ず「課題を解決」する操作タスクを入れる。
+- クエストはタスクの集まり（Quest = Task[]）。**1クエスト = 1〜4タスク**で構成する（御朱印のみの1タスク軽量クエストも可）。
+- すべてのタスクは次のどちらかである：
+  1. **世界の値を直接調整する**（活気=価値−課題 / 覚り=徳−煩悩 を動かす）＝ 操作(act)
+  2. **調整に必要なコンテキストを生成する**（人間から価値・課題・煩悩・今の様子を集める）＝ 情報収集(sense)
+  - 集めたコンテキストを評価して調整方針を決めるのが 理解判断(understand)。
+- 究極目的：世界の幸福（場の活気 + 人間の覚り）を最大化する向きにタスクを設計する。
 - 神の魂（口調・人格・世界観）に沿った語り口にする。
 
-## タスクの例
-- 情報収集：人間から場所の持つ価値を集める / 人間から課題を集める / 人間から課題の解決方法を提示
-- 理解判断：複数の解決方法から適切と思う方法を人間に尋ねる
-- 操作：選ばれた解決方法を実行して場の課題を解決する / 場の価値を世界へ広げる`;
+## 構成方針
+- 複数タスクのときは「情報収集（コンテキスト生成）→ 操作（値の調整）」の流れを基本にする。
+- 課題があるなら、その解決（resolveIssue）を操作タスクに必ず入れる。
+- 1タスククエストは「御朱印をもらう」「煩悩を打ち明ける」など、単独で完結する軽量体験に使う。
+
+## タスク種別の機能と例（kind / 役割 / 例 / 生成制約）
+
+### 情報収集 sense（＝コンテキストを生成）
+- **visit（来訪）**｜役割: その地に立ち、現地のコンテキストを起こす｜例:「鳥居の前に立ち、空気を感じる」｜制約: 位置情報（lat/lng）を持つ。
+- **photo（写真）**｜役割: 景観の一次情報を奉納｜例:「本堂の屋根の反りを一枚」｜制約: 位置情報を持つ。
+- **context（今の様子）**｜役割: 混雑・営業・雰囲気を集める｜例:「平日夕方の人通りを報告」｜制約: なし。
+- **event（できごと）**｜役割: 今この場の出来事を集める｜例:「縁日の屋台の様子を共有」｜制約: なし。
+- **cleaning（清掃確認）**｜役割: 衛生状態のコンテキスト｜例:「参道の清掃状況を確認」｜制約: なし。
+- **value_ask（価値を尋ねる）**｜役割: 人間からこの場の価値を集め enjoyments に加算（活気+1の素材）｜例:「あなたの感じた楽しみ方を教えて」｜制約: 価値が薄い場で特に有効。回答は enjoyments に直結。
+- **issue_ask（課題を尋ねる）**｜役割: 人間からこの場の課題を集め issues に加算（解決の素材）｜例:「気になった困りごとを教えて」｜制約: 課題が無い/薄い場で有効。回答は issues に直結。
+- **bonnou_ask（煩悩を問う）**｜役割: 人間の煩悩（欲・執着）を集める（覚りの調整素材）｜例:「心の執着を打ち明けて」｜制約: 場に依存しない（人間の内面が対象）。非公開で記録。
+- **avatar_photo（アバター写真）**｜役割: 巡礼者自身の姿を撮りアバターに設定｜例:「鳥居を背に自分を一枚」｜制約: 1回で十分。
+
+### 理解判断 understand（＝集めた情報を評価し調整方針を決める）
+- **review（口コミ）**｜役割: 価値を言語化し後続へ伝える｜例:「この地の良さを言伝て」。
+- **eat（実食の声）**｜役割: 飲食体験を評価｜例:「名物の味を報告」｜制約: 飲食がある場で。
+- **evaluate（写真を評価）**｜役割: 集まった写真を選別｜例:「佳い一枚に光を当てる」｜制約: 評価対象の写真が必要。
+- **judge（投稿をジャッジ）**｜役割: 集まった声を評する｜例:「投稿の中から良いものを選ぶ」。
+
+### 操作 act（＝世界の値を直接調整）
+- **resolveIssue（課題解決）**｜役割: 課題を一手動かす（課題−1・価値+1＝活気+2）｜例:「参道脇のゴミを一袋拾う」｜制約: **issues が存在する場合のみ**。issueIndex で対象課題を指定。テキスト or 写真で報告。
+- **bonnou_resolve（煩悩を手放す）**｜役割: 未解決の煩悩を一つ浄化（覚り+1）｜例:「執着をどう手放したか語る」｜制約: bonnou_ask の後に意味を持つ。
+- **walk（散歩）**｜役割: その地を歩いて心を整え、煩悩を一つ手放す（覚り+1）｜例:「境内の周りをゆっくり一周する」｜制約: タップで完了（写真不要）。未解決の煩悩があれば1つ解消する。
+- **cleanup（掃除をする）**｜役割: 実際に掃除をして場を整える＝場へ働きかける操作｜例:「参道のゴミを拾い集める」｜制約: タップで完了。清掃が必要な場で有効。
+- **sns（拡散）**｜役割: 価値を場の外へ広げる｜例:「この地をSNSで共有」｜制約: 実際の共有操作で完了。
+- **buy（買物報告）**｜役割: 経済的賑わいに寄与｜例:「名産を一つ買って報告」｜制約: 物販がある場で。
+
+### 御朱印 goshuin（軽量・単独クエスト向け）
+- **goshuin（御朱印をもらう）**｜役割: 神と一度会話し御朱印を授かる（写真・位置ゲート不要）｜例:「神に話しかけて御朱印を受け取る」｜制約: 価値・課題が薄い場のフォールバックとして1タスククエストで使う。会話＝授与で完了。
+
+## 報酬・徳
+- 各タスクは固定の徳を持つ（煩悩解決・課題解決は高め、御朱印は軽め）。達成で人間の徳（覚り）が増える。`;
 
 /** 場生成ルール（生成方針）の既定値。場タブで編集できる。 */
 export const DEFAULT_SPOT_RULES = `# 場の生成ルール（生成方針）
@@ -654,7 +512,7 @@ export interface ChallengeProgress {
 }
 
 // アクティビティ（クエスト参加・場所訪問・依頼達成などの行動記録）
-export type ActivityType = 'quest_join' | 'quest_step' | 'quest_complete' | 'visit' | 'task' | 'photo' | 'ugc' | 'home_view' | 'map_move' | 'spot_generate';
+export type ActivityType = 'quest_join' | 'quest_step' | 'quest_complete' | 'visit' | 'task' | 'photo' | 'ugc' | 'home_view' | 'map_move' | 'spot_generate' | 'god_generate' | 'spot_delete';
 export type ActivitySource = 'human' | 'system';
 export interface Activity {
   id: string;
@@ -720,7 +578,13 @@ class MockDatabase {
   private load<T>(key: string, defaultValue: T): T {
     if (!this.isBrowser) return defaultValue;
     const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : defaultValue;
+    if (data == null) return defaultValue;
+    // 破損した JSON でも getter 全体が壊れないよう、パース失敗は既定値にフォールバック
+    try {
+      return JSON.parse(data) as T;
+    } catch {
+      return defaultValue;
+    }
   }
 
   private save<T>(key: string, data: T): void {
@@ -732,15 +596,61 @@ class MockDatabase {
 
   // Getters
   getUsers(): User[] {
-    return this.load(KEYS.USERS, INITIAL_USERS);
+    const users = this.load<User[]>(KEYS.USERS, INITIAL_USERS);
+    // 退化・破損したユーザーリスト（空配列・非配列）は初期ユーザーへフォールバック。
+    // クラウド同期で空の yaorozu_users が書き込まれても getUser('user-self') が壊れないようにする。
+    if (!Array.isArray(users) || users.length === 0) return INITIAL_USERS;
+    return users;
+  }
+
+  /** 削除済みも含む全スポット（監査・mutator の保存用）。 */
+  private getSpotsRaw(): Spot[] {
+    return this.load<Spot[]>(KEYS.SPOTS, INITIAL_SPOTS);
+  }
+
+  /** 削除済みも含む全エージェント（監査・mutator の保存用）。 */
+  private getAgentsRaw(): Agent[] {
+    return this.load<Agent[]>(KEYS.AGENTS, INITIAL_AGENTS);
   }
 
   getSpots(): Spot[] {
-    return this.load(KEYS.SPOTS, INITIAL_SPOTS);
+    const stored = this.getSpotsRaw();
+    const now = Date.now();
+    // TTL 期限切れ → ソフト削除（deletedAt 打刻）。ハード削除はせず監査ログを残す。
+    let mutated = false;
+    const withTtl = stored.map(s => {
+      if (!s.deletedAt && s.expiresAt && new Date(s.expiresAt).getTime() <= now) {
+        mutated = true;
+        return { ...s, deletedAt: new Date().toISOString() };
+      }
+      return s;
+    });
+    if (mutated) {
+      this.save(KEYS.SPOTS, withTtl);
+      // カスケード：期限切れになった場の神もソフト削除
+      const justExpired = new Set(
+        withTtl.filter(s => s.deletedAt && !stored.find(o => o.id === s.id)?.deletedAt).map(s => s.id)
+      );
+      if (justExpired.size) {
+        this.save(KEYS.AGENTS, this.getAgentsRaw().map(a =>
+          justExpired.has(a.spotId) && !a.deletedAt ? { ...a, deletedAt: new Date().toISOString() } : a));
+      }
+    }
+    return withTtl.filter(s => !s.deletedAt);
+  }
+
+  /** 削除済みスポット（生成/削除日時の監査ビュー用）。 */
+  getDeletedSpots(): Spot[] {
+    return this.getSpotsRaw().filter(s => s.deletedAt);
   }
 
   getAgents(): Agent[] {
-    return this.load(KEYS.AGENTS, INITIAL_AGENTS);
+    return this.getAgentsRaw().filter(a => !a.deletedAt);
+  }
+
+  /** 削除済みの神（監査ビュー用）。 */
+  getDeletedAgents(): Agent[] {
+    return this.getAgentsRaw().filter(a => a.deletedAt);
   }
 
   getUgc(): UgcPost[] {
@@ -753,17 +663,30 @@ class MockDatabase {
 
   // ── 生成クエスト（場の 価値・課題・魂 から生成。プレイヤーが読む実ストア） ──
   getGeneratedQuests(): Quest[] {
-    return this.load<Quest[]>(KEYS.QUESTS, []);
+    const all = this.load<Quest[]>(KEYS.QUESTS, []);
+    const now = Date.now();
+    const prog = this.getChallengeProgress();
+    // 「参加済み」＝挑戦中 / 制覇済み / ステップ進捗あり。これらは TTL 対象外。
+    const isJoined = (q: Quest) =>
+      prog.activeId === q.id || prog.completed.includes(q.id) || (prog.done[q.id]?.length ?? 0) > 0;
+    // 生成後 QUEST_TTL_MS を過ぎても未参加なら削除（createdAt 無しの旧データは残す）
+    const live = all.filter(
+      (q) => !(q.createdAt && now - new Date(q.createdAt).getTime() > QUEST_TTL_MS && !isJoined(q))
+    );
+    if (live.length !== all.length) this.save(KEYS.QUESTS, live);
+    return live;
   }
 
   getQuestsForSpot(spotId: string): Quest[] {
     return this.getGeneratedQuests().filter((q) => q.spotId === spotId);
   }
 
-  /** その場の生成クエストを差し替え保存（再公開＝置換。重複を避ける）。 */
+  /** その場の生成クエストを差し替え保存（再公開＝置換。重複を避ける）。生成時刻を打刻し TTL を起算。 */
   saveGeneratedQuests(spotId: string, quests: Quest[]): void {
     const others = this.getGeneratedQuests().filter((q) => q.spotId !== spotId);
-    this.save(KEYS.QUESTS, [...quests, ...others]);
+    const nowIso = new Date().toISOString();
+    const stamped = quests.map((q) => ({ ...q, createdAt: q.createdAt ?? nowIso }));
+    this.save(KEYS.QUESTS, [...stamped, ...others]);
   }
 
   /** 生成クエスト＋静的クエスト（CHALLENGES）の全件。生成を先頭に。 */
@@ -907,7 +830,7 @@ class MockDatabase {
   }
 
   // Write operations
-  addUgcPost(userId: string, spotId: string, content: string): UgcPost {
+  addUgcPost(userId: string, spotId: string, content: string, opts?: { imageUrl?: string; visibility?: UgcVisibility }): UgcPost {
     const users = this.getUsers();
     const user = users.find(u => u.id === userId);
     if (!user) throw new Error('User not found');
@@ -919,6 +842,8 @@ class MockDatabase {
       userDisplayName: user.displayName,
       spotId,
       content,
+      imageUrl: opts?.imageUrl,
+      visibility: opts?.visibility ?? 'all',
       likesCount: 0,
       likedBy: [],
       createdAt: new Date().toISOString(),
@@ -929,6 +854,7 @@ class MockDatabase {
 
     // Reward 50 Toku for creating post
     this.rewardToku(userId, 50);
+    this.adjustFollow(userId, 5, 0); // 投稿で信者（フォロワー）が少し増える
 
     // Recalculate Creator for this spot
     this.recalculateSpotCreator(spotId);
@@ -985,8 +911,8 @@ class MockDatabase {
   }
 
   updateAgent(spotId: string, updates: Partial<Agent>): Agent {
-    const agents = this.getAgents();
-    const index = agents.findIndex(a => a.spotId === spotId);
+    const agents = this.getAgentsRaw(); // 削除済みも保持したまま更新
+    const index = agents.findIndex(a => a.spotId === spotId && !a.deletedAt);
     if (index === -1) throw new Error('Agent not found');
 
     const updatedAgent = { ...agents[index], ...updates };
@@ -1009,24 +935,89 @@ class MockDatabase {
   }
 
   // ────────────────────────────────────────────────
+  // アプリ設定（System タブ）
+  // ────────────────────────────────────────────────
+  getAppSettings(): AppSettings {
+    return this.load<AppSettings>(KEYS.APP_SETTINGS, { spotTtlDays: SPOT_TTL_MS / 86_400_000 });
+  }
+  saveAppSettings(s: AppSettings): void {
+    this.save(KEYS.APP_SETTINGS, s);
+  }
+
+  /** ユーザーのアバター画像を設定（アバター写真タスクで撮影した一枚など）。 */
+  setUserAvatar(userId: string, url: string): User | undefined {
+    const users = this.getUsers();
+    const index = users.findIndex(u => u.id === userId);
+    if (index === -1) return undefined;
+    users[index].avatarUrl = url;
+    this.save(KEYS.USERS, users);
+    return users[index];
+  }
+
+  // ────────────────────────────────────────────────
+  // 煩悩（覚り = 徳 − 未解決煩悩）
+  // ────────────────────────────────────────────────
+  getBonnou(userId: string): Bonnou[] {
+    return this.load<Bonnou[]>(KEYS.BONNOU, []).filter(b => b.userId === userId);
+  }
+
+  /** 未解決の煩悩数（覚りの減算項）。 */
+  getUnresolvedBonnouCount(userId?: string): number {
+    const all = this.load<Bonnou[]>(KEYS.BONNOU, []);
+    return all.filter(b => !b.resolved && (userId ? b.userId === userId : true)).length;
+  }
+
+  /** 煩悩を打ち明ける（記録）。bonnou_ask タスクの完了処理。 */
+  addBonnou(userId: string, text: string, spotId?: string): Bonnou {
+    const all = this.load<Bonnou[]>(KEYS.BONNOU, []);
+    const b: Bonnou = { id: `bn-${Date.now()}`, userId, text, spotId, resolved: false, createdAt: new Date().toISOString() };
+    all.push(b);
+    this.save(KEYS.BONNOU, all);
+    return b;
+  }
+
+  /** 煩悩を一つ手放す（浄化）。id 指定が無ければ最も古い未解決を解決。bonnou_resolve タスクの完了処理。 */
+  resolveBonnou(userId: string, bonnouId?: string): Bonnou | undefined {
+    const all = this.load<Bonnou[]>(KEYS.BONNOU, []);
+    const idx = bonnouId
+      ? all.findIndex(b => b.id === bonnouId && b.userId === userId)
+      : all.findIndex(b => b.userId === userId && !b.resolved);
+    if (idx === -1) return undefined;
+    all[idx] = { ...all[idx], resolved: true, resolvedAt: new Date().toISOString() };
+    this.save(KEYS.BONNOU, all);
+    return all[idx];
+  }
+
+  // ────────────────────────────────────────────────
   // Admin operations (管理者ダッシュボード用)
   // ────────────────────────────────────────────────
 
-  // Upsert a spot (create if id is new, otherwise update)
+  // Upsert a spot (create if id is new, otherwise update)。raw リストで保存し削除済みを失わない。
   adminSaveSpot(spot: Spot): Spot {
-    const spots = this.getSpots();
+    const spots = this.getSpotsRaw();
     const index = spots.findIndex(s => s.id === spot.id);
-    if (index === -1) spots.push(spot);
-    else spots[index] = spot;
+    const nowIso = new Date().toISOString();
+    if (index === -1) {
+      spots.push({ ...spot, createdAt: spot.createdAt ?? nowIso });
+    } else {
+      // 更新時は createdAt を維持（リセットしない）
+      spots[index] = { ...spot, createdAt: spot.createdAt ?? spots[index].createdAt };
+    }
     this.save(KEYS.SPOTS, spots);
     return spot;
   }
 
+  // ソフト削除：deletedAt を打刻し、神もカスケードでソフト削除。UGC はハード削除。
   adminDeleteSpot(id: string): void {
-    this.save(KEYS.SPOTS, this.getSpots().filter(s => s.id !== id));
-    // Cascade: remove agent + UGC tied to this spot
-    this.save(KEYS.AGENTS, this.getAgents().filter(a => a.spotId !== id));
+    const ts = new Date().toISOString();
+    const spots = this.getSpotsRaw();
+    const target = spots.find(s => s.id === id);
+    this.save(KEYS.SPOTS, spots.map(s => s.id === id && !s.deletedAt ? { ...s, deletedAt: ts } : s));
+    this.save(KEYS.AGENTS, this.getAgentsRaw().map(a => a.spotId === id && !a.deletedAt ? { ...a, deletedAt: ts } : a));
     this.save(KEYS.UGC, this.getUgc().filter(p => p.spotId !== id));
+    // 生成クエストはハード削除（再生成可能・orphan を残さない）
+    this.save(KEYS.QUESTS, this.getGeneratedQuests().filter(q => q.spotId !== id));
+    this.logActivity({ type: 'spot_delete', userId: 'system', source: 'system', spotId: id, detail: target?.name });
   }
 
   // Upsert a user
@@ -1048,18 +1039,24 @@ class MockDatabase {
     this.save(KEYS.UGC, this.getUgc().filter(p => p.id !== id));
   }
 
-  // Upsert an agent (神様AI)
+  // Upsert an agent (神様AI)。raw リストで保存し削除済みを失わない。
   adminSaveAgent(agent: Agent): Agent {
-    const agents = this.getAgents();
+    const agents = this.getAgentsRaw();
     const index = agents.findIndex(a => a.id === agent.id);
-    if (index === -1) agents.push(agent);
-    else agents[index] = agent;
+    const nowIso = new Date().toISOString();
+    if (index === -1) {
+      agents.push({ ...agent, createdAt: agent.createdAt ?? nowIso });
+    } else {
+      agents[index] = { ...agent, createdAt: agent.createdAt ?? agents[index].createdAt };
+    }
     this.save(KEYS.AGENTS, agents);
     return agent;
   }
 
+  // ソフト削除（deletedAt 打刻）。既に削除済みならタイムスタンプを保持。
   adminDeleteAgent(id: string): void {
-    this.save(KEYS.AGENTS, this.getAgents().filter(a => a.id !== id));
+    const ts = new Date().toISOString();
+    this.save(KEYS.AGENTS, this.getAgentsRaw().map(a => a.id === id && !a.deletedAt ? { ...a, deletedAt: ts } : a));
   }
 
   // Reset all data back to initial seeds
@@ -1093,8 +1090,8 @@ class MockDatabase {
 
   /** 写真を投稿（神への奉納）。初投稿ならスポット写真がセットされる。+30徳 */
   addSpotPhoto(userId: string, spotId: string, url: string): Spot | undefined {
-    const spots = this.getSpots();
-    const idx = spots.findIndex(s => s.id === spotId);
+    const spots = this.getSpotsRaw(); // 削除済みを保持したまま更新
+    const idx = spots.findIndex(s => s.id === spotId && !s.deletedAt);
     if (idx === -1) return undefined;
 
     const spot = spots[idx];
@@ -1111,8 +1108,8 @@ class MockDatabase {
 
   /** 不適切な写真を却下（削除）。誰でも実行可能なコミュニティモデレーション */
   rejectSpotPhoto(spotId: string, url: string): Spot | undefined {
-    const spots = this.getSpots();
-    const idx = spots.findIndex(s => s.id === spotId);
+    const spots = this.getSpotsRaw(); // 削除済みを保持したまま更新
+    const idx = spots.findIndex(s => s.id === spotId && !s.deletedAt);
     if (idx === -1) return undefined;
 
     const spot = spots[idx];
@@ -1126,12 +1123,27 @@ class MockDatabase {
 
   /** 神がUGCによって成長：楽しみ方を1つ追加 */
   addEnjoyment(spotId: string, text: string): Spot | undefined {
-    const spots = this.getSpots();
-    const idx = spots.findIndex(s => s.id === spotId);
+    const spots = this.getSpotsRaw(); // 削除済みを保持したまま更新
+    const idx = spots.findIndex(s => s.id === spotId && !s.deletedAt);
     if (idx === -1) return undefined;
     const spot = spots[idx];
     if (!spot.enjoyments.includes(text)) {
       spot.enjoyments = [...spot.enjoyments, text];
+      spots[idx] = spot;
+      this.save(KEYS.SPOTS, spots);
+    }
+    return spot;
+  }
+
+  /** 神がUGCによって観測：課題を1つ追加（重複は弾く）。価値・課題のループ素材。 */
+  addIssue(spotId: string, text: string): Spot | undefined {
+    const spots = this.getSpotsRaw();
+    const idx = spots.findIndex(s => s.id === spotId && !s.deletedAt);
+    if (idx === -1) return undefined;
+    const spot = spots[idx];
+    const issues = spot.issues ?? [];
+    if (!issues.includes(text)) {
+      spot.issues = [...issues, text];
       spots[idx] = spot;
       this.save(KEYS.SPOTS, spots);
     }
@@ -1266,8 +1278,11 @@ class MockDatabase {
   logActivity(a: Omit<Activity, 'id' | 'createdAt'>): void {
     if (!this.isBrowser) return;
     const all = this.load<Activity[]>(KEYS.ACTIVITIES, []);
-    all.unshift({ ...a, id: `act-${Date.now()}-${Math.floor(Math.random() * 10000)}`, createdAt: new Date().toISOString() });
+    const activity: Activity = { ...a, id: `act-${Date.now()}-${Math.floor(Math.random() * 10000)}`, createdAt: new Date().toISOString() };
+    all.unshift(activity);
     this.save(KEYS.ACTIVITIES, all.slice(0, 500));
+    // 同タブ内のリスナーへリアルタイム通知
+    window.dispatchEvent(new CustomEvent('yaorozu:activity', { detail: activity }));
   }
   getActivities(): Activity[] {
     return this.load<Activity[]>(KEYS.ACTIVITIES, []);
@@ -1284,6 +1299,11 @@ class MockDatabase {
 
   /** チャレンジのステップを達成。+rewardの徳。全ステップ達成でcompletedに追加（バッジ獲得） */
   completeChallengeStep(userId: string, challengeId: string, stepId: string, totalSteps: number, reward = 20): ChallengeProgress {
+    // 御朱印タスクは、その場の御朱印を授かっていなければ完了させない
+    const task = this.getQuest(challengeId)?.tasks.find((t) => t.id === stepId);
+    if (task?.type === 'goshuin' && task.spotId && !hasGoShuin(userId, task.spotId)) {
+      return this.getChallengeProgress();
+    }
     const p = this.getChallengeProgress();
     const done = new Set(p.done[challengeId] || []);
     if (!done.has(stepId)) {
@@ -1295,6 +1315,7 @@ class MockDatabase {
     if (done.size >= totalSteps && !p.completed.includes(challengeId)) {
       p.completed.push(challengeId);
       this.rewardToku(userId, 100); // 制覇ボーナス
+      this.adjustFollow(userId, 30, 0); // 制覇で信者（フォロワー）が増える
       this.logActivity({ type: 'quest_complete', userId, challengeId, reward: 100 });
     }
     this.save(KEYS.CHALLENGE, p);
@@ -1311,6 +1332,19 @@ class MockDatabase {
     const all = this.load<{ [cid: string]: { [sid: string]: string } }>(KEYS.CHALLENGE_PHOTOS, {});
     all[challengeId] = { ...(all[challengeId] || {}), [stepId]: dataUrl };
     this.save(KEYS.CHALLENGE_PHOTOS, all);
+  }
+
+  /** 証拠写真に添えるコメント。challengeId→stepId→text */
+  getChallengeComments(challengeId: string): { [stepId: string]: string } {
+    const all = this.load<{ [cid: string]: { [sid: string]: string } }>(KEYS.CHALLENGE_COMMENTS, {});
+    return all[challengeId] || {};
+  }
+
+  saveChallengeComment(challengeId: string, stepId: string, text: string): void {
+    if (!text.trim()) return;
+    const all = this.load<{ [cid: string]: { [sid: string]: string } }>(KEYS.CHALLENGE_COMMENTS, {});
+    all[challengeId] = { ...(all[challengeId] || {}), [stepId]: text.trim() };
+    this.save(KEYS.CHALLENGE_COMMENTS, all);
   }
 
   /** 全クエスト（チャレンジ）の証拠写真URLを平坦化して返す（写真評価タスク用） */
@@ -1412,8 +1446,8 @@ class MockDatabase {
   // The creator is the user who has generated the most Toku points (likes*10 + posts*50) at this specific spot.
   // The minimum Toku required at a spot to become creator is the spot's `tokuRequirement`.
   private recalculateSpotCreator(spotId: string): void {
-    const spots = this.getSpots();
-    const spotIndex = spots.findIndex(s => s.id === spotId);
+    const spots = this.getSpotsRaw(); // 削除済みを保持したまま保存し直す（監査ログを失わない）
+    const spotIndex = spots.findIndex(s => s.id === spotId && !s.deletedAt);
     if (spotIndex === -1) return;
 
     const spot = spots[spotIndex];
@@ -1469,3 +1503,9 @@ class MockDatabase {
 }
 
 export const db = new MockDatabase();
+
+/** GPS 生成スポットの TTL（ミリ秒）。30 日。 */
+export const SPOT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** 生成クエストの TTL（ミリ秒）。1 時間。参加されないまま期限切れになると削除される。 */
+export const QUEST_TTL_MS = 60 * 60 * 1000;

@@ -10,12 +10,14 @@ import { distanceKm } from '../lib/geo';
 interface HomeTabProps {
   currentUser: User;
   userLocation: { lat: number; lng: number };
+  isGeneratingQuests?: boolean;
   onStartChallenge: (challengeId: string) => void;
   onEndChallenge?: () => void;
   onChanged?: () => void;
+  onNeedSpots?: () => void;
 }
 
-export default function HomeTab({ currentUser, userLocation, onStartChallenge, onEndChallenge }: HomeTabProps) {
+export default function HomeTab({ currentUser, userLocation, isGeneratingQuests, onStartChallenge, onEndChallenge, onNeedSpots }: HomeTabProps) {
   // localStorage 依存のため、マウント後にのみ動的レンダリング（ハイドレーション不一致回避）
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -59,6 +61,14 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
     .map((x) => x.ch);
   const visibleChallenges = nearChallenges.slice(0, visibleCount);
 
+  // クエストが表示されていないとき（'done'フィルタ除く）、場の生成をリクエスト
+  useEffect(() => {
+    if (!mounted) return;
+    if (filter === 'done') return;
+    if (nearChallenges.length === 0) onNeedSpots?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted, nearChallenges.length, filter]);
+
   return (
     <div className="flex flex-col h-full overflow-y-auto bg-[#f5f7fa]">
       {/* ── ブランドヘッダー ── */}
@@ -98,8 +108,18 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
         {!mounted ? (
           <div className="text-center py-10 text-xs text-gray-400">読み込み中…</div>
         ) : nearChallenges.length === 0 ? (
-          <div className="text-center py-12 text-sm text-gray-400">
-            {filter === 'done' ? 'まだ達成したクエストがありません。' : '該当するクエストがありません。'}
+          <div className="text-center py-12">
+            {filter !== 'done' && isGeneratingQuests ? (
+              <>
+                <div className="mx-auto mb-3 w-8 h-8 border-2 border-shrine-red border-t-transparent rounded-full animate-spin" />
+                <p className="text-sm font-bold text-shrine-red">近くの場からクエストを生成中…</p>
+                <p className="text-xs text-gray-400 mt-1">しばらくお待ちください</p>
+              </>
+            ) : (
+              <p className="text-sm text-gray-400">
+                {filter === 'done' ? 'まだ達成したクエストがありません。' : '該当するクエストがありません。'}
+              </p>
+            )}
           </div>
         ) : (
         <div className="flex flex-col gap-3">
@@ -138,12 +158,15 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
                     <div className="flex items-center gap-1.5">
                       {active && <span className="text-[13px] font-black bg-white/25 text-white px-1.5 py-0.5 rounded-full flex-shrink-0">挑戦中</span>}
                       {completed && !active && <span className="text-[11px] font-black bg-gold text-white px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5"><Check className="w-3 h-3" />達成済み</span>}
+                      {ch.tasks.length === 1 && ch.tasks[0].type === 'goshuin' && (
+                        <span className={`text-[11px] font-black px-1.5 py-0.5 rounded-full flex-shrink-0 ${active ? 'bg-white/25 text-white' : 'bg-rose-100 text-rose-700'}`}>🔴 御朱印</span>
+                      )}
                       <h3 className={`text-base font-black truncate ${active ? 'text-white' : 'text-gray-900'}`}>{ch.title}</h3>
                     </div>
                     {(() => {
-                      const godName = ch.spotId ? db.getSpot(ch.spotId)?.godName : null;
-                      return godName ? (
-                        <p className={`text-[11px] font-bold truncate mb-0.5 ${active ? 'text-white/70' : 'text-gray-400'}`}>by {godName}</p>
+                      const godSpot = ch.spotId ? db.getSpot(ch.spotId) : null;
+                      return godSpot?.godName ? (
+                        <p className={`text-[11px] font-bold truncate mb-0.5 ${active ? 'text-white/70' : 'text-gray-400'}`}>{godSpot.godEmoji ? `${godSpot.godEmoji} ` : ''}by {godSpot.godName}</p>
                       ) : null;
                     })()}
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -200,15 +223,36 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
         const ok = userLevel >= confirmCh.minLevel;
         return (
           <div className="fixed inset-0 z-[4000] bg-black/40 flex items-center justify-center p-6" onClick={() => setConfirmCh(null)}>
-            <div className="w-full max-w-[320px] bg-white rounded-3xl p-5 text-center animate-in" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full max-w-[320px] max-h-[85vh] overflow-y-auto bg-white rounded-3xl p-5 text-center animate-in" onClick={(e) => e.stopPropagation()}>
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-100 to-amber-100 flex items-center justify-center text-4xl mx-auto mb-3">{confirmCh.badgeIcon}</div>
               <h3 className="text-lg font-black text-gray-900">{confirmCh.title}</h3>
+              {(() => {
+                const godName = confirmCh.spotId ? db.getSpot(confirmCh.spotId)?.godName : null;
+                return godName ? <p className="text-[11px] font-bold text-gray-400 mt-0.5">by {godName}</p> : null;
+              })()}
               <p className="text-[13px] text-gray-500 mt-1 leading-relaxed">{confirmCh.description}</p>
               <div className="flex items-center justify-center gap-2 mt-3 text-[13px] text-gray-500">
                 <span className="flex items-center gap-0.5"><Clock className="w-3 h-3" />約{confirmCh.estMinutes}分</span>
                 <span>・</span>
                 <span>🏆 {confirmCh.badgeName}</span>
               </div>
+
+              {/* クエスト詳細：タスク一覧 */}
+              {confirmCh.tasks.length > 0 && (
+                <div className="mt-4 text-left">
+                  <p className="text-[11px] font-black text-gray-500 mb-1.5">クエストの内容（全{confirmCh.tasks.length}タスク）</p>
+                  <div className="space-y-1.5">
+                    {confirmCh.tasks.map((t, i) => (
+                      <div key={t.id} className="flex items-center gap-2 bg-gray-50 rounded-xl px-2.5 py-2">
+                        <span className="w-5 h-5 rounded-full bg-shrine-red text-white text-[11px] font-black flex items-center justify-center flex-shrink-0">{i + 1}</span>
+                        <span className="text-base flex-shrink-0">{t.icon}</span>
+                        <span className="flex-1 min-w-0 text-[12px] font-bold text-gray-800 truncate">{t.title}</span>
+                        <span className="text-[11px] font-black text-amber-600 flex-shrink-0">+{t.reward}徳</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="mt-4">
                 {isActive ? (

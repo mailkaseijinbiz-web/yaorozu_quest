@@ -10,10 +10,11 @@ const SYNC_KEYS = [
   'yaorozu_user_stats',
   'yaorozu_challenge_progress',
   'yaorozu_challenge_photos',
+  'yaorozu_challenge_comments',
   'yaorozu_activities',
   'yaorozu_goshuin_user-self',
   // 管理者が作成するコンテンツ
-  'yaorozu_spots_v3',
+  'yaorozu_spots_v4',
   'yaorozu_agents_v2',
   'yaorozu_quests_v2',
   // ルール・設定
@@ -24,14 +25,28 @@ const SYNC_KEYS = [
   // API監視・認証
   'yaorozu_api_calls',
   'yaorozu_revoked_users',
+  // 人間の煩悩（覚りの調整素材）
+  'yaorozu_bonnou',
+  // アプリ設定
+  'yaorozu_app_settings',
 ];
 
-// 単一ユーザーデモのためスナップショットIDは固定。将来は認証ユーザーIDに。
-const SNAPSHOT_ID = 'user-self';
+// スナップショットID。未ログインは 'user-self'、OAuth ログイン中は認証ユーザーIDに切り替える。
+let SNAPSHOT_ID = 'user-self';
+
+/** 同期対象ユーザー（クラウドスナップショットの分離キー）を設定する。認証ログイン/ログアウト時に呼ぶ。 */
+export function setSyncUser(id: string | null): void {
+  SNAPSHOT_ID = id || 'user-self';
+}
 
 let cloudEnabled: boolean | null = null;
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let suspendPush = false; // pull適用中の自己発火を防ぐ
+
+/** クラウド同期が有効か（null=未確認、true/false=判明済み）。System タブの表示用。 */
+export function isCloudEnabled(): boolean | null {
+  return cloudEnabled;
+}
 
 /** 起動時：クラウドのスナップショットを localStorage へ復元。適用したら true。 */
 export async function pullSnapshot(): Promise<boolean> {
@@ -45,10 +60,13 @@ export async function pullSnapshot(): Promise<boolean> {
     suspendPush = true;
     let applied = false;
     for (const key of SYNC_KEYS) {
-      if (key in json.data && json.data[key] != null) {
-        localStorage.setItem(key, JSON.stringify(json.data[key]));
-        applied = true;
-      }
+      if (!(key in json.data) || json.data[key] == null) continue;
+      const v = json.data[key];
+      // 空（または非配列）のユーザーリストでローカルを上書きしない。
+      // user-self を失うと currentUser が null になりマイページが空白化するため。
+      if (key === 'yaorozu_users' && (!Array.isArray(v) || v.length === 0)) continue;
+      localStorage.setItem(key, JSON.stringify(v));
+      applied = true;
     }
     suspendPush = false;
     return applied;
@@ -71,9 +89,13 @@ async function pushNow(): Promise<void> {
   const data: Record<string, unknown> = {};
   for (const key of SYNC_KEYS) {
     const raw = localStorage.getItem(key);
-    if (raw != null) {
-      try { data[key] = JSON.parse(raw); } catch { /* skip */ }
-    }
+    if (raw == null) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      // 空のユーザーリストはクラウドへ送らない（退化状態が同期で伝播するのを防ぐ）
+      if (key === 'yaorozu_users' && (!Array.isArray(parsed) || parsed.length === 0)) continue;
+      data[key] = parsed;
+    } catch { /* skip */ }
   }
   try {
     const res = await fetch('/api/persist', {

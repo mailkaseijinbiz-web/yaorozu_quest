@@ -190,3 +190,12 @@ $$ language plpgsql security definer;
 create trigger on_post_created
   after insert on public.ugc_posts
   for each row execute procedure public.handle_new_post();
+
+-- ─────────────────────────────────────────────
+-- Web Push 購読（VAPID）。/api/push/* がサービスロールで読み書きする。
+-- ─────────────────────────────────────────────
+create table if not exists public.push_subscriptions (
+  endpoint text primary key,
+  subscription jsonb not null,
+  created_at timestamptz not null default now()
+);

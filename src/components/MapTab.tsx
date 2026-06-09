@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Compass, ChevronRight, Flag, X, Camera, Check, MapPin, Clock, Navigation2, MessageCircle, Send, Volume2, VolumeX } from 'lucide-react';
+import { Compass, ChevronRight, Flag, X, Camera, Check, MapPin, Clock, Navigation2, MessageCircle, Send } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { Spot, User, db } from '../lib/db';
 import { uploadImage } from '../lib/upload';
+import { hasGoShuin } from '../lib/goshuin';
 import { distanceKm, bearingDeg } from '../lib/geo';
 import { getHeartVoices } from '../data/god-tasks';
 import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
@@ -147,8 +148,10 @@ export default function MapTab({
   const [msgIdx, setMsgIdx] = useState(0);
 
   // チャレンジ：証拠写真モーダル & 達成演出
+  const [confirmQuest, setConfirmQuest] = useState<Challenge | null>(null); // インタラクティブカードの内容確認モーダル
   const [proofStep, setProofStep] = useState<ChallengeStep | null>(null);
   const [proofPhoto, setProofPhoto] = useState<string | null>(null);
+  const [proofComment, setProofComment] = useState(''); // 証拠写真に添えるコメント
   const [uploadingProof, setUploadingProof] = useState(false);
   // 達成ビート（豆知識つき・手動で次へ）
   const [celebrate, setCelebrate] = useState<
@@ -182,7 +185,7 @@ export default function MapTab({
   // 上部ガイドのフキダシ本文（3行＋スクロール）の自動スクロール用
   const guideScrollRef = useRef<HTMLDivElement | null>(null);
   // 読み上げ（TTS）：ElevenLabs（自然な音声）を優先し、失敗/キー無しは Web Speech にフォールバック
-  const [ttsOn, setTtsOn] = useState(false);
+  const [ttsOn] = useState(false); // TTS は UI 非表示・常時 OFF
   const ttsOnRef = useRef(false);
   const briefFullRef = useRef(''); // 現在のガイド全文（トグルON時に読み上げる）
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -203,18 +206,9 @@ export default function MapTab({
       speakJa(text); // フォールバック（端末内蔵）
     }
   };
-  useEffect(() => { try { setTtsOn(localStorage.getItem('yaorozu_tts') === '1'); } catch {} }, []);
+  // TTS（読み上げ）は UI から非表示。常に OFF（自動再生しない）。機能コードは残置。
   useEffect(() => { ttsOnRef.current = ttsOn; }, [ttsOn]);
   useEffect(() => () => { stopSpeak(); }, []);
-  const toggleTts = () => {
-    setTtsOn((prev) => {
-      const next = !prev;
-      try { localStorage.setItem('yaorozu_tts', next ? '1' : '0'); } catch {}
-      if (next) speak(briefFullRef.current);
-      else stopSpeak();
-      return next;
-    });
-  };
 
   const onPickProof = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -238,6 +232,8 @@ export default function MapTab({
     const doneNow = new Set(db.getChallengeProgress().done[activeChallenge.id] || []);
     const willComplete = doneNow.size + 1 >= activeChallenge.tasks.length;
     const cleared = proofStep;
+    // 証拠写真に添えるコメントを保存
+    if (proofComment.trim()) db.saveChallengeComment(activeChallenge.id, cleared.id, proofComment);
     onAdvanceChallenge?.(cleared.id, proofPhoto);
     // 達成ビート：このステップで得た豆知識を“次の文章”として見せてから次へ進む
     setCelebrate({
@@ -249,6 +245,7 @@ export default function MapTab({
     });
     setProofStep(null);
     setProofPhoto(null);
+    setProofComment('');
     // 自動で閉じない（豆知識を読んでから手動で次へ）
   };
 
@@ -302,13 +299,34 @@ export default function MapTab({
   const activeToku = activeSpot ? db.getSpotToku(activeSpot.id) : 0;
   const activeGodEmoji = activeSpot ? (activeSpot.godEmoji || (activeSpot.category === '神社' ? '⛩️' : '🙏')) : '⛩️';
 
-  // クエスト未参加時に下部へ出す「近くのクエスト」（未達成・解放優先・近い順）
+  // ── インタラクティブカード（Interactive Card） ──
+  // マップ下部に出る「近くのクエスト」カードの領域。クエスト未参加時に表示し、
+  // 横スワイプで次の候補へ切替、タップでクエストを開始できる（未達成・解放優先・近い順）。
   const userLevel = getLevelInfo(currentUser.totalToku).current.level;
   const completedChIds = db.getChallengeProgress().completed;
-  const nearChallenge = db.getAllQuests()
+  const nearChallengeList = db.getAllQuests()
     .filter((c) => !completedChIds.includes(c.id))
     .map((c) => ({ c, d: distanceKm(userLocation.lat, userLocation.lng, c.goalLat, c.goalLng), ok: userLevel >= c.minLevel }))
-    .sort((a, b) => (a.ok !== b.ok ? (a.ok ? -1 : 1) : a.d - b.d))[0]?.c ?? null;
+    .sort((a, b) => (a.ok !== b.ok ? (a.ok ? -1 : 1) : a.d - b.d))
+    .slice(0, 10)
+    .map((x) => x.c);
+  // 表示中のカード位置（スワイプで移動）
+  const [cardIndex, setCardIndex] = useState(0);
+  // 候補数が変わったら範囲内に収める
+  useEffect(() => { setCardIndex((i) => Math.min(i, Math.max(0, nearChallengeList.length - 1))); }, [nearChallengeList.length]);
+  const nearChallenge = nearChallengeList[Math.min(cardIndex, nearChallengeList.length - 1)] ?? null;
+  // 横スワイプ検出（スワイプ直後のタップで誤って開始しないよう swipedRef でガード）
+  const swipeStartXRef = useRef<number | null>(null);
+  const swipedRef = useRef(false);
+  const onCardTouchStart = (e: React.TouchEvent) => { swipeStartXRef.current = e.touches[0]?.clientX ?? null; swipedRef.current = false; };
+  const onCardTouchEnd = (e: React.TouchEvent) => {
+    const start = swipeStartXRef.current;
+    swipeStartXRef.current = null;
+    if (start == null || nearChallengeList.length <= 1) return;
+    const dx = (e.changedTouches[0]?.clientX ?? start) - start;
+    if (dx < -40) { swipedRef.current = true; setCardIndex((i) => Math.min(i + 1, nearChallengeList.length - 1)); }
+    else if (dx > 40) { swipedRef.current = true; setCardIndex((i) => Math.max(i - 1, 0)); }
+  };
 
   // 導入（プロローグ）表示中か。表示中はヘッダー/下部オーバーレイ/現在地ボタンを隠す。
   const introShowing = !!activeChallenge && !celebrate && (chDone?.size ?? 0) === 0 && introSeenId !== activeChallenge.id;
@@ -493,13 +511,7 @@ export default function MapTab({
             <div className="relative flex-1 bg-white rounded-2xl rounded-tl-sm shadow-xl px-4 py-3">
               <div className="flex items-center justify-between">
                 <p className="text-[11px] font-black tracking-wider text-amber-600">道案内の精霊</p>
-                <button
-                  onClick={toggleTts}
-                  aria-label={ttsOn ? '読み上げを止める' : '読み上げる'}
-                  className="pointer-events-auto -mr-1.5 -mt-0.5 w-7 h-7 rounded-full flex items-center justify-center hover:bg-gray-100 cursor-pointer"
-                >
-                  {ttsOn ? <Volume2 className="w-4 h-4 text-[#2563eb]" /> : <VolumeX className="w-4 h-4 text-gray-400" />}
-                </button>
+                {/* TTS（読み上げ）UI は非表示。機能コードは残置。 */}
               </div>
               <div ref={guideScrollRef} className="mt-0.5 max-h-[4.4rem] overflow-y-auto pointer-events-auto pr-1">
                 <p className="text-sm text-gray-800 leading-relaxed">{briefTyped}<span className="animate-pulse text-amber-500">▌</span></p>
@@ -552,20 +564,45 @@ export default function MapTab({
                   );
                 })()}
               </div>
-              {/* アクション（達成には証拠写真が必要・500m以内で解放）。次の案内は上部の進捗ガイドに集約 */}
+              {/* アクション。御朱印タスクは写真・距離ゲートなし（会話で授かって達成）。その他は証拠写真＋500m以内。 */}
               <div className="mt-3">
-                <button
-                  onClick={() => {
-                    if (tooFar) { setFarNotice(true); return; }
-                    setProofStep(nextStep); setProofPhoto(null);
-                  }}
-                  className={`w-full text-[15px] font-black py-3 rounded-full transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                    tooFar ? 'bg-gray-200 text-gray-400' : 'bg-[#2563eb] text-white hover:opacity-90 active:scale-[0.99]'
-                  }`}
-                >
-                  <Camera className="w-4 h-4" />証拠写真を撮影
-                </button>
-                {farNotice && tooFar && (
+                {nextStep.type === 'goshuin' ? (
+                  <button
+                    onClick={() => {
+                      const held = nextStep.spotId ? hasGoShuin(currentUser.id, nextStep.spotId) : false;
+                      if (held) {
+                        const doneNow = new Set(db.getChallengeProgress().done[activeChallenge!.id] || []);
+                        const willComplete = doneNow.size + 1 >= activeChallenge!.tasks.length;
+                        onAdvanceChallenge?.(nextStep.id, null);
+                        setCelebrate({
+                          title: willComplete ? `「${activeChallenge!.badgeName}」獲得！` : `${nextStep.title} 達成！`,
+                          icon: willComplete ? activeChallenge!.badgeIcon : '🔴',
+                          complete: willComplete, trivia: nextStep.trivia, triviaCategory: nextStep.triviaCategory,
+                        });
+                      } else {
+                        // 未取得 → 神のページ（会話タブ）を開いて授かりに行く
+                        const target = (nextStep.spotId ? spots.find((s) => s.id === nextStep.spotId) : null) ?? activeSpot;
+                        if (target) onOpenDetail?.(target);
+                      }
+                    }}
+                    className="w-full text-[15px] font-black py-3 rounded-full transition-all cursor-pointer flex items-center justify-center gap-2 bg-[#2563eb] text-white hover:opacity-90 active:scale-[0.99]"
+                  >
+                    <MessageCircle className="w-4 h-4" />御朱印をもらいに行く
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      if (tooFar) { setFarNotice(true); return; }
+                      setProofStep(nextStep); setProofPhoto(null);
+                    }}
+                    className={`w-full text-[15px] font-black py-3 rounded-full transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                      tooFar ? 'bg-gray-200 text-gray-400' : 'bg-[#2563eb] text-white hover:opacity-90 active:scale-[0.99]'
+                    }`}
+                  >
+                    <Camera className="w-4 h-4" />証拠写真を撮影
+                  </button>
+                )}
+                {farNotice && tooFar && nextStep.type !== 'goshuin' && (
                   <p className="text-center text-[12px] font-black text-rose-500 mt-2">📍 目的地に近づいてください（500m以内で達成できます）</p>
                 )}
               </div>
@@ -573,25 +610,41 @@ export default function MapTab({
           ) : null}
         </div>
       ) : !activeChallenge && !celebrate && nearChallenge ? (() => {
+        // ▼ インタラクティブカード（Interactive Card）：近くのクエストを提示し、タップで開始
         const ch = nearChallenge;
         const diff = difficultyLabel(ch.difficulty);
         const d = distanceKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng);
         const distVal = d < 1 ? `${Math.round(d * 1000)}` : d.toFixed(1);
         const distUnit = d < 1 ? 'm' : 'km';
         const levelOk = userLevel >= ch.minLevel;
+        const godSpot = ch.spotId ? db.getSpot(ch.spotId) : null; // このクエストを鋳造した神
         return (
-          <button
+          <div
             ref={(el) => { overlayElRef.current = el; }}
-            onClick={() => onStartChallenge?.(ch.id)}
-            className="absolute bottom-3 left-3 right-3 z-[1000] text-left bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-black/5 overflow-hidden cursor-pointer active:scale-[0.99] transition-all"
+            role="button"
+            tabIndex={0}
+            onTouchStart={onCardTouchStart}
+            onTouchEnd={onCardTouchEnd}
+            onClick={() => { if (swipedRef.current) { swipedRef.current = false; return; } setConfirmQuest(ch); }}
+            className="absolute bottom-3 left-3 right-3 z-[1000] text-left bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-black/5 overflow-hidden cursor-pointer active:scale-[0.99] transition-all touch-pan-y"
           >
             <div className="flex items-stretch gap-3">
               <div className={`w-20 self-stretch rounded-l-2xl flex items-center justify-center text-4xl flex-shrink-0 ${!levelOk ? 'bg-gray-200 grayscale' : 'bg-gradient-to-br from-blue-100 to-amber-100'}`}>
                 {!levelOk ? '🔒' : ch.badgeIcon}
               </div>
               <div className="flex-1 min-w-0 py-3">
-                <span className="text-[10px] font-black tracking-wider text-[#2563eb]/70">近くのクエスト</span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-black tracking-wider text-[#2563eb]/70">近くのクエスト{nearChallengeList.length > 1 ? ` ${cardIndex + 1}/${nearChallengeList.length}` : ''}</span>
+                  {nearChallengeList.length > 1 && (
+                    <span className="text-[10px] text-gray-400 flex items-center gap-0.5">← スワイプ →</span>
+                  )}
+                </div>
                 <h4 className="text-sm font-black text-gray-900 truncate">{ch.title}</h4>
+                {godSpot?.godName && (
+                  <p className="text-[11px] font-bold text-gray-400 truncate mt-0.5">
+                    {godSpot.godEmoji ? `${godSpot.godEmoji} ` : ''}by {godSpot.godName}
+                  </p>
+                )}
                 <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                   <span className={`text-[13px] font-black ${diff.text}`}>{diff.stars} {diff.label}</span>
                   <span className={`text-[13px] font-black ${levelOk ? 'text-gray-500' : 'text-rose-600'}`}>{levelOk ? '' : '🔒 '}Lv.{ch.minLevel}〜</span>
@@ -600,16 +653,79 @@ export default function MapTab({
                     <MapPin className="w-3 h-3" /><span className="tabular-nums">{distVal}</span><span className="text-[11px]">{distUnit}</span>
                   </span>
                 </div>
+                {/* ページインジケータ（ドット） */}
+                {nearChallengeList.length > 1 && (
+                  <div className="flex items-center gap-1 mt-1.5">
+                    {nearChallengeList.map((_, i) => (
+                      <span key={i} className={`h-1 rounded-full transition-all ${i === cardIndex ? 'w-3 bg-[#2563eb]' : 'w-1 bg-gray-300'}`} />
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="self-center pr-3 flex-shrink-0 text-[#2563eb]"><ChevronRight className="w-5 h-5" /></div>
             </div>
-          </button>
+          </div>
         );
       })() : null}
 
+      {/* インタラクティブカード：クエスト内容を確認してから参加 */}
+      {confirmQuest && (() => {
+        const q = confirmQuest;
+        const diff = difficultyLabel(q.difficulty);
+        const levelOk = userLevel >= q.minLevel;
+        const godName = q.spotId ? db.getSpot(q.spotId)?.godName : null;
+        return (
+          <div className="absolute inset-0 z-[2200] bg-black/50 flex items-center justify-center p-6" onClick={() => setConfirmQuest(null)}>
+            <div className="w-full max-w-[320px] max-h-[85vh] overflow-y-auto bg-white rounded-3xl p-5 text-center animate-in" onClick={(e) => e.stopPropagation()}>
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-100 to-amber-100 flex items-center justify-center text-4xl mx-auto mb-3">{q.badgeIcon}</div>
+              <h3 className="text-lg font-black text-gray-900">{q.title}</h3>
+              {godName && <p className="text-[11px] font-bold text-gray-400 mt-0.5">by {godName}</p>}
+              <p className="text-[13px] text-gray-500 mt-1 leading-relaxed">{q.description}</p>
+              <div className="flex items-center justify-center gap-2 mt-3 text-[13px] text-gray-500 flex-wrap">
+                <span className={`font-black ${diff.text}`}>{diff.stars} {diff.label}</span>
+                <span>・</span>
+                <span className={levelOk ? '' : 'text-rose-600 font-black'}>{levelOk ? '' : '🔒 '}Lv.{q.minLevel}〜</span>
+                <span>・</span>
+                <span className="flex items-center gap-0.5"><Clock className="w-3 h-3" />約{q.estMinutes}分</span>
+              </div>
+
+              {q.tasks.length > 0 && (
+                <div className="mt-4 text-left">
+                  <p className="text-[11px] font-black text-gray-500 mb-1.5">クエストの内容（全{q.tasks.length}タスク）</p>
+                  <div className="space-y-1.5">
+                    {q.tasks.map((t, i) => (
+                      <div key={t.id} className="flex items-center gap-2 bg-gray-50 rounded-xl px-2.5 py-2">
+                        <span className="w-5 h-5 rounded-full bg-shrine-red text-white text-[11px] font-black flex items-center justify-center flex-shrink-0">{i + 1}</span>
+                        <span className="text-base flex-shrink-0">{t.icon}</span>
+                        <span className="flex-1 min-w-0 text-[12px] font-bold text-gray-800 truncate">{t.title}</span>
+                        <span className="text-[11px] font-black text-amber-600 flex-shrink-0">+{t.reward}徳</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2 mt-4">
+                <button onClick={() => setConfirmQuest(null)} className="flex-1 bg-gray-100 text-gray-500 text-sm font-black py-3 rounded-xl cursor-pointer">やめる</button>
+                {levelOk ? (
+                  <button
+                    onClick={() => { const id = q.id; setConfirmQuest(null); onStartChallenge?.(id); }}
+                    className="flex-1 bg-shrine-red text-white text-sm font-black py-3 rounded-xl hover:opacity-90 cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Flag className="w-4 h-4" />参加
+                  </button>
+                ) : (
+                  <div className="flex-1 bg-gray-100 text-gray-400 text-[12px] font-black py-3 rounded-xl flex items-center justify-center">🔒 Lv.{q.minLevel}以上</div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 証拠写真モーダル（この目的地を達成するには写真が必要） */}
       {proofStep && (
-        <div className="absolute inset-0 z-[2000] bg-black/50 flex items-end" onClick={() => { setProofStep(null); setProofPhoto(null); }}>
+        <div className="absolute inset-0 z-[2000] bg-black/50 flex items-end" onClick={() => { setProofStep(null); setProofPhoto(null); setProofComment(''); }}>
           <div className="w-full bg-white rounded-t-3xl p-4 pb-6 animate-in" onClick={(e) => e.stopPropagation()}>
             <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-3" />
             <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5"><Camera className="w-4 h-4 text-[#2563eb]" />証拠写真を撮影</h3>
@@ -631,8 +747,17 @@ export default function MapTab({
               <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickProof} disabled={uploadingProof} />
             </label>
 
+            {/* 証拠写真に添えるコメント（任意） */}
+            <textarea
+              value={proofComment}
+              onChange={(e) => setProofComment(e.target.value)}
+              rows={2}
+              placeholder="コメントを添える（任意）— 感じたこと・気づきなど"
+              className="mt-2 w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-[13px] text-gray-800 focus:outline-none focus:border-[#2563eb] transition-all resize-none"
+            />
+
             <div className="flex gap-2 mt-2">
-              <button onClick={() => { setProofStep(null); setProofPhoto(null); }} className="flex-1 bg-gray-100 text-gray-500 text-sm font-black py-2.5 rounded-xl cursor-pointer">やめる</button>
+              <button onClick={() => { setProofStep(null); setProofPhoto(null); setProofComment(''); }} className="flex-1 bg-gray-100 text-gray-500 text-sm font-black py-2.5 rounded-xl cursor-pointer">やめる</button>
               <button onClick={confirmProof} disabled={!proofPhoto} className="flex-1 bg-[#2563eb] text-white text-sm font-black py-2.5 rounded-xl disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5">
                 <Check className="w-4 h-4" />この写真で達成
               </button>

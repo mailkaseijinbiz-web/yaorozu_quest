@@ -351,23 +351,8 @@ export default function LeafletMap({
           <div class="relative flex items-start gap-1.5 rounded-2xl px-2.5 py-1.5 shadow-lg ${isActive ? 'border-2' : 'border'} ${borderCls}" style="max-width:190px;background:#ffffff;">
             <span style="font-size:15px;line-height:1.15;flex-shrink:0;">${iconEmoji}</span>
             <span class="spot-voice text-[11px] font-bold leading-snug text-gray-800" data-spotid="${spot.id}" data-vi="${voiceIdx}" style="word-break:break-word;transition:opacity 0.3s ease;">${voice}</span>
-          </div>`;
-
-      const spotHtml = showBubble
-        ? flipDown
-          ? `
-        <div class="relative flex flex-col items-center">
-          <div class="god-ripple ${isActive ? 'god-ripple-active' : ''}" style="top:0;"></div>
-          <div class="${isActive ? 'border-l-2 border-t-2' : 'border-l border-t'} ${borderCls} -mb-1.5 rotate-45" style="width:10px;height:10px;background:#ffffff;"></div>
-          ${bubbleBox}
-          <span class="map-spot-name ${isActive ? 'map-spot-name-active' : ''}">${spot.name}</span>
-        </div>
-      `
-          : `
-        <div class="relative flex flex-col items-center">
-          <div class="god-ripple ${isActive ? 'god-ripple-active' : ''}"></div>
-          ${bubbleBox}
-          <div class="${isActive ? 'border-r-2 border-b-2' : 'border-r border-b'} ${borderCls} -mt-1.5 rotate-45" style="width:10px;height:10px;background:#ffffff;"></div>
+          </div>
+          <div class="${isActive ? 'border-r-2 border-b-2' : 'border-r border-b'} ${borderCls} -mt-1.5 rotate-45" style="width:10px;height:10px;background:#ffffff;margin-bottom:20px;"></div>
           <span class="map-spot-name ${isActive ? 'map-spot-name-active' : ''}">${spot.name}</span>
         </div>
       `
@@ -380,9 +365,9 @@ export default function LeafletMap({
       const spotIcon = L.divIcon({
         html: spotHtml,
         className: 'custom-spot-icon',
-        iconSize: showBubble ? [210, 90] : [120, 30],
-        // 下開き時は切り込み(上)を現在地に合わせるため、アンカーを上側に寄せる
-        iconAnchor: showBubble ? (flipDown ? [105, 8] : [105, 50]) : [60, 6],
+        iconSize: showBubble ? [210, 108] : [120, 30],
+        // アンカー（＝この場の地理座標＝現在地ドット位置）を下げ、フキダシを上へ持ち上げてドットとの重なりを防ぐ
+        iconAnchor: showBubble ? [105, 60] : [60, 6],
       });
 
       const marker = L.marker([spot.latitude, spot.longitude], {

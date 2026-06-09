@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Search } from 'lucide-react';
 import { Card, PER_PAGE, Pager } from './ui';
-import { CHALLENGES, difficultyLabel } from '../../data/challenges';
+import { difficultyLabel } from '../../data/challenges';
 import { db, DEFAULT_QUEST_RULES } from '../../lib/db';
 import { RulesPanel } from './RulesPanel';
 
@@ -15,7 +15,9 @@ export function ChallengesManager() {
   const [page, setPage] = useState(0);
   const [rules, setRules] = useState(() => db.getQuestRules());
   const [saved, setSaved] = useState(false);
-  const all = CHALLENGES.filter(c => c.title.includes(q) || c.goalName.includes(q) || c.badgeName.includes(q));
+  // 生成クエストを含む全クエスト（静的 CHALLENGES は現在空のため、実体は生成クエスト）
+  const allQuests = db.getAllQuests();
+  const all = allQuests.filter(c => c.title.includes(q) || c.goalName.includes(q) || c.badgeName.includes(q));
   const list = all.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE);
   return (
     <div className="space-y-3">
@@ -30,7 +32,7 @@ export function ChallengesManager() {
         saved={saved}
       />
 
-      <p className="text-xs text-gray-500">登録済みのクエスト（街歩きミッション）一覧。現在 <span className="font-black text-blue-600">{CHALLENGES.length}</span> 件。難易度・ステップ・蘊蓄・ゴールを確認できます。</p>
+      <p className="text-xs text-gray-500">登録済みのクエスト（街歩きミッション）一覧。現在 <span className="font-black text-blue-600">{allQuests.length}</span> 件。難易度・ステップ・蘊蓄・ゴールを確認できます。</p>
       <div className="relative max-w-xs">
         <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
         <input value={q} onChange={e => { setQ(e.target.value); setPage(0); }} className="w-full bg-white border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-xs text-gray-900 focus:outline-none focus:border-blue-500" placeholder="検索…" />

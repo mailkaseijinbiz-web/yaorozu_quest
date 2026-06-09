@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Loader2, Sparkles } from 'lucide-react';
 import { db, DEFAULT_SYSTEM_ROLE } from '../../lib/db';
-import { GOD_FUNCTIONS } from '../../data/tasks';
+import { GOD_FUNCTIONS, TASK_CATALOG, TASK_TARGET, TASK_TARGET_META, type TaskTarget } from '../../data/tasks';
 import { buildDainichiIdentityMd } from '../../lib/dainichi';
 import { RulesPanel } from './RulesPanel';
 
@@ -73,12 +73,17 @@ export function Blueprint() {
   const users = allUsers.length;
   const totalToku = allUsers.reduce((n, u) => n + (u.totalToku ?? 0), 0); // 徳の総和（スコア）
   const activities = db.getActivities().length;
-  // 究極目的：世界の幸福 = 場の活気（価値−課題）× 人間の覚り（徳−煩悩。煩悩は現状0）
+  // 究極目的：世界の幸福 = 場の活気（価値−課題） + 人間の覚り（徳−煩悩）
+  const bonnou = db.getUnresolvedBonnouCount(); // 全ユーザーの未解決煩悩
   const activeness = totalValue - totalIssues;
-  const enlightenment = totalToku - 0;
+  const enlightenment = totalToku - bonnou;
   const happiness = activeness + enlightenment;
-  const quests = db.getAllQuests().length; // 静的＋生成クエスト
+  const allQuests = db.getAllQuests();
+  const quests = allQuests.length; // 静的＋生成クエスト
   const agents = db.getAgents().length; // 神（Agent）の実数
+  // タスク種別ごとの使用数（全クエスト横断）
+  const taskTypeCounts: Record<string, number> = {};
+  allQuests.forEach((q) => (q.tasks ?? []).forEach((t) => { taskTypeCounts[t.type] = (taskTypeCounts[t.type] ?? 0) + 1; }));
 
   // システムの一括更新：生成ルール＋神の魂を反映して、神・クエストを生成AIでアップデートする
   const [updating, setUpdating] = useState(false);
@@ -226,10 +231,40 @@ export function Blueprint() {
             <div className="grid grid-cols-3 gap-2">
               {GOD_FUNCTIONS.map((fn) => {
                 const st = KIND_STYLE[fn.key];
+                const kindTotal = fn.tasks.reduce((n, t) => n + (taskTypeCounts[t] ?? 0), 0);
                 return (
                   <div key={fn.key} className={`rounded-lg border px-2.5 py-2 ${st.border}`}>
-                    <p className={`text-[12px] font-black ${st.text}`}>{fn.label}</p>
+                    <div className="flex items-baseline justify-between gap-1">
+                      <p className={`text-[12px] font-black ${st.text}`}>{fn.label}</p>
+                      <span className={`text-lg font-black tabular-nums leading-none ${st.text}`} title="この機能のタスク総数">{kindTotal}</span>
+                    </div>
                     <p className={`text-[10px] mt-0.5 leading-tight ${st.text} opacity-80`}>{KIND_ACTIVITY[fn.key] ?? fn.desc}</p>
+                    {/* タスクの種類を「対象（場の活気 / 人間の覚り）」でさらに分類し、数字（使用数）とともに一覧 */}
+                    <div className="mt-1.5 flex flex-col gap-1">
+                      {(['spot', 'human'] as TaskTarget[]).map((target) => {
+                        const types = fn.tasks.filter((t) => TASK_TARGET[t] === target);
+                        if (types.length === 0) return null;
+                        const tm = TASK_TARGET_META[target];
+                        return (
+                          <div key={target}>
+                            <p className="text-[8px] font-black text-gray-400 mb-0.5">{tm.icon} {tm.label}</p>
+                            <div className="flex flex-col gap-0.5">
+                              {types.map((t) => {
+                                const c = TASK_CATALOG[t];
+                                const n = taskTypeCounts[t] ?? 0;
+                                return (
+                                  <div key={t} className="flex items-center gap-1 text-[9px]">
+                                    <span className="leading-none">{c.icon}</span>
+                                    <span className={`flex-1 truncate ${st.text} opacity-90`}>{c.label}</span>
+                                    <span className={`tabular-nums font-black ${n > 0 ? st.text : 'text-gray-300'}`}>{n}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })}
@@ -277,8 +312,8 @@ export function Blueprint() {
                   <p className="text-[10px] text-rose-600 mt-0.5 leading-tight">未浄化の欲・執着</p>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-lg font-black text-rose-700 tabular-nums leading-none">0</p>
-                  <p className="text-[9px] text-rose-500">総和</p>
+                  <p className="text-lg font-black text-rose-700 tabular-nums leading-none">{fmt(bonnou)}</p>
+                  <p className="text-[9px] text-rose-500">未解決</p>
                 </div>
               </div>
             </div>

@@ -4,6 +4,7 @@
 // プロバイダ: Gemini 優先 → OpenAI → ルールベース fallback（いずれも raw fetch）。
 import { NextResponse } from 'next/server';
 import { TASK_CATALOG, kindOfType, type TaskType, type Task, type Quest } from '../../../data/tasks';
+import { isPushConfigured, sendToAll } from '../../../lib/push-server';
 
 interface SpotInput {
   id?: string;
@@ -57,7 +58,7 @@ function coerceQuest(raw: unknown, n: number, spot: SpotInput, ts: number): Ques
   const r = (raw ?? {}) as Record<string, unknown>;
   const rawTasks = Array.isArray(r.tasks) ? r.tasks : [];
   if (rawTasks.length === 0) return null;
-  const tasks = rawTasks.slice(0, 8).map((t, i) => coerceTask(t, i, spot));
+  const tasks = rawTasks.slice(0, 4).map((t, i) => coerceTask(t, i, spot)); // クエストはタスク1〜4
   const difficulty = ([1, 2, 3].includes(Number(r.difficulty)) ? Number(r.difficulty) : 1) as 1 | 2 | 3;
   return {
     id: `uq-${spot.id || 'spot'}-${ts}-${n}`,
@@ -129,13 +130,18 @@ function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '
   return `${policy}${base}あなたは位置情報巡礼ゲーム「八百万クエスト」のクエストデザイナーです。
 以下の「場」を題材に、街歩き型のクエストを${count}個、日本語で考えてください。
 
-クエストは「タスクの集まり」です。各タスクは神の3つの働きのいずれかに属します:
-- 情報収集(sense): visit(来訪), photo(写真), context(今の様子), event(できごと), cleaning(清掃確認)
-- 理解判断(understand): review(口コミ), eat(実食の声), evaluate(写真を評価), judge(投稿をジャッジ)
-- 操作(act): resolveIssue(課題解決), buy(買物報告), sns(SNS拡散)
+クエストは「タスクの集まり」です。各タスクは「世界の値（活気=価値−課題 / 覚り=徳−煩悩）を調整する」か「調整に必要なコンテキストを生成する」かのいずれかで、神の3つの働きに属します:
+- 情報収集(sense)＝コンテキスト生成: visit(来訪), photo(写真), context(今の様子), event(できごと), cleaning(清掃確認), weather(天気), value_ask(この場の価値を人間に尋ねる→活気を上げる素材), issue_ask(この場の課題を人間に尋ねる→解決の素材), discover(隠れた魅力を発見→価値追加), bonnou_ask(人間の煩悩を尋ねる→覚りの素材), wish(願いを書く), gratitude(感謝を捧げる), avatar_photo(巡礼者自身の姿を撮りアバターにする)
+- 理解判断(understand): review(口コミ), eat(実食の声), evaluate(写真を評価), judge(投稿をジャッジ), recommend(一番を選ぶ), verify(情報を確かめる)
+- 操作(act)＝世界の値を直接調整: resolveIssue(課題を解決し活気+2), cleanup(掃除をして場を整える), buy(買物報告), sns(価値を外へ拡散), donate(寄進), guide(道案内), bonnou_resolve(人間の煩悩を一つ手放し覚り+1), walk(散歩で心を整え覚り+1), meditate(瞑想で煩悩を手放し覚り+1)
 
-各クエストには「情報収集・理解判断・操作」を最低1つずつ含め、3〜5タスクで構成してください。
-価値は「楽しみ方」から、操作タスクは「課題」から作ってください（課題があれば必ず resolveIssue を入れ、issueIndex で何番目の課題かを示す）。
+各クエストは1〜4タスクで構成してください（1タスクの軽量クエストも可）。複数タスクのときは、なるべく「情報収集」と「操作」を組み合わせて、コンテキスト収集→世界の値の調整、の流れになるようにします。
+生成の制約条件:
+- resolveIssue は「課題」が存在する場合のみ使用し、issueIndex で何番目の課題かを必ず示す（課題が無ければ使わない）。
+- value_ask / issue_ask は、価値・課題がまだ薄い場で特に有効（人間から集めて充実させる）。
+- bonnou_ask は人間の内面が対象で場に依存しない。bonnou_resolve は bonnou_ask の後に意味を持つ。
+- 価値タスクは「楽しみ方」から、操作タスクは「課題」から作ってください。
+- 参拝・信仰の所作（goshuin 御朱印をもらう / donate お賽銭を捧げる / gratitude 感謝を捧げる）や、覚りを高める所作（bonnou_resolve 煩悩を手放す / meditate 瞑想する）も適宜織り交ぜてください。特に神社・寺院など霊的な場では積極的に取り入れます。
 
 場の名前: ${spot.name}
 カテゴリ: ${spot.category}
@@ -185,6 +191,20 @@ export async function POST(request: Request) {
       return quests.length ? quests : null;
     };
 
+    // 生成成功時：サーバから購読端末へ自動プッシュ（VAPID 設定時のみ）してから返す
+    const respond = async (quests: Quest[], source: string) => {
+      if (isPushConfigured() && quests.length) {
+        try {
+          await sendToAll({
+            title: '新しいクエストが登場',
+            body: `${spot.name}に「${quests[0].title}」など${quests.length}件のクエストが現れました。`,
+            url: '/',
+          });
+        } catch { /* プッシュ失敗は生成結果に影響させない */ }
+      }
+      return NextResponse.json({ quests, source });
+    };
+
     // ── Gemini 優先 ──
     if (geminiKey) {
       try {
@@ -208,7 +228,7 @@ export async function POST(request: Request) {
           const data = await res.json();
           const text: string = data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text || '').join('') ?? '';
           const quests = finalize(extractJson(text));
-          if (quests) return NextResponse.json({ quests, source: 'gemini' });
+          if (quests) return respond(quests, 'gemini');
         }
       } catch {
         /* fall through */
@@ -232,7 +252,7 @@ export async function POST(request: Request) {
           const data = await res.json();
           const text: string = data.choices?.[0]?.message?.content ?? '';
           const quests = finalize(extractJson(text));
-          if (quests) return NextResponse.json({ quests, source: 'openai' });
+          if (quests) return respond(quests, 'openai');
         }
       } catch {
         /* fall through */
@@ -240,7 +260,7 @@ export async function POST(request: Request) {
     }
 
     // ── ルールベース fallback ──
-    return NextResponse.json({ quests: buildFallbackQuest(spot, count, ts), source: 'fallback' });
+    return respond(buildFallbackQuest(spot, count, ts), 'fallback');
   } catch {
     return NextResponse.json({ error: 'generation failed' }, { status: 500 });
   }
