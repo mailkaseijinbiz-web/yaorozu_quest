@@ -140,6 +140,12 @@ export default function HomeTab({ currentUser, userLocation, onStartChallenge, o
                       {completed && !active && <span className="text-[11px] font-black bg-gold text-white px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5"><Check className="w-3 h-3" />達成済み</span>}
                       <h3 className={`text-base font-black truncate ${active ? 'text-white' : 'text-gray-900'}`}>{ch.title}</h3>
                     </div>
+                    {(() => {
+                      const godName = ch.spotId ? db.getSpot(ch.spotId)?.godName : null;
+                      return godName ? (
+                        <p className={`text-[11px] font-bold truncate mb-0.5 ${active ? 'text-white/70' : 'text-gray-400'}`}>by {godName}</p>
+                      ) : null;
+                    })()}
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                       <span className={`text-[13px] font-black ${active ? 'text-white' : diff.text}`}>
                         {diff.stars} {diff.label}

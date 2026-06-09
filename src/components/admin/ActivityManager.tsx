@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { db, Spot, ActivityType } from '../../lib/db';
+import { useState, useEffect } from 'react';
+import { db, Spot, Activity, ActivityType, ActivitySource } from '../../lib/db';
 import { CHALLENGES } from '../../data/challenges';
 import { PER_PAGE, Pager } from './ui';
 
@@ -15,6 +15,9 @@ const META: Record<ActivityType, { icon: string; label: string; color: string }>
   task: { icon: '⭐', label: '依頼を達成', color: 'text-indigo-600' },
   photo: { icon: '📸', label: '写真を奉納', color: 'text-pink-600' },
   ugc: { icon: '💬', label: '口コミを投稿', color: 'text-violet-600' },
+  home_view:     { icon: '🏠', label: 'ホームタブを表示', color: 'text-slate-600' },
+  map_move:      { icon: '🗺️', label: '地図を移動', color: 'text-teal-600' },
+  spot_generate: { icon: '✨', label: '場を生成', color: 'text-purple-600' },
 };
 
 function timeAgo(iso: string): string {
@@ -30,14 +33,23 @@ function timeAgo(iso: string): string {
 export function ActivityManager({ spots }: { spots: Spot[] }) {
   const [page, setPage] = useState(0);
   const [filter, setFilter] = useState<'all' | 'quest' | 'visit'>('all');
-  const all = db.getActivities();
+  const [sourceFilter, setSourceFilter] = useState<'all' | ActivitySource>('all');
+  const [all, setAll] = useState<Activity[]>(() => db.getActivities());
+
+  // 3秒ごとに自動同期（アプリ側でログされたアクティビティをリアルタイム反映）
+  useEffect(() => {
+    const id = setInterval(() => setAll(db.getActivities()), 3000);
+    return () => clearInterval(id);
+  }, []);
 
   const challengeTitle = (id?: string) => (id ? (CHALLENGES.find((c) => c.id === id)?.title ?? id) : '');
   const spotName = (id?: string) => (id ? (spots.find((s) => s.id === id)?.name ?? id) : '');
 
-  const filtered = all.filter((a) =>
-    filter === 'all' ? true : filter === 'quest' ? a.type.startsWith('quest') : a.type === 'visit'
-  );
+  const filtered = all.filter((a) => {
+    const typeOk = filter === 'all' ? true : filter === 'quest' ? a.type.startsWith('quest') : a.type === 'visit';
+    const srcOk = sourceFilter === 'all' ? true : (a.source ?? 'human') === sourceFilter;
+    return typeOk && srcOk;
+  });
   const pageItems = filtered.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE);
 
   const FILTERS = [
@@ -46,10 +58,16 @@ export function ActivityManager({ spots }: { spots: Spot[] }) {
     { k: 'visit', label: '訪問' },
   ] as const;
 
+  const SOURCE_FILTERS: { k: 'all' | ActivitySource; label: string; icon: string }[] = [
+    { k: 'all',    label: 'すべて',   icon: '📋' },
+    { k: 'human',  label: '人間',     icon: '👤' },
+    { k: 'system', label: 'システム', icon: '🤖' },
+  ];
+
   return (
     <div>
       <p className="text-[12px] text-gray-500 mb-2">巡礼者の行動ログ — <b>クエストに参加</b>・<b>場所に行く</b>・依頼達成などを時系列で保持する。</p>
-      <div className="flex items-center gap-1.5 mb-3">
+      <div className="flex items-center gap-1.5 mb-2 flex-wrap">
         {FILTERS.map((f) => (
           <button
             key={f.k}
@@ -57,6 +75,16 @@ export function ActivityManager({ spots }: { spots: Spot[] }) {
             className={`text-[12px] font-black px-3 py-1.5 rounded-full border transition-all cursor-pointer ${filter === f.k ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-500 border-gray-200 hover:border-blue-400'}`}
           >
             {f.label}
+          </button>
+        ))}
+        <span className="w-px h-4 bg-gray-200 mx-1" />
+        {SOURCE_FILTERS.map((f) => (
+          <button
+            key={f.k}
+            onClick={() => { setSourceFilter(f.k); setPage(0); }}
+            className={`text-[12px] font-black px-3 py-1.5 rounded-full border transition-all cursor-pointer flex items-center gap-1 ${sourceFilter === f.k ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-gray-500 border-gray-200 hover:border-violet-400'}`}
+          >
+            {f.icon} {f.label}
           </button>
         ))}
         <span className="ml-auto text-[11px] text-gray-400">全 {filtered.length} 件</span>
@@ -78,7 +106,13 @@ export function ActivityManager({ spots }: { spots: Spot[] }) {
                     <span className="text-lg shrink-0">{m.icon}</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-[13px] font-black text-gray-800 truncate"><span className={m.color}>{m.label}</span>{target && <span className="text-gray-700"> {target}</span>}</p>
-                      <p className="text-[10px] text-gray-400">{timeAgo(a.createdAt)}{a.detail && a.type === 'task' ? ` ・ ${a.detail}` : ''}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <p className="text-[10px] text-gray-400">{timeAgo(a.createdAt)}{a.detail && a.type === 'task' ? ` ・ ${a.detail}` : ''}</p>
+                        {(a.source ?? 'human') === 'system'
+                          ? <span className="text-[9px] font-black bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full">🤖 システム</span>
+                          : <span className="text-[9px] font-black bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">👤 人間</span>
+                        }
+                      </div>
                     </div>
                     {a.reward != null && <span className="text-[11px] font-black text-amber-600 shrink-0">+{a.reward}徳</span>}
                   </div>

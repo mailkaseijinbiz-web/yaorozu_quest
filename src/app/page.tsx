@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, MessageSquare, Heart, Share2, X } from 'lucide-react';
-import { db, Spot, Agent, User as UserType, UserContribution } from '../lib/db';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, Clock, Share2, X, Stamp } from 'lucide-react';
+import { db, Spot, Agent, User as UserType, UserContribution, Activity } from '../lib/db';
+import { getGoShuinList, Goshuin } from '../lib/goshuin';
 import { pullSnapshot } from '../lib/cloud-sync';
 import { distanceKm } from '../lib/geo';
 import HomeTab from '../components/HomeTab';
@@ -29,6 +30,7 @@ const FALLBACK_CURRENT_USER: UserType = {
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<TabType>('home');
+  const [isRevoked, setIsRevoked] = useState(false); // 管理者削除によるアカウント失効
   const [spots, setSpots] = useState<Spot[]>([]);
   const [activeSpot, setActiveSpot] = useState<Spot | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -71,9 +73,35 @@ export default function HomePage() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
-  const [mypageTab, setMypageTab] = useState<'posts' | 'badges' | 'quests'>('posts');
+  const [mypageTab, setMypageTab] = useState<'activity' | 'goshuin' | 'badges' | 'quests'>('activity');
+  const [goShuinList, setGoShuinList] = useState<Goshuin[]>([]);
   // 達成クエストの振り返り modal
   const [reviewQuest, setReviewQuest] = useState<Challenge | null>(null);
+
+  // GPS 場の自動生成（最後に生成した座標と時刻を保持 — 近すぎる・頻度高すぎる場合はスキップ）
+  const lastGenRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
+
+  const generateSpotNearby = useCallback(async (lat: number, lng: number) => {
+    const now = Date.now();
+    const prev = lastGenRef.current;
+    // 5 分以内かつ 500 m 以内なら重複生成しない
+    if (prev && now - prev.at < 5 * 60_000 && distanceKm(lat, lng, prev.lat, prev.lng) < 0.5) return;
+    lastGenRef.current = { lat, lng, at: now };
+    try {
+      const res = await fetch('/api/generate-spot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat, lng }),
+      });
+      if (!res.ok) return;
+      const { spot, agent } = await res.json() as { spot: Spot; agent: Agent };
+      db.adminSaveSpot(spot);
+      db.adminSaveAgent(agent);
+      db.trackApiCall('ai_generate');
+      db.logActivity({ type: 'spot_generate', userId: 'system', source: 'system', spotId: spot.id, detail: spot.name });
+      refreshDatabaseStates();
+    } catch { /* ネットワークエラーは無視 */ }
+  }, []);
 
   // Initial load
   useEffect(() => {
@@ -86,6 +114,11 @@ export default function HomePage() {
     const initialSpot = db.getSpots()[0];
     setActiveSpot(initialSpot);
 
+    // 管理者に削除されたユーザーは再ログイン画面へ
+    if (db.isRevoked('user-self')) {
+      setIsRevoked(true);
+      return;
+    }
     const self = db.getUser('user-self');
     if (self) {
       setCurrentUser(self);
@@ -99,6 +132,7 @@ export default function HomePage() {
       if (claimed) setClaimedQuests(JSON.parse(claimed));
       setHasChatted(localStorage.getItem('yaorozu_quest_chatted') === 'true');
       setHasTakenPhoto(localStorage.getItem('yaorozu_quest_photo') === 'true');
+      setGoShuinList(getGoShuinList('user-self'));
     }
   }, []);
 
@@ -232,6 +266,30 @@ export default function HomePage() {
     { key: 'mypage' as TabType, label: 'マイページ', icon: UserCircle2 },
   ];
 
+  // アカウント削除 → 再ログイン画面
+  if (isRevoked) {
+    return (
+      <div className="flex-1 min-h-dvh bg-[#eaecef] flex items-center justify-center p-6">
+        <div className="bg-white rounded-3xl shadow-xl p-8 max-w-xs w-full text-center">
+          <div className="text-5xl mb-4">⛩️</div>
+          <h1 className="text-lg font-black text-gray-900 mb-2">アカウントが削除されました</h1>
+          <p className="text-sm text-gray-500 mb-6 leading-relaxed">管理者によってアカウントが削除されました。<br />再度ご利用には再登録が必要です。</p>
+          <button
+            onClick={() => {
+              db.reinstateUser('user-self');
+              // ユーザーデータをクリアして再スタート
+              ['yaorozu_users','yaorozu_user_stats','yaorozu_challenge_progress','yaorozu_challenge_photos','yaorozu_goshuin_user-self'].forEach(k => localStorage.removeItem(k));
+              window.location.reload();
+            }}
+            className="w-full bg-shrine-red text-white font-black py-3 rounded-xl hover:opacity-90 cursor-pointer"
+          >
+            新たな巡礼者として始める
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 min-h-dvh bg-[#eaecef] flex items-center justify-center font-sans overflow-hidden p-0 sm:p-4 md:p-8 relative">
       {/* Background glows */}
@@ -301,6 +359,10 @@ export default function HomePage() {
                   onStartChallenge={(cid) => { db.setActiveChallenge(cid); setActiveChallengeId(cid); }}
                   activeChallenge={activeChallengeId ? db.getQuest(activeChallengeId) ?? null : null}
                   onClearChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
+                  onMapMove={(center) => {
+                    if (currentUser) db.logActivity({ type: 'map_move', userId: currentUser.id, source: 'human' });
+                    generateSpotNearby(center.lat, center.lng);
+                  }}
                   onAdvanceChallenge={(stepId, photo) => {
                     if (!activeChallengeId || !currentUser) return;
                     const ch = db.getQuest(activeChallengeId);
@@ -387,21 +449,9 @@ export default function HomePage() {
                           )}
                           <p className="text-[13px] font-bold text-gray-500 mt-0.5">{lvInfo.current.title}</p>
 
-                          {/* XPシールド＋徳バー */}
-                          <div className="w-full mt-5 flex items-center gap-3">
-                            {/* XPシールドバッジ */}
-                            <div className="relative flex-shrink-0 w-14 h-16">
-                              <div className="absolute inset-0 drop-shadow-sm" style={{ clipPath: XP_SHIELD, background: 'linear-gradient(150deg, #fcd34d, #f59e0b)' }} />
-                              <div className="absolute inset-[2px]" style={{ clipPath: XP_SHIELD, background: 'linear-gradient(150deg, #fde68a, #f59e0b)' }} />
-                              <div className="absolute inset-0 flex flex-col items-center justify-center text-white leading-none pb-2">
-                                <span className="text-[15px] font-black tracking-wider" style={{ textShadow: '0 1px 1px rgba(0,0,0,0.2)' }}>XP</span>
-                                <span className="text-[7px] font-black opacity-90 mt-0.5">LEVEL</span>
-                                <span className="text-lg font-black leading-none" style={{ textShadow: '0 1px 1px rgba(0,0,0,0.2)' }}>{lvInfo.current.level}</span>
-                              </div>
-                            </div>
-
-                            {/* 徳プログレスバー */}
-                            <div className="flex-1 min-w-0 text-left">
+                          {/* 徳バー */}
+                          <div className="w-full mt-5">
+                            <div className="text-left">
                               <div className="flex items-baseline gap-1">
                                 <span className="text-2xl font-black text-gray-900 tabular-nums leading-none">{currentUser.totalToku}</span>
                                 <span className="text-sm font-black text-gold">徳</span>
@@ -445,11 +495,12 @@ export default function HomePage() {
                 {/* タブ */}
                 <div className="flex border-b border-black/5 bg-white sticky top-0 z-10">
                   {([
-                    { key: 'posts', label: '投稿', icon: MessageSquare },
-                    { key: 'quests', label: '達成クエスト', icon: Flag },
-                    { key: 'badges', label: 'バッジ', icon: Trophy },
+                    { key: 'activity', label: 'アクティビティ', icon: Clock },
+                    { key: 'goshuin',  label: '御朱印',         icon: Stamp },
+                    { key: 'quests',   label: '達成クエスト',   icon: Flag },
+                    { key: 'badges',   label: 'バッジ',         icon: Trophy },
                   ] as const).map(({ key, label, icon: Icon }) => (
-                    <button key={key} onClick={() => setMypageTab(key)} className={`flex-1 py-3 flex items-center justify-center gap-1.5 text-xs font-black transition-all cursor-pointer border-b-2 ${mypageTab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
+                    <button key={key} onClick={() => setMypageTab(key)} className={`flex-1 py-2.5 flex flex-col items-center justify-center gap-0.5 text-[10px] font-black transition-all cursor-pointer border-b-2 ${mypageTab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
                       <Icon className="w-3.5 h-3.5" />{label}
                     </button>
                   ))}
@@ -457,31 +508,100 @@ export default function HomePage() {
 
                 {/* タブ内容 */}
                 <div className="p-4">
-                  {/* 投稿コンテンツ（自分の口コミ・できごと等） */}
-                  {mypageTab === 'posts' && (() => {
-                    const myPosts = db.getUgc().filter((u) => u.userId === currentUser.id).sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
-                    const spotName = (id: string) => db.getSpot(id)?.name || 'スポット';
-                    return myPosts.length === 0 ? (
+                  {/* アクティビティ（訪問・クエスト参加・依頼達成などの履歴） */}
+                  {mypageTab === 'activity' && (() => {
+                    const activities = db.getActivities()
+                      .filter((a) => a.userId === currentUser.id)
+                      .slice(0, 60);
+
+                    const TASK_LABEL: Record<string, string> = {
+                      context: 'コンテキスト収集', photo: '写真奉納', evaluate: '写真評価',
+                      event: 'できごと報告', review: 'クチコミ', sns: 'SNS共有',
+                      buy: '買い物体験', eat: '食事体験', cleaning: '清掃奉仕',
+                      visit: '来訪', resolveIssue: '課題解決', judge: '評価',
+                    };
+                    const ACT_CFG: Record<Activity['type'], { icon: string; bg: string; text: string; label: (a: Activity) => string }> = {
+                      visit:          { icon: '📍', bg: 'bg-blue-50',   text: 'text-blue-700',   label: (a) => `${db.getSpot(a.spotId ?? '')?.name ?? a.spotId ?? '場所'} を訪問` },
+                      quest_join:     { icon: '🏴', bg: 'bg-indigo-50', text: 'text-indigo-700', label: (a) => `「${db.getQuest(a.challengeId ?? '')?.title ?? 'クエスト'}」に参加` },
+                      quest_step:     { icon: '✅', bg: 'bg-emerald-50',text: 'text-emerald-700',label: (a) => `クエストのミッションを達成` },
+                      quest_complete: { icon: '🏆', bg: 'bg-amber-50',  text: 'text-amber-700',  label: (a) => `「${db.getQuest(a.challengeId ?? '')?.title ?? 'クエスト'}」を制覇！` },
+                      task:           { icon: '⭐', bg: 'bg-violet-50', text: 'text-violet-700', label: (a) => `${db.getSpot(a.spotId ?? '')?.name ?? '場所'} で${TASK_LABEL[a.detail ?? ''] ?? '依頼'}を達成` },
+                      photo:          { icon: '📸', bg: 'bg-rose-50',   text: 'text-rose-700',   label: (a) => `${db.getSpot(a.spotId ?? '')?.name ?? '場所'} に写真を奉納` },
+                      ugc:            { icon: '💬', bg: 'bg-sky-50',    text: 'text-sky-700',    label: (a) => `${db.getSpot(a.spotId ?? '')?.name ?? '場所'} に口コミを投稿` },
+                      home_view:      { icon: '🏠', bg: 'bg-slate-50',  text: 'text-slate-700',  label: () => 'ホームタブを表示' },
+                      map_move:       { icon: '🗺️', bg: 'bg-teal-50',   text: 'text-teal-700',   label: () => '地図を移動' },
+                      spot_generate:  { icon: '✨', bg: 'bg-purple-50', text: 'text-purple-700', label: (a) => `場を生成：${a.detail ?? '新しい場所'}` },
+                    };
+
+                    if (activities.length === 0) return (
                       <div className="text-center py-12">
-                        <MessageSquare className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                        <p className="text-xs text-gray-400">まだ投稿がありません。<br />スポットで神の依頼に応えて投稿しよう。</p>
+                        <Clock className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                        <p className="text-xs text-gray-400">まだアクティビティがありません。<br />スポットを訪問してクエストに挑もう。</p>
                       </div>
-                    ) : (
-                      <div className="space-y-2.5">
-                        {myPosts.map((post) => (
-                          <div key={post.id} className="bg-white rounded-2xl p-3.5 border border-black/5 shadow-sm">
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span className="text-[13px] font-black text-shrine-red bg-shrine-red/10 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                <MapPin className="w-2.5 h-2.5" />{spotName(post.spotId)}
-                              </span>
-                              <span className="text-[11px] text-gray-400 flex items-center gap-1">
-                                <Heart className="w-2.5 h-2.5 fill-shrine-red text-shrine-red" />{post.likesCount}
-                              </span>
+                    );
+
+                    return (
+                      <div className="space-y-2">
+                        {activities.map((a) => {
+                          const cfg = ACT_CFG[a.type] ?? ACT_CFG.task;
+                          return (
+                            <div key={a.id} className="flex items-start gap-3 bg-white rounded-2xl p-3 border border-black/5 shadow-sm">
+                              <div className={`w-9 h-9 rounded-full flex items-center justify-center text-lg flex-shrink-0 ${cfg.bg}`}>
+                                {cfg.icon}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-xs font-bold leading-snug ${cfg.text}`}>{cfg.label(a)}</p>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <p className="text-[11px] text-gray-400">{new Date(a.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                                  {a.reward != null && a.reward > 0 && (
+                                    <span className="text-[11px] font-black text-amber-600">+{a.reward}徳</span>
+                                  )}
+                                </div>
+                              </div>
                             </div>
-                            <p className="text-xs text-gray-700 leading-relaxed">{post.content}</p>
-                            <p className="text-[11px] text-gray-400 mt-1.5">{new Date(post.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
-                          </div>
-                        ))}
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+
+                  {/* 御朱印帳 */}
+                  {mypageTab === 'goshuin' && (() => {
+                    if (goShuinList.length === 0) {
+                      return (
+                        <div className="text-center py-14">
+                          <div className="text-5xl mb-3">📖</div>
+                          <p className="text-sm font-black text-gray-500">御朱印帳が空です</p>
+                          <p className="text-xs text-gray-400 mt-1">神と対話すると御朱印を授かります</p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div>
+                        <p className="text-[11px] text-gray-400 mb-3 text-right">{goShuinList.length} 社寺</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          {[...goShuinList].reverse().map((g) => {
+                            const d = new Date(g.receivedAt);
+                            const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
+                            const timeStr = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                            return (
+                              <div key={g.id} className="bg-white rounded-2xl border border-red-100 shadow-sm overflow-hidden flex flex-col items-center py-4 px-2 gap-1.5">
+                                {/* 朱印円 */}
+                                <div className="relative w-20 h-20 flex-shrink-0">
+                                  <div className="absolute inset-0 rounded-full border-4 border-red-600/80" />
+                                  <div className="absolute inset-1.5 rounded-full border-2 border-red-600/40" />
+                                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5">
+                                    <span className="text-2xl leading-none">{g.godEmoji}</span>
+                                    <span className="text-[8px] font-black text-red-700 text-center leading-tight px-1" style={{ maxWidth: 64 }}>{g.godName}</span>
+                                  </div>
+                                </div>
+                                {/* スポット名 */}
+                                <p className="text-[11px] font-black text-gray-800 text-center leading-tight line-clamp-2">{g.spotName}</p>
+                                <p className="text-[9px] text-gray-400">{dateStr} {timeStr}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     );
                   })()}
@@ -573,7 +693,11 @@ export default function HomePage() {
               <button
                 key={key}
                 onClick={() => {
-                  if (key === 'home') setHomeResetSignal(s => s + 1);
+                  if (key === 'home') {
+                    setHomeResetSignal(s => s + 1);
+                    if (currentUser) db.logActivity({ type: 'home_view', userId: currentUser.id, source: 'human' });
+                    generateSpotNearby(userLocation.lat, userLocation.lng);
+                  }
                   setActiveTab(key);
                 }}
                 className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-xl transition-all cursor-pointer relative ${
@@ -611,6 +735,9 @@ export default function HomePage() {
                 setHasChatted(true);
                 localStorage.setItem('yaorozu_quest_chatted', 'true');
               }
+            }}
+            onGoShuinGranted={() => {
+              if (currentUser) setGoShuinList(getGoShuinList(currentUser.id));
             }}
           />
         )}

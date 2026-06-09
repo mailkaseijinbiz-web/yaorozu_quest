@@ -129,6 +129,9 @@ const INITIAL_USERS: User[] = [
 ];
 
 const INITIAL_SPOTS: Spot[] = [
+  // リセット済み — 管理画面から追加してください
+];
+const _UNUSED_SPOTS_ARCHIVE: Spot[] = [
   {
     id: 'spot-jukusen',
     name: '成願寺',
@@ -328,10 +331,14 @@ const INITIAL_SPOTS: Spot[] = [
   },
   // 東京周辺の手続き生成スポット（合計で約1000件になる）
   ...generateTokyoSpots(),
-];
+]; // _UNUSED_SPOTS_ARCHIVE end
 
 
 const INITIAL_AGENTS: Agent[] = [
+  // リセット済み — 管理画面から追加してください
+  // 旧データは yaorozu_agents キーに残存（無効）
+];
+const _UNUSED_AGENTS_ARCHIVE: Agent[] = [
   {
     id: 'agent-sensoji',
     spotId: 'spot-sensoji',
@@ -387,7 +394,7 @@ const INITIAL_AGENTS: Agent[] = [
     accessoryType: '剣',
     voiceTone: '厳格'
   }
-];
+]; // _UNUSED_AGENTS_ARCHIVE end
 
 const INITIAL_UGC: UgcPost[] = [
   {
@@ -512,14 +519,14 @@ const INITIAL_TRIVIA: TriviaEntry[] = [
 // Local Storage Keys
 const KEYS = {
   USERS: 'yaorozu_users',
-  SPOTS: 'yaorozu_spots_v2', // v2: 東京1000スポットへ拡張のため再シード
-  AGENTS: 'yaorozu_agents',
+  SPOTS: 'yaorozu_spots_v3', // v3: リセット（空からスタート）
+  AGENTS: 'yaorozu_agents_v2', // v2: リセット（空からスタート）
   UGC: 'yaorozu_ugc',
   AFFILIATE: 'yaorozu_affiliate',
   STATS: 'yaorozu_user_stats',
   CHALLENGE: 'yaorozu_challenge_progress',
   CHALLENGE_PHOTOS: 'yaorozu_challenge_photos',
-  QUESTS: 'yaorozu_generated_quests', // 場ごとに生成したクエスト（プレイヤーが読む実ストア）
+  QUESTS: 'yaorozu_quests_v2', // v2: リセット（空からスタート）
   QUEST_RULES: 'yaorozu_quest_rules', // クエスト生成のルール（方針）
   SPOT_RULES: 'yaorozu_spot_rules', // 場の生成のルール（方針）
   SYSTEM_ROLE: 'yaorozu_system_role', // Godの役割（システムの目的）
@@ -528,6 +535,8 @@ const KEYS = {
   TRIVIA: 'yaorozu_trivia',
   ACTIVITIES: 'yaorozu_activities',
   DAINICHI: 'yaorozu_dainichi_identity',
+  API_CALLS: 'yaorozu_api_calls',     // AI / TTS API呼び出しログ（日別集計）
+  REVOKED: 'yaorozu_revoked_users',   // 削除済みユーザーID（再ログイン強制用）
 };
 
 /** クエスト生成ルール（生成方針）の既定値。クエストタブで編集できる。 */
@@ -573,9 +582,9 @@ export const DEFAULT_SPOT_RULES = `# 場の生成ルール（生成方針）
 - 課題が解けると 課題−1・価値+1（活気+2）を生む素材になる。解決の証がそのまま価値の一行になるよう、解いた後に残る成果を想像して書く。
 - 自己申告だけで課題[]を消さない。理解判断タスク（評価・ジャッジ）の承認を解決判定に噛ませる前提で、検証可能な課題を立てる。
 
-## 神の魂・大日如来との整合
+## 神の魂・アマテラスとの整合
 - 価値・課題の語り口は、その地の神の魂（soulMd）の口調・人格・世界観とねじれないようにする。
-- 各神が持つ「増幅すべき価値の軸」「優先して解くべき課題の型」へ重心を寄せる。大日如来の三つの働き（価値の増幅・課題の解決・試練の付与）に沿わせる。
+- 各神が持つ「増幅すべき価値の軸」「優先して解くべき課題の型」へ重心を寄せる。アマテラスの三つの働き（価値の増幅・課題の解決・試練の付与）に沿わせる。
 - 検証済みでない生成場では断定を避け、巡礼者の発信で確かめられる余地を残す。
 
 ## 観測と更新
@@ -603,8 +612,8 @@ export const DEFAULT_SYSTEM_ROLE = `# Godの役割
 - 煩悩を実データへ接続する。常に0のままでは覚り＝徳の単調増加に堕する。放置・未制覇・低品質投稿など人間側の停滞を、徳とは別の独立カウンタとして指標に持たせ、覚り = 徳 − 煩悩 として幸福式で明示的に差し引く。
 - 徳の付与は価値+1に対し桁違いに大きく、活気成分を覆い隠す。徳と煩悩の規模を釣り合わせるため、煩悩は累積数でなく率や時間減衰で持ち、徳の二重加算は避ける。課題解決が「活気↑かつ煩悩↓」の二重の善行になるよう設計する。
 
-### ③ 八百万神とクエストの生成設計（場 / 神=大日如来 / クエストの3層ルール）
-- 生成に直接効くのはクエスト生成ルールと各神の魂（soulMd）の2層のみ。場の生成ルールと大日如来の役割は保存されるだけなので、その意図をクエストルールと魂へ集約転記し、実注入の経路に乗せる。
+### ③ 八百万神とクエストの生成設計（場 / 神=アマテラス / クエストの3層ルール）
+- 生成に直接効くのはクエスト生成ルールと各神の魂（soulMd）の2層のみ。場の生成ルールとアマテラスの役割は保存されるだけなので、その意図をクエストルールと魂へ集約転記し、実注入の経路に乗せる。
 - クエストは情報収集・理解判断・操作の3機能を最低1つずつ含め、課題があれば必ず課題解決タスクを入れる。生成器はこの最低構成を検証しないため、ルール文で冗長に強制する。
 - 各神の魂に「この場で増幅すべき価値の軸」「優先して解くべき課題の型」「迷い（煩悩）を課題解決で徳へ転じよ」という物語を書き込み、生成タスクを還流前提の依頼へ寄せる。
 - 字数予算（ルール約2500字・魂約1200字）に収まるよう要点を抽出し、口調素材や課題列挙と競合させない。
@@ -629,7 +638,13 @@ export interface MetricsSnapshot {
   users: number;     // ユーザー
   activities: number;// アクティビティ
   toku: number;      // 徳の総和
+  aiCalls: number;   // AI API 累計リクエスト数
+  ttsCalls: number;  // TTS API 累計リクエスト数
 }
+
+// API 呼び出しログ: { [YYYY-MM-DD]: { ai_chat: n, ai_generate: n, tts: n } }
+export type ApiCallType = 'ai_chat' | 'ai_generate' | 'tts';
+export type ApiCallsByDay = Record<string, Partial<Record<ApiCallType, number>>>;
 
 // チャレンジ進捗
 export interface ChallengeProgress {
@@ -639,11 +654,13 @@ export interface ChallengeProgress {
 }
 
 // アクティビティ（クエスト参加・場所訪問・依頼達成などの行動記録）
-export type ActivityType = 'quest_join' | 'quest_step' | 'quest_complete' | 'visit' | 'task' | 'photo' | 'ugc';
+export type ActivityType = 'quest_join' | 'quest_step' | 'quest_complete' | 'visit' | 'task' | 'photo' | 'ugc' | 'home_view' | 'map_move' | 'spot_generate';
+export type ActivitySource = 'human' | 'system';
 export interface Activity {
   id: string;
   type: ActivityType;
   userId: string;
+  source?: ActivitySource; // 'human'=ユーザー操作, 'system'=自動生成（未設定は human 扱い）
   spotId?: string;       // 場所がある行動（訪問・依頼・写真）
   challengeId?: string;  // クエストがある行動（参加・達成・制覇）
   detail?: string;       // 補足（タスク種別など）
@@ -791,6 +808,12 @@ class MockDatabase {
   getCurrentMetrics(): Omit<MetricsSnapshot, 'ts'> {
     const spots = this.getSpots();
     const users = this.getUsers();
+    const apiByDay = this.getApiCallsByDay();
+    let aiCalls = 0, ttsCalls = 0;
+    for (const day of Object.values(apiByDay)) {
+      aiCalls += (day.ai_chat ?? 0) + (day.ai_generate ?? 0);
+      ttsCalls += day.tts ?? 0;
+    }
     return {
       spots: spots.length,
       quests: this.getAllQuests().length,
@@ -799,7 +822,46 @@ class MockDatabase {
       users: users.length,
       activities: this.getActivities().length,
       toku: users.reduce((n, u) => n + (u.totalToku ?? 0), 0),
+      aiCalls,
+      ttsCalls,
     };
+  }
+
+  // API 呼び出しログ
+  getApiCallsByDay(): ApiCallsByDay {
+    return this.load<ApiCallsByDay>(KEYS.API_CALLS, {});
+  }
+
+  trackApiCall(type: ApiCallType): void {
+    const date = new Date().toISOString().slice(0, 10);
+    const log = this.getApiCallsByDay();
+    const day = log[date] ?? {};
+    day[type] = (day[type] ?? 0) + 1;
+    log[date] = day;
+    // 60日より古いエントリを削除
+    const cutoff = new Date(Date.now() - 60 * 86400_000).toISOString().slice(0, 10);
+    for (const k of Object.keys(log)) { if (k < cutoff) delete log[k]; }
+    this.save(KEYS.API_CALLS, log);
+  }
+
+  // ユーザー失効（管理者削除 → 再ログイン強制）
+  getRevokedUsers(): string[] {
+    return this.load<string[]>(KEYS.REVOKED, []);
+  }
+
+  isRevoked(userId: string): boolean {
+    return this.getRevokedUsers().includes(userId);
+  }
+
+  revokeUser(userId: string): void {
+    const list = this.getRevokedUsers();
+    if (!list.includes(userId)) {
+      this.save(KEYS.REVOKED, [...list, userId]);
+    }
+  }
+
+  reinstateUser(userId: string): void {
+    this.save(KEYS.REVOKED, this.getRevokedUsers().filter(id => id !== userId));
   }
 
   getMetricsSnapshots(): MetricsSnapshot[] {
@@ -979,6 +1041,7 @@ class MockDatabase {
 
   adminDeleteUser(id: string): void {
     this.save(KEYS.USERS, this.getUsers().filter(u => u.id !== id));
+    this.revokeUser(id); // 次回ログイン時に再登録を強制
   }
 
   adminDeleteUgc(id: string): void {
@@ -1210,7 +1273,7 @@ class MockDatabase {
     return this.load<Activity[]>(KEYS.ACTIVITIES, []);
   }
 
-  // ── 大日如来（八百万神の基底クラス）の共通Identity.md ──
+  // ── アマテラス（八百万神の基底クラス）の共通Identity.md ──
   getDainichiIdentity(): string | undefined {
     const v = this.load<string | null>(KEYS.DAINICHI, null);
     return v ?? undefined;
@@ -1291,7 +1354,7 @@ class MockDatabase {
       })
       .filter((r) => r.toku > 0)
       .sort((a, b) => b.toku - a.toku)
-      .slice(0, 5);
+      .slice(0, 10);
   }
 
   /** スポットに集まった徳の総量（地図のフキダシ「徳 123」用）。

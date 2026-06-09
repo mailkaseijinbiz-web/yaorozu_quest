@@ -40,7 +40,7 @@ export function Pager({ page, total, onPage }: { page: number; total: number; on
 }
 
 export function Toolbar({ onAdd, search, setSearch, addLabel }: {
-  onAdd: () => void; search: string; setSearch: (v: string) => void; addLabel: string;
+  onAdd?: () => void; search: string; setSearch: (v: string) => void; addLabel?: string;
 }) {
   return (
     <div className="flex items-center justify-between gap-3 mb-4">
@@ -53,12 +53,14 @@ export function Toolbar({ onAdd, search, setSearch, addLabel }: {
           placeholder="検索…"
         />
       </div>
-      <button
-        onClick={onAdd}
-        className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black px-3 py-2 rounded-lg transition-all cursor-pointer shrink-0"
-      >
-        <Plus className="w-4 h-4" /> {addLabel}
-      </button>
+      {onAdd && (
+        <button
+          onClick={onAdd}
+          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black px-3 py-2 rounded-lg transition-all cursor-pointer shrink-0"
+        >
+          <Plus className="w-4 h-4" /> {addLabel}
+        </button>
+      )}
     </div>
   );
 }

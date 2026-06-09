@@ -1,11 +1,62 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag } from 'lucide-react';
+import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark } from 'lucide-react';
 import { Spot, Agent, User, db, isVerifiedSpot } from '../lib/db';
 import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
 import { uploadImage } from '../lib/upload';
+import { grantGoShuin } from '../lib/goshuin';
+
+// ── TTS（神の声）──────────────────────────────────────────
+const _ttsCache = new Map<string, string>();
+async function _fetchTtsUrl(text: string): Promise<string | null> {
+  if (!text) return null;
+  const cached = _ttsCache.get(text);
+  if (cached) return cached;
+  try {
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('audio')) {
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      _ttsCache.set(text, url);
+      db.trackApiCall('tts');
+      return url;
+    }
+  } catch { /* fallback */ }
+  return null;
+}
+function _pickJaVoice(): SpeechSynthesisVoice | null {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return null;
+  const voices = window.speechSynthesis.getVoices().filter((v) => /^ja/i.test(v.lang));
+  if (!voices.length) return null;
+  return (
+    voices.find((v) => /(enhanced|premium|neural|siri)/i.test(v.name)) ||
+    voices.find((v) => /google/i.test(v.name)) ||
+    voices.find((v) => /(kyoko|o-?ren|otoya|hattori|ichiro|nanami)/i.test(v.name)) ||
+    voices[0]
+  );
+}
+function _speakJa(text: string) {
+  try {
+    const synth = window.speechSynthesis;
+    if (!synth || !text) return;
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'ja-JP';
+    const v = _pickJaVoice();
+    if (v) u.voice = v;
+    u.rate = 1.05;
+    u.pitch = 1.45;
+    synth.speak(u);
+  } catch { /* TTS非対応環境は無視 */ }
+}
+// ────────────────────────────────────────────────────────────
 
 interface Message {
   id: string;
@@ -24,6 +75,7 @@ interface SpotDetailProps {
   onChanged?: () => void; // 写真/楽しみ方/徳が変化した時に親へ通知
   onMessageSent?: () => void;
   onStartChallenge?: (challengeId: string) => void; // クエストタブから挑戦開始
+  onGoShuinGranted?: () => void; // 御朱印を授かったとき親へ通知
 }
 
 // タスク達成時に「楽しみ方」へ追加されるテキスト（神がUGCで成長する）
@@ -64,8 +116,9 @@ export default function SpotDetail({
   onChanged,
   onMessageSent,
   onStartChallenge,
+  onGoShuinGranted,
 }: SpotDetailProps) {
-  const [tab, setTab] = useState<'chat' | 'requests' | 'photos'>('chat');
+  const [tab, setTab] = useState<'chat' | 'requests' | 'photos' | 'leaderboard'>('chat');
   const [agent] = useState<Agent>(() => resolveAgent(spot));
 
   // UGCで変化する状態（写真・楽しみ方）は db から都度読む
@@ -87,6 +140,25 @@ export default function SpotDetail({
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
+  const greetSpokenRef = useRef<string | null>(null); // 読み上げ済みスポットID（二重再生防止）
+  const stopAudio = () => {
+    try { ttsAudioRef.current?.pause(); ttsAudioRef.current = null; } catch {}
+    try { window.speechSynthesis?.cancel(); } catch {}
+  };
+  const speak = async (text: string) => {
+    stopAudio();
+    const url = await _fetchTtsUrl(text);
+    // 取得中に他の speak が走っていたら鳴らさない
+    if (ttsAudioRef.current !== null) return;
+    if (url) {
+      const audio = new Audio(url);
+      ttsAudioRef.current = audio;
+      audio.play().catch(() => _speakJa(text));
+    } else {
+      _speakJa(text);
+    }
+  };
 
   const ugc = useMemo(() => db.getUgcBySpot(spot.id), [spot.id, ugcTick]);
   const affiliates = db.getAffiliatesBySpot(spot.name);
@@ -181,7 +253,7 @@ export default function SpotDetail({
       if (task.type === 'visit') db.recordVisit(currentUser.id, spot.id);
       db.completeGodTask(currentUser.id, spot.id, task.reward);
       db.recordTaskDone(currentUser.id, task.type, spot.id, task.reward);
-      flashToast(`${task.icon} 依頼を達成！ +${task.reward}徳`);
+      flashToast(`${task.icon} クエストを達成！ +${task.reward}徳`);
       onChanged?.();
     }
     setDoneTasks((prev) => ({ ...prev, [task.id]: true }));
@@ -241,7 +313,14 @@ export default function SpotDetail({
       setMessages([
         { id: `greet-${Date.now()}`, sender: 'agent', text: greet, createdAt: new Date().toISOString() },
       ]);
+      // スポットごとに1度だけ読み上げる（StrictMode の二重呼び出し防止）
+      if (greetSpokenRef.current !== spot.id) {
+        greetSpokenRef.current = spot.id;
+        speak(greet);
+      }
     }
+    return () => { stopAudio(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, messages.length, agent.name, spot.name, currentUser.displayName, nearbyChallenge]);
 
   useEffect(() => {
@@ -250,6 +329,19 @@ export default function SpotDetail({
 
   const handleSend = async (textToSend: string) => {
     if (!textToSend.trim() || isLoading) return;
+    // 初回メッセージ送信 → 御朱印を授ける
+    const isFirstMessage = messages.filter((m) => m.sender === 'user').length === 0;
+    if (isFirstMessage) {
+      const stamp = grantGoShuin(
+        currentUser.id,
+        { id: spot.id, name: spot.name, category: spot.category, godEmoji: spot.godEmoji },
+        agent.name
+      );
+      if (stamp) {
+        flashToast(`🔴 ${spot.name} の御朱印を授かった！`);
+        onGoShuinGranted?.();
+      }
+    }
     const userMessage: Message = { id: `u-${Date.now()}`, sender: 'user', text: textToSend, createdAt: new Date().toISOString() };
     setMessages((prev) => [...prev, userMessage]);
     setInputText('');
@@ -272,6 +364,7 @@ export default function SpotDetail({
       });
       if (!res.ok) throw new Error('failed');
       const data = await res.json();
+      db.trackApiCall('ai_chat');
       setMessages((prev) => [...prev, { id: `a-${Date.now()}`, sender: 'agent', text: data.response, createdAt: new Date().toISOString(), mode: data.mode }]);
     } catch {
       setMessages((prev) => [...prev, { id: `err-${Date.now()}`, sender: 'agent', text: '神聖なる通信に乱れが生じた。しばし時をおいて、再び問いかけてくれ。', createdAt: new Date().toISOString() }]);
@@ -335,18 +428,64 @@ export default function SpotDetail({
       {/* ── タブ切替 ── */}
       <div className="flex border-b border-black/5 bg-white flex-shrink-0">
         {([
-          { key: 'chat', label: '会話', icon: MessageCircle },
-          { key: 'requests', label: '依頼', icon: Flag },
-          { key: 'photos', label: '写真', icon: Camera },
+          { key: 'chat',        label: '会話',   icon: MessageCircle },
+          { key: 'requests',    label: 'クエスト', icon: Flag },
+          { key: 'photos',      label: '写真',   icon: Camera },
+          { key: 'leaderboard', label: '石碑',   icon: Landmark },
         ] as const).map(({ key, label, icon: Icon }) => (
-          <button key={key} onClick={() => setTab(key)} className={`flex-1 py-3 flex flex-row items-center justify-center gap-1.5 text-[13px] font-black transition-all cursor-pointer border-b-2 ${tab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
-            <Icon className="w-4 h-4" />
-            <span>{label}</span>
+          <button key={key} onClick={() => setTab(key)} className={`flex-1 py-3 flex flex-row items-center justify-center gap-1.5 text-[12px] font-black transition-all cursor-pointer border-b-2 ${tab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
+            <Icon className="w-3.5 h-3.5" />{label}
           </button>
         ))}
       </div>
 
-      {tab === 'photos' ? (
+      {tab === 'leaderboard' ? (
+        /* ── 石碑（参拝者ランキング） ── */
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+            <div className="px-4 pt-4 pb-2 flex items-center gap-2 border-b border-black/5">
+              <Landmark className="w-4 h-4 text-stone-500" />
+              <h3 className="text-sm font-black text-gray-800">石碑</h3>
+              <span className="text-[11px] text-gray-400 ml-auto">この地に捧げた徳</span>
+            </div>
+            {(() => {
+              const ranking = db.getSpotRanking(spot.id);
+              if (ranking.length === 0) {
+                return (
+                  <div className="text-center py-10">
+                    <div className="text-4xl mb-2">🪨</div>
+                    <p className="text-sm text-gray-400">まだ参拝者がいません</p>
+                    <p className="text-xs text-gray-300 mt-1">この地で徳を積んで刻まれよう</p>
+                  </div>
+                );
+              }
+              const RANK_MEDAL = ['🥇','🥈','🥉'];
+              return (
+                <ul>
+                  {ranking.map(({ user, toku }, i) => {
+                    const isSelf = user.id === currentUser.id;
+                    return (
+                      <li key={user.id} className={`flex items-center gap-3 px-4 py-3 border-b border-black/4 last:border-0 ${isSelf ? 'bg-amber-50/60' : ''}`}>
+                        <span className="w-6 text-center text-base flex-shrink-0">
+                          {i < 3 ? RANK_MEDAL[i] : <span className="text-[12px] font-black text-gray-400">{i + 1}</span>}
+                        </span>
+                        <img src={user.avatarUrl} alt={user.displayName} className="w-8 h-8 rounded-full border-2 flex-shrink-0 object-cover" style={{ borderColor: user.avatarFrameColor || '#e5e7eb' }} />
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-[13px] font-black truncate ${isSelf ? 'text-amber-700' : 'text-gray-800'}`}>
+                            {user.displayName}{isSelf && <span className="ml-1 text-[10px] text-amber-500">（あなた）</span>}
+                          </p>
+                          <p className="text-[10px] text-gray-400">{user.currentTitle || '巡礼者'}</p>
+                        </div>
+                        <span className="text-sm font-black text-amber-600 flex-shrink-0">{toku.toLocaleString()} 徳</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              );
+            })()}
+          </div>
+        </div>
+      ) : tab === 'photos' ? (
         /* ── みんなの写真（タブ） ── */
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-black/5">
@@ -394,9 +533,9 @@ export default function SpotDetail({
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-black/5">
             <h3 className="text-lg font-black text-gray-800 mb-1 flex items-center gap-2">
               <span className="text-2xl">{godEmoji}</span>
-              {agent.name} からの依頼
+              {agent.name} からのクエスト
             </h3>
-            <p className="text-[13px] text-gray-400 mb-3">達成すると徳を授かり、この地の神が育っていく。依頼は神の3つの働き（情報収集・理解判断・操作）で分かれる。</p>
+            <p className="text-[13px] text-gray-400 mb-3">達成すると徳を授かり、この地の神が育っていく。クエストは神の3つの働き（情報収集・理解判断・操作）で分かれる。</p>
             <div className="space-y-4">
               {GOD_FUNCTIONS.map((fn) => {
                 const groupTasks = tasks.filter((t) => t.kind === fn.key);
@@ -482,11 +621,11 @@ export default function SpotDetail({
               <div className="flex flex-wrap gap-1.5">
                 {nearbyChallenge && onStartChallenge && (
                   <button onClick={() => onStartChallenge(nearbyChallenge.id)} className="whitespace-nowrap bg-shrine-red text-white px-3 py-1.5 rounded-full text-[13px] font-black flex items-center gap-1 cursor-pointer active:scale-95 transition-transform">
-                    <Flag className="w-3 h-3" />クエストに挑戦
+                    <Flag className="w-3 h-3" />このクエストに挑戦する
                   </button>
                 )}
-                <button onClick={() => setTab('requests')} className="whitespace-nowrap bg-indigo-600 text-white px-3 py-1.5 rounded-full text-[13px] font-black flex items-center gap-1 cursor-pointer active:scale-95 transition-transform">
-                  ⭐ 依頼を見る
+                <button onClick={() => setTab('requests')} className="whitespace-nowrap bg-white border border-gray-200 text-gray-700 px-3 py-1.5 rounded-full text-[13px] font-black flex items-center gap-1 cursor-pointer active:scale-95 transition-transform">
+                  ⭐ クエストを見る
                 </button>
               </div>
               {/* 質問プリセット */}

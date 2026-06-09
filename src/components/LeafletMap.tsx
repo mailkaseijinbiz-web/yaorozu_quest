@@ -33,6 +33,7 @@ interface LeafletMapProps {
   controlsBottom?: number; // 現在地ボタンの下端からの位置（下部オーバーレイの上端+余白）
   focusGoalToken?: number; // 値が変わると目的地を地図中央へ寄せる
   hideControls?: boolean; // 導入表示中は現在地ボタンを隠し、解除時にふわっと出す
+  onMapMove?: (center: { lat: number; lng: number }) => void; // ユーザーが地図を移動させたとき（スロットル済み）
 }
 
 export default function LeafletMap({
@@ -46,6 +47,7 @@ export default function LeafletMap({
   controlsBottom = 210,
   focusGoalToken,
   hideControls = false,
+  onMapMove,
 }: LeafletMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -57,6 +59,9 @@ export default function LeafletMap({
   // 最新の現在地を参照（再生成を避けつつ、ゴール演出で使う）
   const userLocationRef = useRef(userLocation);
   userLocationRef.current = userLocation;
+  // onMapMove を ref 化してクロージャ内から最新コールバックを呼べるようにする
+  const onMapMoveRef = useRef(onMapMove);
+  onMapMoveRef.current = onMapMove;
 
   // 地図の移動に追従して再描画するためのバージョン
   const [mapVersion, setMapVersion] = useState(0);
@@ -83,6 +88,17 @@ export default function LeafletMap({
     map.on('move', bump);
     map.on('zoomend', bump);
     setMapVersion((v) => v + 1);
+
+    // 地図移動をアクティビティログへ（60秒スロットル）
+    let lastMoveLog = 0;
+    map.on('moveend', () => {
+      const now = Date.now();
+      if (now - lastMoveLog > 60_000) {
+        lastMoveLog = now;
+        const c = map.getCenter();
+        onMapMoveRef.current?.({ lat: c.lat, lng: c.lng });
+      }
+    });
 
     // コンテナの実寸が確定/変化したら投影をやり直す。
     // PWA（standalone）ではセーフエリアやビューポート高がブラウザと異なり、
@@ -232,7 +248,7 @@ export default function LeafletMap({
     const goalHtml = `
       <div style="position:relative;display:flex;flex-direction:column;align-items:center;padding-bottom:4px;">
         <div style="background:#2563eb;color:#fff;font-weight:900;font-size:11px;white-space:nowrap;padding:3px 11px;border-radius:9999px;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);">📸 ここで写真を撮る！</div>
-        <div style="width:10px;height:10px;background:#2563eb;transform:rotate(45deg);margin-top:-4px;border-right:2px solid #fff;border-bottom:2px solid #fff;"></div>
+        <div style="width:10px;height:10px;background:#2563eb;transform:rotate(45deg);margin-top:-6px;border-right:2px solid #fff;border-bottom:2px solid #fff;"></div>
       </div>`;
     goalMarkerRef.current = L.marker([goalLat, goalLng], {
       icon: L.divIcon({ html: goalHtml, className: 'custom-goal-icon', iconSize: [180, 44], iconAnchor: [90, 40] }),
@@ -285,8 +301,6 @@ export default function LeafletMap({
       const iconEmoji = spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏');
       // 最も近い神（と選択中）だけフキダシを表示。クエスト中は青のフキダシを出さない。
       const showBubble = !questMode && (spot.id === nearestId || isActive);
-      // 未検証スポットは淡く表示して信頼性を区別
-      const dim = isVerifiedSpot(spot) ? '' : 'opacity:0.5;';
       // フキダシの中身は「ここの神のつぶやき（心の声）」。スポット毎に変化させ、一定間隔で動的に切り替える
       let voice = '';
       let voiceIdx = 0;
@@ -300,18 +314,18 @@ export default function LeafletMap({
 
       const spotHtml = showBubble
         ? `
-        <div class="relative flex flex-col items-center" style="${dim}">
+        <div class="relative flex flex-col items-center">
           <div class="god-ripple ${isActive ? 'god-ripple-active' : ''}"></div>
-          <div class="relative flex items-start gap-1.5 bg-white ${isActive ? 'border-2' : 'border'} ${borderCls} rounded-2xl px-2.5 py-1.5 shadow-lg" style="max-width:190px;">
+          <div class="relative flex items-start gap-1.5 rounded-2xl px-2.5 py-1.5 shadow-lg ${isActive ? 'border-2' : 'border'} ${borderCls}" style="max-width:190px;background:#ffffff;">
             <span style="font-size:15px;line-height:1.15;flex-shrink:0;">${iconEmoji}</span>
             <span class="spot-voice text-[11px] font-bold leading-snug text-gray-800" data-spotid="${spot.id}" data-vi="${voiceIdx}" style="word-break:break-word;transition:opacity 0.3s ease;">${voice}</span>
           </div>
-          <div class="w-2.5 h-2.5 bg-white rotate-45 -mt-1.5 border-r-2 border-b-2 ${borderCls}"></div>
+          <div class="${isActive ? 'border-r-2 border-b-2' : 'border-r border-b'} ${borderCls} -mt-1.5 rotate-45" style="width:10px;height:10px;background:#ffffff;"></div>
           <span class="map-spot-name ${isActive ? 'map-spot-name-active' : ''}">${spot.name}</span>
         </div>
       `
         : `
-        <div class="relative flex flex-col items-center" style="${dim}">
+        <div class="relative flex flex-col items-center">
           <div class="w-3 h-3 rounded-full bg-[#2563eb]/70 border-2 border-white shadow-sm"></div>
         </div>
       `;

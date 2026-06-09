@@ -24,7 +24,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ fallback: 'web-speech' }, { status: 200 });
     }
 
-    const voiceId = process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM'; // Rachel（既定）
+    // Elli（明るく表情豊か・アニメ声向き）を既定に。ELEVENLABS_VOICE_ID で上書き可。
+    const voiceId = process.env.ELEVENLABS_VOICE_ID || 'MF3mGyEYCl7XYWbV9V6O';
     const modelId = process.env.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2'; // 日本語対応
 
     const r = await fetch(
@@ -37,10 +38,10 @@ export async function POST(request: Request) {
           Accept: 'audio/mpeg',
         },
         body: JSON.stringify({
-          text: text.slice(0, 800), // 長文の暴発防止
+          text: text.slice(0, 800),
           model_id: modelId,
-          // 落ち着いた語り部らしい設定
-          voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.2, use_speaker_boost: true },
+          // 愛嬌のあるアニメ声：stability低め＝抑揚豊か、style高め＝表情感
+          voice_settings: { stability: 0.2, similarity_boost: 0.85, style: 0.75, use_speaker_boost: true },
         }),
       }
     );

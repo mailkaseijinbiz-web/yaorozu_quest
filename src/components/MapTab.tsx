@@ -80,8 +80,8 @@ function speakJa(text: string) {
     u.lang = 'ja-JP';
     const v = pickJaVoice();
     if (v) u.voice = v;
-    u.rate = 0.95; // 少しゆっくり＝落ち着いた精霊の語り
-    u.pitch = 1.05;
+    u.rate = 1.05;
+    u.pitch = 1.45;
     synth.speak(u);
   } catch {
     /* TTS非対応環境は無視 */
@@ -113,6 +113,7 @@ interface MapTabProps {
   onAdvanceChallenge?: (stepId: string, photo?: string | null) => void; // 次の目的地ステップを達成（証拠写真つき）
   currentUser: User; // 近くのクエストカード表示・レベル判定用
   onStartChallenge?: (challengeId: string) => void; // 未参加時のカードから挑戦開始
+  onMapMove?: (center: { lat: number; lng: number }) => void; // 地図を移動させたとき（アクティビティログ用）
 }
 
 
@@ -129,6 +130,7 @@ export default function MapTab({
   onAdvanceChallenge,
   currentUser,
   onStartChallenge,
+  onMapMove,
 }: MapTabProps) {
   const displaySpots = spots;
 
@@ -152,8 +154,14 @@ export default function MapTab({
   const [celebrate, setCelebrate] = useState<
     { title: string; icon: string; complete: boolean; trivia?: string; triviaCategory?: TriviaCategory } | null
   >(null);
-  // 導入（プロローグ）を見せたチャレンジID
-  const [introSeenId, setIntroSeenId] = useState<string | null>(null);
+  // 導入（プロローグ）を見せたチャレンジID。タブ切替でアンマウントされても消えないよう localStorage に永続化。
+  const [introSeenId, setIntroSeenId] = useState<string | null>(() => {
+    try { return localStorage.getItem('yaorozu_intro_seen'); } catch { return null; }
+  });
+  const markIntroSeen = (id: string) => {
+    try { localStorage.setItem('yaorozu_intro_seen', id); } catch {}
+    setIntroSeenId(id);
+  };
   // 導入の段階：0=精霊のセリフ（フキダシ）→ 1=ミッション情報（PROLOGUE）。同時には出さない
   const [introStep, setIntroStep] = useState(0);
   useEffect(() => { setIntroStep(0); }, [activeChallenge?.id]);
@@ -347,7 +355,7 @@ export default function MapTab({
   // フェーズ1（PROLOGUE）：ボタンを押さなくても3秒で自動的に冒険開始
   useEffect(() => {
     if (!(introShowing && introStep === 1 && activeChallenge)) return;
-    const id = setTimeout(() => setIntroSeenId(activeChallenge.id), 3000);
+    const id = setTimeout(() => markIntroSeen(activeChallenge.id), 3000);
     return () => clearTimeout(id);
   }, [introShowing, introStep, activeChallenge?.id]);
 
@@ -451,6 +459,7 @@ export default function MapTab({
           controlsBottom={controlsBottom}
           focusGoalToken={focusGoalToken}
           hideControls={introShowing}
+          onMapMove={onMapMove}
         />
       </div>
 
@@ -461,8 +470,8 @@ export default function MapTab({
             <Flag className="w-2.5 h-2.5" />挑戦中
           </span>
           <h4 className="flex-1 min-w-0 text-sm font-black truncate">{activeChallenge.title}</h4>
-          <button onClick={onClearChallenge} aria-label="チャレンジを終了" className="w-7 h-7 rounded-full hover:bg-white/20 flex items-center justify-center flex-shrink-0 cursor-pointer">
-            <X className="w-4 h-4" />
+          <button onClick={onClearChallenge} aria-label="チャレンジを中断" className="flex items-center gap-0.5 text-[11px] font-black bg-white/20 hover:bg-white/30 px-2 py-1 rounded-full flex-shrink-0 cursor-pointer transition-colors">
+            中断<X className="w-3 h-3" />
           </button>
         </div>
       )}
@@ -635,12 +644,64 @@ export default function MapTab({
       {/* 達成ビート（案内役の精霊がコメント＋豆知識をフキダシで語る） */}
       {celebrate && (
         <div className="absolute inset-0 z-[2100] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/45 celebrate-fade" onClick={() => { if (celebrate.complete) onClearChallenge?.(); setCelebrate(null); }} />
+          <div className="absolute inset-0 bg-black/55" onClick={() => { if (celebrate.complete) onClearChallenge?.(); setCelebrate(null); }} />
+
+          {/* ── バッジ獲得：紙吹雪パーティクル ── */}
+          {celebrate.complete && (() => {
+            const COLORS = ['#f59e0b','#ef4444','#3b82f6','#10b981','#8b5cf6','#ec4899','#f97316','#fbbf24','#06b6d4','#a3e635'];
+            const items = [
+              { l:5,  d:0.0, dur:1.8, w:8,  h:12 },
+              { l:12, d:0.2, dur:2.1, w:10, h:7  },
+              { l:20, d:0.05,dur:1.6, w:7,  h:10 },
+              { l:28, d:0.35,dur:2.3, w:12, h:8  },
+              { l:36, d:0.1, dur:1.9, w:9,  h:13 },
+              { l:44, d:0.45,dur:2.0, w:11, h:7  },
+              { l:52, d:0.15,dur:1.7, w:8,  h:11 },
+              { l:60, d:0.3, dur:2.2, w:10, h:9  },
+              { l:68, d:0.0, dur:1.5, w:7,  h:12 },
+              { l:76, d:0.4, dur:2.4, w:12, h:8  },
+              { l:84, d:0.2, dur:1.8, w:9,  h:10 },
+              { l:92, d:0.1, dur:2.1, w:11, h:7  },
+              { l:9,  d:0.5, dur:1.9, w:8,  h:13 },
+              { l:25, d:0.6, dur:2.0, w:10, h:8  },
+              { l:47, d:0.55,dur:1.6, w:7,  h:11 },
+              { l:63, d:0.65,dur:2.3, w:12, h:9  },
+              { l:80, d:0.7, dur:1.7, w:9,  h:12 },
+              { l:95, d:0.8, dur:2.2, w:11, h:8  },
+            ];
+            return items.map((p, i) => (
+              <div
+                key={i}
+                className="confetti-piece"
+                style={{
+                  left: `${p.l}%`,
+                  width: p.w,
+                  height: p.h,
+                  backgroundColor: COLORS[i % COLORS.length],
+                  animationDuration: `${p.dur}s`,
+                  animationDelay: `${p.d}s`,
+                  borderRadius: i % 3 === 0 ? '50%' : '2px',
+                }}
+              />
+            ));
+          })()}
+
           <div className="relative celebrate-pop w-full max-w-sm">
             {/* 達成エンブレム */}
             <div className="text-center">
-              <div className={`text-6xl ${celebrate.complete ? 'animate-bounce' : ''}`}>{celebrate.icon}</div>
-              <p className="text-[11px] font-black tracking-[0.2em] text-white drop-shadow mt-1">{celebrate.complete ? 'CHALLENGE COMPLETE' : 'STEP CLEAR'}</p>
+              {celebrate.complete ? (
+                <div className="relative inline-block">
+                  <div className="badge-ring" />
+                  <div className="badge-ring badge-ring-2" />
+                  <div className="text-7xl badge-acquired leading-none">{celebrate.icon}</div>
+                  <p className="badge-get-text text-[11px] font-black tracking-[0.25em] text-amber-300 drop-shadow mt-1.5">BADGE GET!</p>
+                </div>
+              ) : (
+                <>
+                  <div className="text-6xl">{celebrate.icon}</div>
+                  <p className="text-[11px] font-black tracking-[0.2em] text-white drop-shadow mt-1">STEP CLEAR</p>
+                </>
+              )}
             </div>
             {/* 案内役の精霊＋フキダシ（コメント＋豆知識） */}
             <div className="flex items-end gap-2 mt-3">
@@ -662,13 +723,10 @@ export default function MapTab({
             </div>
             <button
               onClick={() => { if (celebrate.complete) onClearChallenge?.(); setCelebrate(null); }}
-              className="w-full mt-4 bg-[#2563eb] text-white text-[15px] font-black py-3 rounded-full hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer"
+              className={`w-full mt-4 text-white text-[15px] font-black py-3 rounded-full hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer ${celebrate.complete ? 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-lg shadow-amber-500/40' : 'bg-[#2563eb]'}`}
             >
-              {celebrate.complete ? 'クエストを終える' : '次の目的地へ →'}
+              {celebrate.complete ? '🏆 クエストを終える' : '次の目的地へ →'}
             </button>
-            {celebrate.complete && (
-              <div className="mt-2 text-2xl celebrate-confetti text-center">🎉 ✨ 🎊</div>
-            )}
           </div>
         </div>
       )}
@@ -676,7 +734,7 @@ export default function MapTab({
       {/* 導入（プロローグ）：案内役の精霊がフキダシで物語を語ってから冒険へ */}
       {activeChallenge && !celebrate && (chDone?.size ?? 0) === 0 && introSeenId !== activeChallenge.id && (
         <div className="absolute inset-0 z-[2050] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/55" onClick={() => setIntroSeenId(activeChallenge.id)} />
+          <div className="absolute inset-0 bg-black/55" onClick={() => markIntroSeen(activeChallenge.id)} />
           <div className="relative w-full max-w-sm celebrate-pop">
             {introStep === 0 ? (
               /* フェーズ0：案内役の精霊がフキダシでシナリオを一文字ずつ語る（中央センタリング・カードは出さない） */

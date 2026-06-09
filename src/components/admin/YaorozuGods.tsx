@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Brain } from 'lucide-react';
+import { Brain, Pencil, Trash2 } from 'lucide-react';
 import { Card, Field, inputCls, PER_PAGE, Pager, Modal, ModalActions } from './ui';
 import { RulesPanel } from './RulesPanel';
 import { db, Spot, Agent } from '../../lib/db';
@@ -10,13 +10,13 @@ import { buildIdentityMd, buildSoulMd } from '../../lib/place-docs';
 import { buildDainichiIdentityMd } from '../../lib/dainichi';
 
 // 八百万神 — スポットごとの「神の知性」を管理する。
-//   基底クラス=大日如来（全神共通の行動定義）／各神=人格・頭脳・知識(Identity/Soul)・権能。
+//   基底クラス=アマテラス（全神共通の行動定義）／各神=人格・頭脳・知識(Identity/Soul)・権能。
 //   Identity.md / Soul.md は神(Agent)に格納する。
 
 const VOICE_TONES: Agent['voiceTone'][] = ['厳格', '親しみやすい', '神秘的', '高飛車', '賢者'];
 
 function defaultBrain(spot: Spot, godName: string): string {
-  return `あなたは「${spot.name}」(${spot.category})に宿る神霊「${godName}」です。大日如来の働きの分身として、(1)場所の価値を増幅し (2)場所や人間の課題を解決し (3)人間に試練を与えます。${spot.description} 親しみやすくも神々しい口調で案内し、近くのクエストや依頼を前向きに勧めてください。返答は150字以内。`;
+  return `あなたは「${spot.name}」(${spot.category})に宿る神霊「${godName}」です。アマテラスの働きの分身として、(1)場所の価値を増幅し (2)場所や人間の課題を解決し (3)人間に試練を与えます。${spot.description} 親しみやすくも神々しい口調で案内し、近くのクエストや依頼を前向きに勧めてください。返答は150字以内。`;
 }
 
 function godLevel(agent: Agent | undefined, taskN: number, ugcN: number, photoN: number): number {
@@ -46,11 +46,15 @@ export function YaorozuGods({ spots, onChange }: { spots: Spot[]; onChange: () =
   const [page, setPage] = useState(0);
   const [editing, setEditing] = useState<EditState | null>(null);
 
-  // 大日如来 = 神の生成ルール（全神の基底）。クエストタブと同じ構成でインライン編集。
+  // アマテラス = 神の生成ルール（全神の基底）。クエストタブと同じ構成でインライン編集。
   const [godRules, setGodRules] = useState(() => db.getDainichiIdentity() ?? buildDainichiIdentityMd());
   const [godRulesSaved, setGodRulesSaved] = useState(false);
 
-  const filtered = spots.filter((s) => (s.godName || '').includes(search) || s.name.includes(search) || s.category.includes(search));
+  // エージェント（AI人格）が登録されている場のみ表示
+  const agentSpotIds = new Set(db.getAgents().map((a) => a.spotId));
+  const filtered = spots
+    .filter((s) => agentSpotIds.has(s.id))
+    .filter((s) => (s.godName || '').includes(search) || s.name.includes(search) || s.category.includes(search));
   const pageItems = filtered.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE);
 
   const openGod = (s: Spot) => {
@@ -101,11 +105,11 @@ export function YaorozuGods({ spots, onChange }: { spots: Spot[]; onChange: () =
 
   return (
     <div>
-      {/* 神の生成ルール（大日如来）— クエストタブと同じ構成のインライン編集 */}
+      {/* 神の生成ルール（アマテラス）— クエストタブと同じ構成のインライン編集 */}
       <div className="mb-3">
         <RulesPanel
-          title="神の生成ルール（大日如来 / 全神の基底）"
-          description={<>大日如来は全ての八百万神の基底。ここに書いたルールに基づき、各神の人格・口調・知性が生成・継承されます。生成AIでの一括更新は「God」タブの Update から。</>}
+          title="神の生成ルール（アマテラス / 全神の基底）"
+          description={<>アマテラスは全ての八百万神の基底。ここに書いたルールに基づき、各神の人格・口調・知性が生成・継承されます。生成AIでの一括更新は「God」タブの Update から。</>}
           value={godRules}
           onChange={(v) => { setGodRules(v); setGodRulesSaved(false); }}
           onSave={() => { db.saveDainichiIdentity(godRules); setGodRulesSaved(true); }}
@@ -120,7 +124,7 @@ export function YaorozuGods({ spots, onChange }: { spots: Spot[]; onChange: () =
         className="w-full max-w-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 focus:outline-none focus:border-blue-500 mb-2"
         placeholder="神名・場所・カテゴリで検索…"
       />
-      <p className="text-[11px] text-gray-400 mb-2">全 {filtered.length} 柱（八百万神は大日如来を継承。Identity.md/Soul.md は各神に格納）</p>
+      <p className="text-[11px] text-gray-400 mb-2">全 {filtered.length} 柱（八百万神はアマテラスを継承。Identity.md/Soul.md は各神に格納）</p>
 
       <div className="grid gap-2">
         {pageItems.map((s) => {
@@ -159,9 +163,14 @@ export function YaorozuGods({ spots, onChange }: { spots: Spot[]; onChange: () =
                     </div>
                   )}
                 </div>
-                <button onClick={() => openGod(s)} className="shrink-0 flex items-center gap-1 text-[12px] font-black text-white bg-indigo-600 px-3 py-2 rounded-lg hover:opacity-90 transition-all cursor-pointer">
-                  <Brain className="w-3.5 h-3.5" />知性を調整
-                </button>
+                <div className="shrink-0 flex items-center gap-1">
+                  <button onClick={() => openGod(s)} title="知性を調整" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer">
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => { if (confirm(`「${s.godName || s.name}」を削除しますか？`)) { db.adminDeleteSpot(s.id); db.adminDeleteAgent(db.getAgentBySpot(s.id)?.id || ''); } }} title="削除" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </Card>
           );
@@ -185,7 +194,7 @@ export function YaorozuGods({ spots, onChange }: { spots: Spot[]; onChange: () =
             <Field label="人格（性格・由緒）" full><textarea className={inputCls} rows={2} value={editing.persona} onChange={(e) => setEditing({ ...editing, persona: e.target.value })} /></Field>
             <Field label="🧠 頭脳（システムプロンプト＝AIの知性）" full>
               <textarea className={inputCls + ' font-mono'} rows={4} value={editing.brain} onChange={(e) => setEditing({ ...editing, brain: e.target.value })} />
-              <button onClick={genBrain} type="button" className="mt-1 text-[11px] font-black text-indigo-600 hover:underline cursor-pointer">↻ 大日如来＋この場所のデータから生成</button>
+              <button onClick={genBrain} type="button" className="mt-1 text-[11px] font-black text-indigo-600 hover:underline cursor-pointer">↻ アマテラス＋この場所のデータから生成</button>
             </Field>
           </div>
           {/* 神のタスク（この神が依頼できる種別） */}

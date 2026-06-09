@@ -2,13 +2,28 @@
 // localStorage の「ユーザー生成データ」キーだけを /api/persist 経由で
 // Supabase に保存・復元する。鍵未設定時はサーバーが enabled:false を返し no-op。
 
-// 同期対象キー（生成シードの SPOTS/AGENTS など重いものは除外）
+// 同期対象キー（全データをサーバー管理）
 const SYNC_KEYS = [
+  // ユーザー・プレイデータ
   'yaorozu_users',
   'yaorozu_ugc',
   'yaorozu_user_stats',
   'yaorozu_challenge_progress',
   'yaorozu_challenge_photos',
+  'yaorozu_activities',
+  'yaorozu_goshuin_user-self',
+  // 管理者が作成するコンテンツ
+  'yaorozu_spots_v3',
+  'yaorozu_agents_v2',
+  'yaorozu_quests_v2',
+  // ルール・設定
+  'yaorozu_quest_rules',
+  'yaorozu_spot_rules',
+  'yaorozu_system_role',
+  'yaorozu_dainichi_identity',
+  // API監視・認証
+  'yaorozu_api_calls',
+  'yaorozu_revoked_users',
 ];
 
 // 単一ユーザーデモのためスナップショットIDは固定。将来は認証ユーザーIDに。

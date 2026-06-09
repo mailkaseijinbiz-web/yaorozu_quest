@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { LineChart } from 'lucide-react';
-import { db, type MetricsSnapshot } from '../../lib/db';
+import { db, type MetricsSnapshot, type ApiCallType } from '../../lib/db';
 
 // ════════════════════════════════════════════════
 // Analytics — 各指標の時系列推移を確認する
@@ -21,7 +21,9 @@ const METRICS: { key: string; label: string; color: string; get: (s: Metrics) =>
   { key: 'issues', label: '課題 総和', color: '#e11d48', get: (s) => s.issues },
   { key: 'users', label: '人間', color: '#7c3aed', get: (s) => s.users },
   { key: 'activities', label: 'アクティビティ', color: '#0891b2', get: (s) => s.activities },
-  { key: 'toku', label: '徳 総和', color: '#ca8a04', get: (s) => s.toku },
+  { key: 'toku',     label: '徳 総和',          color: '#ca8a04', get: (s) => s.toku },
+  { key: 'aiCalls',  label: 'AI リクエスト数',  color: '#6d28d9', get: (s) => s.aiCalls ?? 0 },
+  { key: 'ttsCalls', label: 'TTS リクエスト数', color: '#0e7490', get: (s) => s.ttsCalls ?? 0 },
 ];
 
 function Sparkline({ values, color }: { values: number[]; color: string }) {
@@ -47,6 +49,7 @@ export function Analytics() {
   // 表示時に現在値を記録（直近と同値なら追加されない）してから読み出す
   const [snaps] = useState<MetricsSnapshot[]>(() => db.recordMetricsSnapshot());
   const [activities] = useState(() => db.getActivities());
+  const [apiByDay] = useState(() => db.getApiCallsByDay());
   const current = db.getCurrentMetrics();
 
   // アクティビティの日別件数
@@ -107,6 +110,56 @@ export function Analytics() {
           </div>
         )}
       </div>
+
+      {/* AI / TTS API リクエストの日別推移 */}
+      {(() => {
+        const API_TYPES: { key: ApiCallType; label: string; color: string }[] = [
+          { key: 'ai_chat',    label: 'AI チャット', color: '#6d28d9' },
+          { key: 'ai_generate',label: 'AI 生成',    color: '#9333ea' },
+          { key: 'tts',        label: 'TTS',         color: '#0e7490' },
+        ];
+        const apiDays = Object.keys(apiByDay).sort();
+        const maxApi = apiDays.length
+          ? Math.max(...apiDays.map((d) => API_TYPES.reduce((s, t) => s + (apiByDay[d]?.[t.key] ?? 0), 0)))
+          : 0;
+        return (
+          <div className="bg-white border border-gray-200 rounded-2xl p-4">
+            <h3 className="text-sm font-black text-gray-800">AI / TTS リクエスト（日別）</h3>
+            <p className="text-[11px] text-gray-400 mt-0.5 mb-3">生成AI（Gemini）とTTS（ElevenLabs）への API 呼び出し件数。</p>
+            <div className="flex items-center gap-4 mb-3 flex-wrap">
+              {API_TYPES.map((t) => (
+                <span key={t.key} className="flex items-center gap-1 text-[11px] font-black" style={{ color: t.color }}>
+                  <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: t.color }} />
+                  {t.label}: {Object.values(apiByDay).reduce((s, d) => s + (d?.[t.key] ?? 0), 0)}件
+                </span>
+              ))}
+            </div>
+            {apiDays.length === 0 ? (
+              <p className="text-center text-xs text-gray-400 py-6">まだ API リクエストがありません。</p>
+            ) : (
+              <div className="flex items-end gap-1.5 h-32">
+                {apiDays.map((d) => {
+                  const total = API_TYPES.reduce((s, t) => s + (apiByDay[d]?.[t.key] ?? 0), 0);
+                  return (
+                    <div key={d} className="flex-1 flex flex-col items-center justify-end gap-1 min-w-0">
+                      <span className="text-[9px] font-black text-violet-700 tabular-nums">{total}</span>
+                      <div className="w-full flex flex-col-reverse rounded-t overflow-hidden" style={{ height: `${maxApi ? (total / maxApi) * 100 : 0}%`, minHeight: 3 }}>
+                        {API_TYPES.map((t) => {
+                          const n = apiByDay[d]?.[t.key] ?? 0;
+                          return n > 0 ? (
+                            <div key={t.key} style={{ flex: n, background: t.color }} />
+                          ) : null;
+                        })}
+                      </div>
+                      <span className="text-[8px] text-gray-400 truncate w-full text-center">{d.slice(5)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

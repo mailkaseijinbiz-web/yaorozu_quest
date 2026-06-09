@@ -43,7 +43,7 @@ export function QuestGenerator({ spots }: { spots: Spot[] }) {
           count,
           ts: Date.now(),
           rules: db.getQuestRules(),
-          godRules: db.getDainichiIdentity() ?? buildDainichiIdentityMd(), // 大日如来＝全神の基底
+          godRules: db.getDainichiIdentity() ?? buildDainichiIdentityMd(), // アマテラス＝全神の基底
           spotRules: db.getSpotRules(), // 場の生成ルール（背景文脈）
           spot: {
             id: spot.id,

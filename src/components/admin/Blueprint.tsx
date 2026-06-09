@@ -27,14 +27,14 @@ const KIND_ACTIVITY: Record<string, string> = {
 };
 
 function Node({ icon, name, type, count, ring }: {
-  icon: string; name: string; type: string; count?: number; ring?: boolean;
+  icon: string; name: string; type?: string; count?: number; ring?: boolean;
 }) {
   return (
     <div className={`flex items-center gap-2.5 rounded-xl border bg-white px-3 py-2 shadow-sm ${ring ? 'border-amber-300 ring-1 ring-amber-200' : 'border-gray-200'}`}>
       <span className="text-lg leading-none flex-shrink-0">{icon}</span>
       <div className="min-w-0 flex-1">
         <p className="text-[13px] font-black text-gray-800 leading-tight">{name}{ring && <span className="ml-1 text-[9px] font-black text-amber-500 align-middle">統合</span>}</p>
-        <p className="text-[10px] font-mono text-gray-400 leading-tight truncate">{type}</p>
+        {type && <p className="text-[10px] font-mono text-gray-400 leading-tight truncate">{type}</p>}
       </div>
       {count != null && <span className="text-[11px] font-black text-gray-500 tabular-nums flex-shrink-0">{fmt(count)}</span>}
     </div>
@@ -78,6 +78,7 @@ export function Blueprint() {
   const enlightenment = totalToku - 0;
   const happiness = activeness + enlightenment;
   const quests = db.getAllQuests().length; // 静的＋生成クエスト
+  const agents = db.getAgents().length; // 神（Agent）の実数
 
   // システムの一括更新：生成ルール＋神の魂を反映して、神・クエストを生成AIでアップデートする
   const [updating, setUpdating] = useState(false);
@@ -90,7 +91,7 @@ export function Blueprint() {
     setUpdating(true);
     setUpdateMsg(null);
     const rules = db.getQuestRules();
-    const godRules = db.getDainichiIdentity() ?? buildDainichiIdentityMd(); // 大日如来＝全神の基底
+    const godRules = db.getDainichiIdentity() ?? buildDainichiIdentityMd(); // アマテラス＝全神の基底
     const spotRules = db.getSpotRules(); // 場の生成ルール（背景文脈）
     const targets = db.getSpots().slice(0, 5); // 標本（全件は多数のため一部を更新）
     let ok = 0;
@@ -112,6 +113,7 @@ export function Blueprint() {
         const data = await res.json();
         if (Array.isArray(data.quests) && data.quests.length) {
           db.saveGeneratedQuests(s.id, data.quests);
+          db.trackApiCall('ai_generate');
           ok++;
         }
       } catch {
@@ -136,15 +138,6 @@ export function Blueprint() {
       <div className="mb-3">
         <div className="flex items-start justify-between gap-2">
           <h2 className="text-lg font-black text-gray-900 flex items-center gap-2">🪷 God</h2>
-          <button
-            onClick={runUpdate}
-            disabled={updating}
-            className="shrink-0 flex items-center gap-1.5 text-xs font-black text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-3 py-2 rounded-lg cursor-pointer transition-all"
-            title="生成ルールと神の魂を反映して、神・クエストを生成AIで更新する"
-          >
-            {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            {updating ? '更新中…' : 'Update（AIで神・クエスト更新）'}
-          </button>
         </div>
         {updateMsg && <p className="text-[11px] font-bold text-emerald-600 mt-1">{updateMsg}</p>}
       </div>
@@ -159,7 +152,7 @@ export function Blueprint() {
           onSave={() => { db.saveSystemRole(systemRole); setRoleSaved(true); }}
           onReset={() => { setSystemRole(DEFAULT_SYSTEM_ROLE); setRoleSaved(false); }}
           saved={roleSaved}
-          rows={14}
+          rows={22}
         />
       </div>
 
@@ -178,7 +171,7 @@ export function Blueprint() {
 
         {/* ① 場（すべての中心） */}
         <Stage tag="場" sub="場のゴール = 場の価値を高める" color="#2563eb">
-          <Node icon="📍" name="場 / スポット" type="Spot · 基本情報 / 座標" count={spots} />
+          <Node icon="📍" name="場" count={spots} />
           <div className="rounded-xl border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white p-3">
             <p className="text-[11px] font-black text-blue-600 mb-2">場の中心データ（神の知識になる）</p>
             <div className="grid grid-cols-2 gap-2">
@@ -211,9 +204,11 @@ export function Blueprint() {
         <Arrow label="場のデータを、その地の神が受け取る" />
 
         {/* ② 鋳造（神・工房） */}
-        <Stage tag="八百万神" sub="場に宿る神が、価値・課題・魂から クエスト を鋳造する" color="#d97706">
+        <Stage tag="神" sub="場に宿る神が、価値・課題・魂から クエスト を鋳造する" color="#d97706">
+          {/* アマテラス（根源・一者） */}
+          <Node icon="☸️" name="アマテラス" count={1} />
           {/* 場に宿る神（Agent）＝ 工房の主 */}
-          <Node icon="🦊" name="八百万の神 (Agent)" type="Spot と 1:1 · 魂 = Identity.md / Soul.md / 口調" count={spots} />
+          <Node icon="🦊" name="神" count={agents} />
           <div className="flex items-center gap-2 pl-6 text-[11px] font-bold text-gray-400">└─ が鋳造する ─▶</div>
           {/* 鋳造される本体 = クエスト。3種のタスクを「内包」するコンテナとして表現する */}
           <div className="rounded-xl border-2 border-amber-400 bg-amber-50/50 p-3 shadow-sm">
@@ -259,7 +254,7 @@ export function Blueprint() {
 
         {/* ③ 巡礼（民） */}
         <Stage tag="人間" sub="人間がタスクを達成し、データを生む" color="#7c3aed">
-          <Node icon="🧑‍🦱" name="巡礼者 (人間)" type="User · 徳 / レベル" count={users} />
+          <Node icon="🧑‍🦱" name="巡礼者 (人間)" count={users} />
           {/* 人間の中心データ：徳[] と アクティビティ[]（総和を表示） */}
           <div className="rounded-xl border-2 border-violet-200 bg-gradient-to-br from-violet-50 to-white p-3">
             <p className="text-[11px] font-black text-violet-600 mb-2">人間の中心データ</p>
