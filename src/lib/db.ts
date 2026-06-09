@@ -1056,6 +1056,7 @@ class MockDatabase {
 
     // Reward 50 Toku for creating post
     this.rewardToku(userId, 50);
+    this.adjustFollow(userId, 5, 0); // 投稿で信者（フォロワー）が少し増える
 
     // Recalculate Creator for this spot
     this.recalculateSpotCreator(spotId);
@@ -1516,6 +1517,7 @@ class MockDatabase {
     if (done.size >= totalSteps && !p.completed.includes(challengeId)) {
       p.completed.push(challengeId);
       this.rewardToku(userId, 100); // 制覇ボーナス
+      this.adjustFollow(userId, 30, 0); // 制覇で信者（フォロワー）が増える
       this.logActivity({ type: 'quest_complete', userId, challengeId, reward: 100 });
     }
     this.save(KEYS.CHALLENGE, p);

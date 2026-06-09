@@ -13,7 +13,7 @@ import SpotDetail from '../components/SpotDetail';
 import DebugPanel from '../components/DebugPanel';
 import { isDebugEnabled, getDebugLocation, setDebugLocation, type DebugLatLng } from '../lib/debug';
 import { getLevelInfo } from '../data/levels';
-import { getBadgeStates, godAvatarEmoji } from '../data/badges';
+import { getBadgeStates, godAvatarEmoji, type BadgeState } from '../data/badges';
 import { Challenge } from '../data/challenges';
 import type { Quest } from '../data/tasks';
 import { subscribePush } from '../lib/push-client';
@@ -27,6 +27,25 @@ const XP_SHIELD = 'polygon(0% 0%, 100% 0%, 100% 58%, 50% 100%, 0% 58%)';
 
 // 場・クエストを「近い / 中くらい / 遠い」が混ざるように散らす距離（km）。約 500m / 1000m / 3000m。
 const VARIED_SPOT_DISTANCES_KM = [0.5, 1.0, 3.0];
+
+// 新たに獲得したバッジを検出（既読は localStorage で管理。初回は既存を既読化して演出しない）。
+function detectNewBadges(stats: UserContribution, user: UserType): BadgeState[] {
+  if (typeof window === 'undefined') return [];
+  const states = getBadgeStates(stats, user);
+  const earnedIds = states.filter((b) => b.earned).map((b) => b.id);
+  let seen: string[];
+  try {
+    const raw = localStorage.getItem('yaorozu_badges_earned');
+    if (raw === null) { localStorage.setItem('yaorozu_badges_earned', JSON.stringify(earnedIds)); return []; }
+    seen = JSON.parse(raw);
+  } catch { return []; }
+  const seenSet = new Set(seen);
+  const fresh = states.filter((b) => b.earned && !seenSet.has(b.id));
+  if (fresh.length) {
+    try { localStorage.setItem('yaorozu_badges_earned', JSON.stringify([...seenSet, ...fresh.map((b) => b.id)])); } catch {}
+  }
+  return fresh;
+}
 
 const FALLBACK_CURRENT_USER: UserType = {
   id: 'user-self',
@@ -42,6 +61,7 @@ export default function HomePage() {
   const [needsOnboard, setNeedsOnboard] = useState(false); // 初回起動の登録（オンボーディング）
   const [onboardName, setOnboardName] = useState(''); // オンボーディングの名前入力
   const [authProfile, setAuthProfile] = useState<AuthProfile | null>(null); // OAuthログイン中のユーザー
+  const [earnedBadge, setEarnedBadge] = useState<BadgeState | null>(null); // 新規獲得バッジの演出
   const [spots, setSpots] = useState<Spot[]>([]);
   const [activeSpot, setActiveSpot] = useState<Spot | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -374,12 +394,23 @@ export default function HomePage() {
     // クラウド復元後に getUser が null でも currentUser を非 null に保つ（マイページの空白防止）
     const self = db.getUser('user-self') ?? FALLBACK_CURRENT_USER;
     setCurrentUser(self);
-    setUserStats(db.getUserStats('user-self'));
+    const stats = db.getUserStats('user-self');
+    setUserStats(stats);
     if (activeSpot) {
       const refreshedSpot = db.getSpot(activeSpot.id);
       if (refreshedSpot) setActiveSpot(refreshedSpot);
     }
+    // 新たに条件を満たしたバッジがあれば獲得演出
+    const fresh = detectNewBadges(stats, self);
+    if (fresh.length) setEarnedBadge(fresh[0]);
   };
+
+  // バッジ獲得演出を数秒で自動的に閉じる
+  useEffect(() => {
+    if (!earnedBadge) return;
+    const t = setTimeout(() => setEarnedBadge(null), 4500);
+    return () => clearTimeout(t);
+  }, [earnedBadge]);
 
   // 達成クエストを写真とともに振り返りシェア（Web Share API、非対応時はクリップボード）
   const shareQuest = async (title: string, badgeName: string, badgeIcon: string, photos: string[]) => {
@@ -1127,6 +1158,29 @@ export default function HomePage() {
             </div>
           );
         })()}
+
+        {/* ── バッジ獲得演出 ── */}
+        {earnedBadge && (
+          <div className="absolute inset-0 z-[4500] flex items-center justify-center p-6" onClick={() => setEarnedBadge(null)}>
+            <div className="absolute inset-0 bg-black/55" />
+            <div className="relative celebrate-pop w-full max-w-[300px] bg-white rounded-3xl shadow-2xl px-6 py-7 text-center">
+              <p className="text-[11px] font-black tracking-[0.25em] text-amber-500">BADGE GET!</p>
+              <div className="relative inline-block mt-3 mb-1">
+                <div className="badge-ring" />
+                <div className="badge-ring badge-ring-2" />
+                <div className="text-6xl badge-acquired leading-none">{earnedBadge.icon}</div>
+              </div>
+              <h3 className="text-lg font-black text-gray-900 mt-3">{earnedBadge.name}</h3>
+              <p className="text-[13px] text-gray-500 mt-1 leading-relaxed">{earnedBadge.desc}</p>
+              <button
+                onClick={() => setEarnedBadge(null)}
+                className="w-full mt-5 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[15px] font-black py-3 rounded-full shadow-lg shadow-amber-500/40 hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer"
+              >
+                やった！
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
