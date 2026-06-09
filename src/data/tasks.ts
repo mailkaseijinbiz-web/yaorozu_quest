@@ -34,6 +34,7 @@ export type TaskType =
   | 'bonnou_ask' // sense — 人間の「煩悩」を神が問う → 煩悩ストアに記録（覚りの調整素材）
   | 'bonnou_resolve' // act — 人間の煩悩を1つ浄化する → 未解決煩悩−1（覚り+1）
   | 'walk' // act — 散歩で心を整え、煩悩を一つ手放す → 未解決煩悩−1（覚り+1）
+  | 'cleanup' // act — 実際に掃除をして場を整える＝場へ働きかける操作
   | 'avatar_photo' // sense — アバターになる写真を撮る → ユーザーのアバターに設定
   | 'goshuin'; // sense — 神と会話し御朱印を授かる（写真不要・会話で完了する軽量クエスト）
 
@@ -286,6 +287,16 @@ export const TASK_CATALOG: Record<TaskType, CatalogTask> = {
     call: (p) => `${p}の周りを、ゆっくりと歩いてみよ。足を運ぶうちに、心の煩悩が一つ、すっと解けていくはずじゃ。`,
     murmur: 'のう、ゆるりと散歩して心を整えぬか…',
   },
+  cleanup: {
+    type: 'cleanup',
+    kind: 'act',
+    icon: '🧹',
+    label: '掃除をする',
+    title: 'この地を掃除して整える',
+    reward: 40,
+    call: (p) => `${p}を、その手で少し綺麗にしてはくれぬか。一掃きが、この地の活気を取り戻す。`,
+    murmur: 'のう、この地を掃除して整えてはくれぬか…',
+  },
   avatar_photo: {
     type: 'avatar_photo',
     kind: 'sense',
@@ -356,8 +367,23 @@ export const COMMON_TASK_TYPES: TaskType[] = ['context', 'photo', 'evaluate', 'e
 export const GOD_FUNCTIONS: { key: TaskKind; icon: string; label: string; desc: string; tasks: TaskType[] }[] = [
   { key: 'sense', icon: '👁️', label: '情報収集', desc: '世界の値を調整するためのコンテキストを集める（価値・課題・煩悩・今の様子）', tasks: ['context', 'event', 'photo', 'cleaning', 'visit', 'value_ask', 'issue_ask', 'bonnou_ask', 'avatar_photo', 'goshuin'] },
   { key: 'understand', icon: '🧠', label: '理解判断', desc: '集めた情報・投稿をジャッジし、価値と課題を読み解く', tasks: ['review', 'eat', 'evaluate', 'judge'] },
-  { key: 'act', icon: '✋', label: '操作', desc: '世界の値を直接動かす（価値を広げ、課題・煩悩を解決する）', tasks: ['buy', 'sns', 'resolveIssue', 'bonnou_resolve', 'walk'] },
+  { key: 'act', icon: '✋', label: '操作', desc: '世界の値を直接動かす（価値を広げ、課題・煩悩を解決する）', tasks: ['resolveIssue', 'cleanup', 'buy', 'sns', 'bonnou_resolve', 'walk'] },
 ];
+
+/** タスクの対象（第2の分類軸）。場の活気を動かすか、人間の覚りを動かすか。 */
+export type TaskTarget = 'spot' | 'human';
+export const TASK_TARGET_META: Record<TaskTarget, { label: string; icon: string }> = {
+  spot: { label: '場（活気）', icon: '📍' },
+  human: { label: '人間（覚り）', icon: '🧑‍🦱' },
+};
+export const TASK_TARGET: Record<TaskType, TaskTarget> = {
+  // 場の活気（価値・課題）に働く
+  context: 'spot', photo: 'spot', evaluate: 'spot', event: 'spot', review: 'spot',
+  sns: 'spot', buy: 'spot', eat: 'spot', cleaning: 'spot', visit: 'spot',
+  resolveIssue: 'spot', judge: 'spot', value_ask: 'spot', issue_ask: 'spot', cleanup: 'spot',
+  // 人間の覚り（徳・煩悩）に働く
+  bonnou_ask: 'human', bonnou_resolve: 'human', walk: 'human', avatar_photo: 'human', goshuin: 'human',
+};
 
 /** タスク種別ごとのテーマ色（Tailwind 用） */
 export const TASK_TONE: Record<TaskType, { text: string; bg: string; border: string }> = {
@@ -378,6 +404,7 @@ export const TASK_TONE: Record<TaskType, { text: string; bg: string; border: str
   bonnou_ask: { text: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-200' },
   bonnou_resolve: { text: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-200' },
   walk: { text: 'text-lime-600', bg: 'bg-lime-50', border: 'border-lime-200' },
+  cleanup: { text: 'text-teal-600', bg: 'bg-teal-50', border: 'border-teal-200' },
   avatar_photo: { text: 'text-pink-600', bg: 'bg-pink-50', border: 'border-pink-200' },
   goshuin: { text: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200' },
 };
