@@ -4,7 +4,6 @@ import React, { useEffect, useState } from 'react';
 import { Shield, MapPin, Users as UsersIcon, Lock, LogOut, RotateCcw, Flag, Network, Brain, Activity as ActivityIcon, LineChart } from 'lucide-react';
 import { db, Spot, User } from '../../lib/db';
 import { pullSnapshot } from '../../lib/cloud-sync';
-import { CHALLENGES } from '../../data/challenges';
 import { Blueprint } from '../../components/admin/Blueprint';
 import { Analytics } from '../../components/admin/Analytics';
 import { YaorozuGods } from '../../components/admin/YaorozuGods';
@@ -152,7 +151,7 @@ export default function AdminPage() {
           const counts: Record<AdminTab, number | null> = {
             blueprint: null, analytics: null, gods: agentCount, activity: db.getActivities().length,
             spots: spots.length, users: users.length,
-            challenges: CHALLENGES.length,
+            challenges: db.getAllQuests().length, // 生成クエストを含む実数（CHALLENGES は静的・空）
           };
           const active = tab === key;
           return (
