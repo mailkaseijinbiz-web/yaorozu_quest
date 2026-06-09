@@ -85,6 +85,10 @@ export default function HomePage() {
   const lastQuestGenRef = useRef<number>(0);
   // クエスト生成中フラグ（HomeTab のスピナー表示用）
   const [isGeneratingQuests, setIsGeneratingQuests] = useState(false);
+  // useCallback 内から最新の activeSpot を参照するための ref
+  const activeSpotRef = useRef<Spot | null>(null);
+  // state との同期（毎レンダリング更新）
+  activeSpotRef.current = activeSpot;
 
   /** 指定した場のクエストを generate-quest API で生成して保存する */
   const generateQuestsForSpot = useCallback(async (spot: Spot, spotAgent: Agent | null) => {
@@ -145,6 +149,10 @@ export default function HomePage() {
       db.trackApiCall('ai_generate');
       db.logActivity({ type: 'spot_generate', userId: 'system', source: 'system', spotId: spot.id, detail: spot.name });
       refreshDatabaseStates();
+      // アクティブスポットが未設定なら生成した場を選択（地図がその位置にパンされる）
+      if (!activeSpotRef.current) {
+        setActiveSpot(spot);
+      }
       // 場を生成後、クエストがなければこの場のクエストも生成する
       if (db.getAllQuests().length === 0) {
         generateQuestsForSpot(spot, agent);
@@ -185,19 +193,18 @@ export default function HomePage() {
       setGoShuinList(getGoShuinList('user-self'));
     }
 
-    // 初回表示時にクエストが無ければバックグラウンドで生成（場が無い場合は場も生成）
-    if (db.getAllQuests().length === 0) {
-      if (initSpots.length === 0) {
-        // 場も無い → 場を生成（場の生成後にクエストも自動生成される）
-        generateSpotNearby(35.6580, 139.7514); // 取得前は東京デフォルト座標を使用
+    // 初回表示時：場が無ければ生成（クエスト有無に関係なく）。場があってクエストが無ければクエストだけ生成
+    if (initSpots.length === 0) {
+      // 場も無い → 場を生成（場の生成後にクエストも自動チェーンされる）
+      generateSpotNearby(35.6580, 139.7514); // GPS取得前は東京デフォルト座標
+    } else if (db.getAllQuests().length === 0) {
+      // 場はあるがクエストが無い → クエストを生成
+      const agentSpotIds = new Set(db.getAgents().map(a => a.spotId));
+      const spotWithAgent = initSpots.find(s => agentSpotIds.has(s.id));
+      if (spotWithAgent) {
+        generateQuestsForSpot(spotWithAgent, db.getAgentBySpot(spotWithAgent.id) ?? null);
       } else {
-        const agentSpotIds = new Set(db.getAgents().map(a => a.spotId));
-        const spotWithAgent = initSpots.find(s => agentSpotIds.has(s.id));
-        if (spotWithAgent) {
-          generateQuestsForSpot(spotWithAgent, db.getAgentBySpot(spotWithAgent.id) ?? null);
-        } else {
-          generateSpotNearby(35.6580, 139.7514);
-        }
+        generateSpotNearby(35.6580, 139.7514);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
