@@ -332,6 +332,15 @@ export default function SpotDetail({
       flashToast(result === 'copied' ? `🔗 リンクをコピー！ +${task.reward}徳` : `📣 シェアしました！ +${task.reward}徳`);
       onChanged?.();
       return;
+    } else if (task.type === 'walk') {
+      // 散歩：その場で達成し、未解決の煩悩を一つ手放す（覚り+1）
+      const released = db.resolveBonnou(currentUser.id);
+      db.completeGodTask(currentUser.id, spot.id, task.reward);
+      db.recordTaskDone(currentUser.id, task.type, spot.id, task.reward);
+      setDoneTasks((prev) => ({ ...prev, [task.id]: true }));
+      flashToast(released ? `🚶 散歩で煩悩を一つ手放した！ +${task.reward}徳` : `🚶 心を整えた！ +${task.reward}徳`);
+      onChanged?.();
+      return;
     } else if (POST_TYPES.has(task.type)) {
       // 実際に投稿（口コミ・できごと・実食・買物・課題解決の報告）→ 入力モーダルを開く
       setPostingTask(task);
