@@ -161,9 +161,9 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
                       <h3 className={`text-base font-black truncate ${active ? 'text-white' : 'text-gray-900'}`}>{ch.title}</h3>
                     </div>
                     {(() => {
-                      const godName = ch.spotId ? db.getSpot(ch.spotId)?.godName : null;
-                      return godName ? (
-                        <p className={`text-[11px] font-bold truncate mb-0.5 ${active ? 'text-white/70' : 'text-gray-400'}`}>by {godName}</p>
+                      const godSpot = ch.spotId ? db.getSpot(ch.spotId) : null;
+                      return godSpot?.godName ? (
+                        <p className={`text-[11px] font-bold truncate mb-0.5 ${active ? 'text-white/70' : 'text-gray-400'}`}>{godSpot.godEmoji ? `${godSpot.godEmoji} ` : ''}by {godSpot.godName}</p>
                       ) : null;
                     })()}
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">

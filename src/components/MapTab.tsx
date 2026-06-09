@@ -579,6 +579,7 @@ export default function MapTab({
         const distVal = d < 1 ? `${Math.round(d * 1000)}` : d.toFixed(1);
         const distUnit = d < 1 ? 'm' : 'km';
         const levelOk = userLevel >= ch.minLevel;
+        const godSpot = ch.spotId ? db.getSpot(ch.spotId) : null; // このクエストを鋳造した神
         return (
           <button
             ref={(el) => { overlayElRef.current = el; }}
@@ -592,6 +593,11 @@ export default function MapTab({
               <div className="flex-1 min-w-0 py-3">
                 <span className="text-[10px] font-black tracking-wider text-[#2563eb]/70">近くのクエスト</span>
                 <h4 className="text-sm font-black text-gray-900 truncate">{ch.title}</h4>
+                {godSpot?.godName && (
+                  <p className="text-[11px] font-bold text-gray-400 truncate mt-0.5">
+                    {godSpot.godEmoji ? `${godSpot.godEmoji} ` : ''}by {godSpot.godName}
+                  </p>
+                )}
                 <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                   <span className={`text-[13px] font-black ${diff.text}`}>{diff.stars} {diff.label}</span>
                   <span className={`text-[13px] font-black ${levelOk ? 'text-gray-500' : 'text-rose-600'}`}>{levelOk ? '' : '🔒 '}Lv.{ch.minLevel}〜</span>
