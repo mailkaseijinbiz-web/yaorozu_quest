@@ -36,7 +36,17 @@ export type TaskType =
   | 'walk' // act — 散歩で心を整え、煩悩を一つ手放す → 未解決煩悩−1（覚り+1）
   | 'cleanup' // act — 実際に掃除をして場を整える＝場へ働きかける操作
   | 'avatar_photo' // sense — アバターになる写真を撮る → ユーザーのアバターに設定
-  | 'goshuin'; // sense — 神と会話し御朱印を授かる（写真不要・会話で完了する軽量クエスト）
+  | 'goshuin' // sense — 神と会話し御朱印を授かる（写真不要・会話で完了する軽量クエスト）
+  // ── バリエーション拡張 ──
+  | 'weather' // sense（場）— 今の天気・体感を伝える＝コンテキスト生成
+  | 'discover' // sense（場）— 隠れた魅力を見つけて報告 → enjoyments に加算（活気+1）
+  | 'wish' // sense（人間）— 願いを書いて奉納する＝心のコンテキスト
+  | 'gratitude' // sense（人間）— 神へ感謝を捧げる（覚りの所作）
+  | 'recommend' // understand（場）— 集めた候補から一番を選ぶ
+  | 'verify' // understand（場）— 集まった情報の正しさを確かめる
+  | 'donate' // act（場）— お賽銭・寄進をする＝場へ働きかける
+  | 'guide' // act（場）— 道案内をして他の巡礼者を助ける
+  | 'meditate'; // act（人間）— 瞑想して心を鎮め、煩悩を一つ手放す（覚り+1）
 
 /** resolveIssue タスクが参照する課題 */
 export interface IssueRef {
@@ -317,6 +327,52 @@ export const TASK_CATALOG: Record<TaskType, CatalogTask> = {
     call: (p) => `${p}に宿るわしのもとへ参り、言葉を交わして御朱印を受け取っておくれ。`,
     murmur: '御朱印を授けよう。わしのもとへ参られよ…',
   },
+  // ── バリエーション拡張 ──
+  weather: {
+    type: 'weather', kind: 'sense', icon: '⛅', label: '天気を伝える', title: '今の天気・体感を伝える', reward: 15,
+    call: (p) => `${p}の今の空はどうじゃ？　晴れか曇りか、暑さ寒さも添えて教えておくれ。`,
+    murmur: 'のう、今の天気を教えておくれ…',
+  },
+  discover: {
+    type: 'discover', kind: 'sense', icon: '🔎', label: '魅力を発見', title: '隠れた魅力を見つける', reward: 35,
+    call: (p) => `${p}で、まだ知られておらぬ隠れた魅力を一つ見つけて報せておくれ。それが新たな価値となる。`,
+    murmur: 'のう、隠れた魅力を見つけておくれ…',
+  },
+  wish: {
+    type: 'wish', kind: 'sense', icon: '🎋', label: '願いを書く', title: '願いを書いて奉納する', reward: 20,
+    call: (p) => `${p}の神前に、そなたの願いを一つ書いて奉納してみよ。心が澄むはずじゃ。`,
+    murmur: 'のう、願いを書いてみぬか…',
+  },
+  gratitude: {
+    type: 'gratitude', kind: 'sense', icon: '🙏', label: '感謝を捧げる', title: '神へ感謝を捧げる', reward: 15,
+    call: (p) => `${p}に宿るわしへ、日々の恵みに感謝を捧げてはくれぬか。`,
+    murmur: 'のう、感謝を捧げてみぬか…',
+  },
+  recommend: {
+    type: 'recommend', kind: 'understand', icon: '👍', label: 'おすすめを選ぶ', title: '一番のおすすめを選ぶ', reward: 30,
+    call: (p) => `${p}で集まった声の中から、そなたが一番と思うものを選んでおくれ。`,
+    murmur: 'そなたの一番を、選んでおくれ…',
+  },
+  verify: {
+    type: 'verify', kind: 'understand', icon: '🔍', label: '情報を確かめる', title: '集まった情報の正しさを確かめる', reward: 30,
+    call: (p) => `${p}に集まった情報、その正しさをそなたの目で確かめておくれ。`,
+    murmur: 'そなたの目で、情報を確かめておくれ…',
+  },
+  donate: {
+    type: 'donate', kind: 'act', icon: '🪙', label: 'お賽銭を捧げる', title: 'お賽銭・寄進をする', reward: 35,
+    call: (p) => `${p}の発展のため、心ばかりの寄進をしてはくれぬか。塵も積もれば山となる。`,
+    murmur: 'のう、心ばかりの寄進を…',
+  },
+  guide: {
+    type: 'guide', kind: 'act', icon: '🧭', label: '道案内をする', title: '他の巡礼者を案内する', reward: 35,
+    call: (p) => `${p}を訪れた他の巡礼者に、道や見どころを案内してはくれぬか。`,
+    murmur: 'のう、他の巡礼者を案内してはくれぬか…',
+  },
+  meditate: {
+    type: 'meditate', kind: 'act', icon: '🧘', label: '瞑想する', title: '瞑想して心を鎮める', reward: 40,
+    call: (p) => `${p}の静けさの中で、しばし目を閉じ瞑想してみよ。煩悩が一つ、静かに消えてゆく。`,
+    murmur: 'のう、しばし瞑想してみぬか…',
+  },
 };
 
 /** タスク種別 → どの神の機能を強化するか（TASK_CATALOG.kind と一致） */
@@ -365,9 +421,9 @@ export const COMMON_TASK_TYPES: TaskType[] = ['context', 'photo', 'evaluate', 'e
 
 /** 神の3機能（管理画面のグルーピング表示用） */
 export const GOD_FUNCTIONS: { key: TaskKind; icon: string; label: string; desc: string; tasks: TaskType[] }[] = [
-  { key: 'sense', icon: '👁️', label: '情報収集タスク', desc: '世界の値を調整するためのコンテキストを集める（価値・課題・煩悩・今の様子）', tasks: ['context', 'event', 'photo', 'cleaning', 'visit', 'value_ask', 'issue_ask', 'bonnou_ask', 'avatar_photo', 'goshuin'] },
-  { key: 'understand', icon: '🧠', label: '理解判断タスク', desc: '集めた情報・投稿をジャッジし、価値と課題を読み解く', tasks: ['review', 'eat', 'evaluate', 'judge'] },
-  { key: 'act', icon: '✋', label: '操作タスク', desc: '世界の値を直接動かす（価値を広げ、課題・煩悩を解決する）', tasks: ['resolveIssue', 'cleanup', 'buy', 'sns', 'bonnou_resolve', 'walk'] },
+  { key: 'sense', icon: '👁️', label: '情報収集タスク', desc: '世界の値を調整するためのコンテキストを集める（価値・課題・煩悩・今の様子）', tasks: ['context', 'event', 'photo', 'cleaning', 'visit', 'weather', 'value_ask', 'issue_ask', 'discover', 'bonnou_ask', 'wish', 'gratitude', 'avatar_photo', 'goshuin'] },
+  { key: 'understand', icon: '🧠', label: '理解判断タスク', desc: '集めた情報・投稿をジャッジし、価値と課題を読み解く', tasks: ['review', 'eat', 'evaluate', 'judge', 'recommend', 'verify'] },
+  { key: 'act', icon: '✋', label: '操作タスク', desc: '世界の値を直接動かす（価値を広げ、課題・煩悩を解決する）', tasks: ['resolveIssue', 'cleanup', 'buy', 'sns', 'donate', 'guide', 'bonnou_resolve', 'walk', 'meditate'] },
 ];
 
 /** タスクの対象（第2の分類軸）。場の活気を動かすか、人間の覚りを動かすか。 */
@@ -381,8 +437,10 @@ export const TASK_TARGET: Record<TaskType, TaskTarget> = {
   context: 'spot', photo: 'spot', evaluate: 'spot', event: 'spot', review: 'spot',
   sns: 'spot', buy: 'spot', eat: 'spot', cleaning: 'spot', visit: 'spot',
   resolveIssue: 'spot', judge: 'spot', value_ask: 'spot', issue_ask: 'spot', cleanup: 'spot',
+  weather: 'spot', discover: 'spot', recommend: 'spot', verify: 'spot', donate: 'spot', guide: 'spot',
   // 人間の覚り（徳・煩悩）に働く
   bonnou_ask: 'human', bonnou_resolve: 'human', walk: 'human', avatar_photo: 'human', goshuin: 'human',
+  wish: 'human', gratitude: 'human', meditate: 'human',
 };
 
 /** タスク種別ごとのテーマ色（Tailwind 用） */
@@ -407,4 +465,13 @@ export const TASK_TONE: Record<TaskType, { text: string; bg: string; border: str
   cleanup: { text: 'text-teal-600', bg: 'bg-teal-50', border: 'border-teal-200' },
   avatar_photo: { text: 'text-pink-600', bg: 'bg-pink-50', border: 'border-pink-200' },
   goshuin: { text: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200' },
+  weather: { text: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-200' },
+  discover: { text: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200' },
+  wish: { text: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
+  gratitude: { text: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-200' },
+  recommend: { text: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-200' },
+  verify: { text: 'text-cyan-600', bg: 'bg-cyan-50', border: 'border-cyan-200' },
+  donate: { text: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200' },
+  guide: { text: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200' },
+  meditate: { text: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-200' },
 };

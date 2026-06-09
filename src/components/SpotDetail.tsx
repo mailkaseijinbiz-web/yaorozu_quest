@@ -285,7 +285,7 @@ export default function SpotDetail({
   };
 
   // テキスト投稿で達成するタスク種別（価値・課題・煩悩の収集を含む）
-  const POST_TYPES = new Set(['context', 'review', 'event', 'eat', 'buy', 'resolveIssue', 'value_ask', 'issue_ask', 'bonnou_ask', 'bonnou_resolve']);
+  const POST_TYPES = new Set(['context', 'review', 'event', 'eat', 'buy', 'resolveIssue', 'value_ask', 'issue_ask', 'bonnou_ask', 'bonnou_resolve', 'weather', 'discover', 'wish']);
 
   // ── 神の依頼タスク達成 ──
   const handleTask = async (task: GodTask) => {
@@ -332,13 +332,13 @@ export default function SpotDetail({
       flashToast(result === 'copied' ? `🔗 リンクをコピー！ +${task.reward}徳` : `📣 シェアしました！ +${task.reward}徳`);
       onChanged?.();
       return;
-    } else if (task.type === 'walk') {
-      // 散歩：その場で達成し、未解決の煩悩を一つ手放す（覚り+1）
+    } else if (task.type === 'walk' || task.type === 'meditate') {
+      // 散歩／瞑想：その場で達成し、未解決の煩悩を一つ手放す（覚り+1）
       const released = db.resolveBonnou(currentUser.id);
       db.completeGodTask(currentUser.id, spot.id, task.reward);
       db.recordTaskDone(currentUser.id, task.type, spot.id, task.reward);
       setDoneTasks((prev) => ({ ...prev, [task.id]: true }));
-      flashToast(released ? `🚶 散歩で煩悩を一つ手放した！ +${task.reward}徳` : `🚶 心を整えた！ +${task.reward}徳`);
+      flashToast(released ? `${task.icon} 煩悩を一つ手放した！ +${task.reward}徳` : `${task.icon} 心を整えた！ +${task.reward}徳`);
       onChanged?.();
       return;
     } else if (POST_TYPES.has(task.type)) {
@@ -376,7 +376,7 @@ export default function SpotDetail({
       // 価値・課題・口コミ等：UGC として投稿（+50徳）
       db.addUgcPost(currentUser.id, spot.id, text, { imageUrl: postPhoto || undefined, visibility: postVisibility });
       // 世界の値を直接調整：価値→enjoyments / 課題→issues に加算
-      if (t === 'value_ask' && text) db.addEnjoyment(spot.id, text);
+      if ((t === 'value_ask' || t === 'discover') && text) db.addEnjoyment(spot.id, text);
       if (t === 'issue_ask' && text) db.addIssue(spot.id, text);
       const grow = enjoymentForTask(postingTask, spot.name);
       if (grow) db.addEnjoyment(spot.id, grow);

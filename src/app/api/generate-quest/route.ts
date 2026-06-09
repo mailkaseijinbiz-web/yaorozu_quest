@@ -130,9 +130,9 @@ function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '
 以下の「場」を題材に、街歩き型のクエストを${count}個、日本語で考えてください。
 
 クエストは「タスクの集まり」です。各タスクは「世界の値（活気=価値−課題 / 覚り=徳−煩悩）を調整する」か「調整に必要なコンテキストを生成する」かのいずれかで、神の3つの働きに属します:
-- 情報収集(sense)＝コンテキスト生成: visit(来訪), photo(写真), context(今の様子), event(できごと), cleaning(清掃確認), value_ask(この場の価値を人間に尋ねる→活気を上げる素材), issue_ask(この場の課題を人間に尋ねる→解決の素材), bonnou_ask(人間の煩悩を尋ねる→覚りの素材), avatar_photo(巡礼者自身の姿を撮りアバターにする)
-- 理解判断(understand): review(口コミ), eat(実食の声), evaluate(写真を評価), judge(投稿をジャッジ)
-- 操作(act)＝世界の値を直接調整: resolveIssue(課題を解決し活気+2), cleanup(掃除をして場を整える), buy(買物報告), sns(価値を外へ拡散), bonnou_resolve(人間の煩悩を一つ手放し覚り+1), walk(散歩で心を整え煩悩を一つ手放す＝覚り+1)
+- 情報収集(sense)＝コンテキスト生成: visit(来訪), photo(写真), context(今の様子), event(できごと), cleaning(清掃確認), weather(天気), value_ask(この場の価値を人間に尋ねる→活気を上げる素材), issue_ask(この場の課題を人間に尋ねる→解決の素材), discover(隠れた魅力を発見→価値追加), bonnou_ask(人間の煩悩を尋ねる→覚りの素材), wish(願いを書く), gratitude(感謝を捧げる), avatar_photo(巡礼者自身の姿を撮りアバターにする)
+- 理解判断(understand): review(口コミ), eat(実食の声), evaluate(写真を評価), judge(投稿をジャッジ), recommend(一番を選ぶ), verify(情報を確かめる)
+- 操作(act)＝世界の値を直接調整: resolveIssue(課題を解決し活気+2), cleanup(掃除をして場を整える), buy(買物報告), sns(価値を外へ拡散), donate(寄進), guide(道案内), bonnou_resolve(人間の煩悩を一つ手放し覚り+1), walk(散歩で心を整え覚り+1), meditate(瞑想で煩悩を手放し覚り+1)
 
 各クエストは1〜4タスクで構成してください（1タスクの軽量クエストも可）。複数タスクのときは、なるべく「情報収集」と「操作」を組み合わせて、コンテキスト収集→世界の値の調整、の流れになるようにします。
 生成の制約条件:
