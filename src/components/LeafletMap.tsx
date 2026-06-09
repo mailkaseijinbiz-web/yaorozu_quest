@@ -36,6 +36,7 @@ interface LeafletMapProps {
   onMapMove?: (center: { lat: number; lng: number }) => void; // ユーザーが地図を移動させたとき（スロットル済み）
   cardFocus?: { lat: number; lng: number } | null; // インタラクティブカードが指す場所
   cardFocusToken?: number; // 値が変わるとカードの場所へ地図を寄せる（スワイプ連動）
+  deviceHeading?: number | null; // 端末の向き（方位磁針, 北=0時計回り）。親で取得して配る
 }
 
 export default function LeafletMap({
@@ -52,6 +53,7 @@ export default function LeafletMap({
   onMapMove,
   cardFocus,
   cardFocusToken,
+  deviceHeading = null,
 }: LeafletMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -71,7 +73,6 @@ export default function LeafletMap({
 
   // 地図の移動に追従して再描画するためのバージョン
   const [mapVersion, setMapVersion] = useState(0);
-  const [deviceHeading, setDeviceHeading] = useState<number | null>(null); // 方位磁針
 
   // 1. Initialize Map
   useEffect(() => {
@@ -139,40 +140,6 @@ export default function LeafletMap({
       }
     };
   }, []);
-
-  // 方位磁針（デバイスの向き）に反応して矢印を回す
-  useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handler = (e: any) => {
-      let h: number | null = null;
-      if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading; // iOS
-      else if (e.absolute === true && typeof e.alpha === 'number') h = (360 - e.alpha) % 360; // Android/絶対
-      else if (typeof e.alpha === 'number') h = (360 - e.alpha) % 360;
-      if (h != null && !isNaN(h)) setDeviceHeading(h);
-    };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const DOE: any = typeof window !== 'undefined' ? (window as any).DeviceOrientationEvent : undefined;
-    let attached = false;
-    const attach = () => {
-      window.addEventListener('deviceorientationabsolute', handler as EventListener);
-      window.addEventListener('deviceorientation', handler as EventListener);
-      attached = true;
-    };
-    if (DOE && typeof DOE.requestPermission === 'function') {
-      // iOS 13+ はユーザー操作で許可が必要 → 最初のタップで要求
-      const onFirst = () => {
-        DOE.requestPermission().then((s: string) => { if (s === 'granted') attach(); }).catch(() => {});
-        window.removeEventListener('touchend', onFirst);
-        window.removeEventListener('click', onFirst);
-      };
-      window.addEventListener('touchend', onFirst, { once: true });
-      window.addEventListener('click', onFirst, { once: true });
-      return () => { window.removeEventListener('touchend', onFirst); window.removeEventListener('click', onFirst); if (attached) { window.removeEventListener('deviceorientationabsolute', handler as EventListener); window.removeEventListener('deviceorientation', handler as EventListener); } };
-    }
-    attach();
-    return () => { window.removeEventListener('deviceorientationabsolute', handler as EventListener); window.removeEventListener('deviceorientation', handler as EventListener); };
-  }, []);
-
 
   // ビューポート内のスポットを中心からの近さ順に、ズーム連動の上限まで絞る
   const visibleSpots = useMemo(() => {
@@ -362,7 +329,14 @@ export default function LeafletMap({
       }
       const borderCls = isActive ? 'border-[#2563eb]' : 'border-[#2563eb]/40';
 
-      const spotHtml = showBubble
+      const spotHtml = isActive
+        ? `
+        <div class="relative flex flex-col items-center">
+          <div style="width:40px;height:40px;border-radius:9999px;background:#2563eb;border:3px solid #fff;box-shadow:0 2px 10px rgba(37,99,235,.55);display:flex;align-items:center;justify-content:center;font-size:21px;line-height:1;">${iconEmoji}</div>
+          <span class="map-spot-name map-spot-name-active" style="margin-top:3px;">${spot.name}</span>
+        </div>
+      `
+        : showBubble
         ? `
         <div class="relative flex flex-col items-center">
           <div class="relative flex items-start gap-1.5 rounded-2xl px-2.5 py-1.5 shadow-lg ${isActive ? 'border-2' : 'border'} ${borderCls}" style="max-width:190px;background:#ffffff;">
@@ -382,9 +356,9 @@ export default function LeafletMap({
       const spotIcon = L.divIcon({
         html: spotHtml,
         className: 'custom-spot-icon',
-        iconSize: showBubble ? [210, 108] : [120, 30],
-        // アンカー（＝この場の地理座標＝現在地ドット位置）を下げ、フキダシを上へ持ち上げてドットとの重なりを防ぐ
-        iconAnchor: showBubble ? [105, 60] : [60, 8],
+        iconSize: isActive ? [150, 64] : showBubble ? [210, 108] : [120, 30],
+        // アンカー（＝この場の地理座標）。選択中は青丸の中心、フキダシは上へ持ち上げてドットとの重なりを防ぐ
+        iconAnchor: isActive ? [75, 20] : showBubble ? [105, 60] : [60, 8],
       });
 
       const marker = L.marker([spot.latitude, spot.longitude], {

@@ -133,9 +133,9 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="min-h-dvh bg-gray-50 text-gray-800 font-sans">
+    <div className="h-dvh flex flex-col overflow-hidden bg-gray-50 text-gray-800 font-sans">
       {/* Top bar */}
-      <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between">
+      <header className="flex-shrink-0 z-20 bg-white/95 backdrop-blur border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Shield className="w-5 h-5 text-blue-600" />
           <h1 className="text-base font-black text-gray-900">GOD MANAGER</h1>
@@ -162,7 +162,7 @@ export default function AdminPage() {
       </header>
 
       {/* Tabs */}
-      <nav className="px-4 sm:px-6 pt-4 flex gap-2 flex-wrap">
+      <nav className="flex-shrink-0 px-4 sm:px-6 pt-4 pb-1 flex gap-2 flex-wrap">
         {TABS.map(({ key, label, icon: Icon }) => {
           const counts: Record<AdminTab, number | null> = {
             blueprint: null, analytics: null, gods: agentCount, activity: db.getActivities().length,
@@ -190,7 +190,7 @@ export default function AdminPage() {
         })}
       </nav>
 
-      <main className="px-4 sm:px-6 py-5 max-w-6xl mx-auto">
+      <main className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-5 max-w-6xl mx-auto w-full">
         {tab === 'blueprint' && <Blueprint />}
         {tab === 'analytics' && <Analytics />}
         {tab === 'gods' && <YaorozuGods spots={spots} onChange={refresh} />}

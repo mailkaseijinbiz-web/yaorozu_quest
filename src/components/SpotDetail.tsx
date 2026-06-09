@@ -596,24 +596,25 @@ export default function SpotDetail({
                       const tone = TASK_TONE[task.type];
                       const done = doneTasks[task.id];
                       return (
-                        <div key={task.id} className={`rounded-xl border p-3 ${done ? 'bg-gray-50 border-gray-200 opacity-70' : `${tone.bg} ${tone.border}`}`}>
-                          <div className="flex items-start gap-2.5">
-                            <span className="text-xl flex-shrink-0">{task.icon}</span>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <h4 className={`text-base font-black ${done ? 'text-gray-500' : 'text-gray-800'}`}>{task.title}</h4>
-                                <span className={`text-xs font-black ${tone.text}`}>+{task.reward}徳</span>
-                              </div>
-                              <p className="text-[13px] text-gray-500 leading-relaxed mt-0.5">{task.call?.(spot.name)}</p>
-                            </div>
-                            <button
-                              onClick={() => handleTask(task)}
-                              disabled={done}
-                              className={`flex-shrink-0 text-[13px] font-black px-3 py-1.5 rounded-full transition-all cursor-pointer ${done ? 'bg-gray-200 text-gray-400' : 'bg-shrine-red text-white hover:opacity-90 active:scale-95'}`}
-                            >
-                              {done ? '達成済' : task.label}
-                            </button>
+                        <div key={task.id} className={`rounded-2xl border shadow-sm overflow-hidden flex items-stretch gap-3 ${done ? 'bg-gray-50 border-gray-200 opacity-70' : `${tone.bg} ${tone.border}`}`}>
+                          {/* 左：アイコンのサムネブロック（クエストカード形式） */}
+                          <div className={`w-16 self-stretch flex items-center justify-center text-3xl flex-shrink-0 ${done ? 'bg-gray-100' : 'bg-white/60'}`}>
+                            {done ? '✅' : task.icon}
                           </div>
+                          <div className="flex-1 min-w-0 py-2.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h4 className={`text-[15px] font-black ${done ? 'text-gray-500' : 'text-gray-800'}`}>{task.title}</h4>
+                              <span className={`text-xs font-black ${tone.text}`}>+{task.reward}徳</span>
+                            </div>
+                            <p className="text-[13px] text-gray-500 leading-relaxed mt-0.5">{task.call?.(spot.name)}</p>
+                          </div>
+                          <button
+                            onClick={() => handleTask(task)}
+                            disabled={done}
+                            className={`self-center mr-2.5 flex-shrink-0 text-[13px] font-black px-3 py-1.5 rounded-full transition-all cursor-pointer ${done ? 'bg-gray-200 text-gray-400' : 'bg-shrine-red text-white hover:opacity-90 active:scale-95'}`}
+                          >
+                            {done ? '達成済' : task.label}
+                          </button>
                         </div>
                       );
                     })}

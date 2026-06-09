@@ -59,6 +59,7 @@ interface MapTabProps {
   onAdvanceChallenge?: (stepId: string, photo?: string | null) => void; // 次の目的地ステップを達成（証拠写真つき）
   currentUser: User; // 近くの場カード表示用
   onMapMove?: (center: { lat: number; lng: number }) => void; // 地図を移動させたとき（アクティビティログ用）
+  deviceHeading?: number | null; // 端末の向き（方位磁針）。ナビ矢印のコンパス補正と現在地マーカーに使う
 }
 
 
@@ -75,6 +76,7 @@ export default function MapTab({
   onAdvanceChallenge,
   currentUser,
   onMapMove,
+  deviceHeading = null,
 }: MapTabProps) {
   const displaySpots = spots;
 
@@ -225,20 +227,17 @@ export default function MapTab({
 
   // ── インタラクティブカード（Interactive Card） ──
   // マップ下部に出る「近くの場」カードの領域。クエスト未参加時に表示し、
-  // 横スワイプで次の場へ切替、タップでその場の詳細を開く（近い順）。
+  // 横スワイプで隣の場へ切替、タップでその場の詳細を開く（近い順）。
   const nearSpotList = [...spots]
     .map((s) => ({ s, d: distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude) }))
     .sort((a, b) => a.d - b.d)
     .slice(0, 10)
     .map((x) => x.s);
-  // 表示中のカード位置（スワイプで移動）
-  const [cardIndex, setCardIndex] = useState(0);
-  // スワイプでカードが変わったら、対応する場所へ地図を寄せるためのトークン
-  const [cardFocusToken, setCardFocusToken] = useState(0);
-  // 候補数が変わったら範囲内に収める
-  useEffect(() => { setCardIndex((i) => Math.min(i, Math.max(0, nearSpotList.length - 1))); }, [nearSpotList.length]);
-  const nearSpot = nearSpotList[Math.min(cardIndex, nearSpotList.length - 1)] ?? null;
-  // 横スワイプ検出（スワイプ直後のタップで誤って開始しないよう swipedRef でガード）
+  // カードが指す場：選択中(activeSpot)があればそれ、無ければ最寄り。
+  // マーカータップ/スワイプで activeSpot が変わり、それに追従してカードと地図ハイライトが更新される。
+  const cardSpot = activeSpot ?? nearSpotList[0] ?? null;
+  const cardIdx = cardSpot ? nearSpotList.findIndex((s) => s.id === cardSpot.id) : -1;
+  // 横スワイプ検出（スワイプ直後のタップで誤って詳細を開かないよう swipedRef でガード）
   const swipeStartXRef = useRef<number | null>(null);
   const swipedRef = useRef(false);
   const onCardTouchStart = (e: React.TouchEvent) => { swipeStartXRef.current = e.touches[0]?.clientX ?? null; swipedRef.current = false; };
@@ -249,9 +248,10 @@ export default function MapTab({
     const dx = (e.changedTouches[0]?.clientX ?? start) - start;
     if (Math.abs(dx) <= 40) return;
     swipedRef.current = true; // スワイプ後のタップ誤爆を防ぐ
-    // カードが実際に変わるときだけ地図を対応する場所へ寄せる（端では動かさない）
-    if (dx < 0 && cardIndex < nearSpotList.length - 1) { setCardIndex(cardIndex + 1); setCardFocusToken((t) => t + 1); }
-    else if (dx > 0 && cardIndex > 0) { setCardIndex(cardIndex - 1); setCardFocusToken((t) => t + 1); }
+    // スワイプで隣の場を選択（地図のハイライトも更新）。端では動かさない。
+    const base = cardIdx < 0 ? 0 : cardIdx;
+    if (dx < 0 && base < nearSpotList.length - 1) onSelectSpot(nearSpotList[base + 1]);
+    else if (dx > 0 && base > 0) onSelectSpot(nearSpotList[base - 1]);
   };
 
   // 導入（プロローグ）表示中か。表示中はヘッダー/下部オーバーレイ/現在地ボタンを隠す。
@@ -269,7 +269,7 @@ export default function MapTab({
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [activeChallenge?.id, nextStep?.id, !!nearSpot, !!celebrate, chAllDone, introShowing, guideDone]);
+  }, [activeChallenge?.id, nextStep?.id, !!cardSpot, !!celebrate, chAllDone, introShowing, guideDone]);
   // bottom-3(12px) + オーバーレイ高さ + 余白10px
   const controlsBottom = overlayH > 0 ? overlayH + 12 + 10 : 210;
 
@@ -402,8 +402,7 @@ export default function MapTab({
           focusGoalToken={focusGoalToken}
           hideControls={introShowing}
           onMapMove={onMapMove}
-          cardFocus={nearSpot ? { lat: nearSpot.latitude, lng: nearSpot.longitude } : null}
-          cardFocusToken={cardFocusToken}
+          deviceHeading={deviceHeading}
         />
       </div>
 
@@ -476,11 +475,14 @@ export default function MapTab({
                   const val = d < 1 ? `${Math.round(d * 1000)}` : d.toFixed(1);
                   const unit = d < 1 ? 'm' : 'km';
                   const brg = bearingDeg(userLocation.lat, userLocation.lng, nextStep.lat, nextStep.lng!);
+                  // コンパス化：端末の向き(deviceHeading)を引いて画面相対の方角にする。
+                  // 端末を回すと矢印が現実の目的地方向を指し続ける（方位磁針が無ければ真北基準=従来動作）。
+                  const screenBrg = brg - (deviceHeading ?? 0);
                   // 近づくほど色が変わる：~50m以内=緑、~300m以内=橙、遠い=青
                   const color = d <= 0.05 ? 'text-emerald-500' : d <= 0.3 ? 'text-amber-500' : 'text-[#2563eb]';
                   return (
                     <span className={`font-black flex items-baseline gap-1 flex-shrink-0 ${color}`} style={{ transition: 'color 0.3s' }}>
-                      <Navigation2 className="w-5 h-5 fill-current self-center" style={{ transform: `rotate(${brg}deg)`, transition: 'transform 0.3s ease-out' }} />
+                      <Navigation2 className="w-5 h-5 fill-current self-center" style={{ transform: `rotate(${screenBrg}deg)`, transition: 'transform 0.3s ease-out' }} />
                       <span className="tabular-nums text-3xl leading-none">{val}</span>
                       <span className="text-sm font-bold">{unit}</span>
                     </span>
@@ -532,9 +534,9 @@ export default function MapTab({
             </>
           ) : null}
         </div>
-      ) : !activeChallenge && !celebrate && nearSpot ? (() => {
-        // ▼ インタラクティブカード（Interactive Card）：近くの場を提示し、タップで詳細を開く
-        const spot = nearSpot;
+      ) : !activeChallenge && !celebrate && cardSpot ? (() => {
+        // ▼ インタラクティブカード（Interactive Card）：選択中/最寄りの場を提示し、タップで詳細を開く
+        const spot = cardSpot;
         const d = distanceKm(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude);
         const distVal = d < 1 ? `${Math.round(d * 1000)}` : d.toFixed(1);
         const distUnit = d < 1 ? 'm' : 'km';
@@ -548,7 +550,7 @@ export default function MapTab({
             tabIndex={0}
             onTouchStart={onCardTouchStart}
             onTouchEnd={onCardTouchEnd}
-            onClick={() => { if (swipedRef.current) { swipedRef.current = false; return; } onSelectSpot(spot); }}
+            onClick={() => { if (swipedRef.current) { swipedRef.current = false; return; } onSelectSpot(spot); onOpenDetail?.(spot); }}
             className="absolute bottom-3 left-3 right-3 z-[1000] text-left bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-black/5 overflow-hidden cursor-pointer active:scale-[0.99] transition-all touch-pan-y"
           >
             <div className="flex items-stretch gap-3">
@@ -557,7 +559,7 @@ export default function MapTab({
               </div>
               <div className="flex-1 min-w-0 py-3">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-black tracking-wider text-[#2563eb]/70">近くの場{nearSpotList.length > 1 ? ` ${cardIndex + 1}/${nearSpotList.length}` : ''}</span>
+                  <span className="text-[10px] font-black tracking-wider text-[#2563eb]/70">近くの場{nearSpotList.length > 1 && cardIdx >= 0 ? ` ${cardIdx + 1}/${nearSpotList.length}` : ''}</span>
                   {nearSpotList.length > 1 && (
                     <span className="text-[10px] text-gray-400 flex items-center gap-0.5">← スワイプ →</span>
                   )}
@@ -580,7 +582,7 @@ export default function MapTab({
                 {nearSpotList.length > 1 && (
                   <div className="flex items-center gap-1 mt-1.5">
                     {nearSpotList.map((_, i) => (
-                      <span key={i} className={`h-1 rounded-full transition-all ${i === cardIndex ? 'w-3 bg-[#2563eb]' : 'w-1 bg-gray-300'}`} />
+                      <span key={i} className={`h-1 rounded-full transition-all ${i === cardIdx ? 'w-3 bg-[#2563eb]' : 'w-1 bg-gray-300'}`} />
                     ))}
                   </div>
                 )}

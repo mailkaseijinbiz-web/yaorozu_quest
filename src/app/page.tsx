@@ -17,6 +17,7 @@ import { getBadgeStates, godAvatarEmoji, type BadgeState } from '../data/badges'
 import { Challenge } from '../data/challenges';
 import type { Quest } from '../data/tasks';
 import { subscribePush } from '../lib/push-client';
+import { useDeviceHeading } from '../lib/use-device-heading';
 
 type TabType = 'home' | 'quest' | 'mypage';
 
@@ -67,6 +68,7 @@ export default function HomePage() {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [detailSpot, setDetailSpot] = useState<Spot | null>(null);
   const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
+  const deviceHeading = useDeviceHeading(); // 端末の向き（方位磁針）。地図のナビ矢印・現在地マーカーで共有
 
   // 詳細ページをブラウザの「戻る」で閉じられるように履歴に積む
   useEffect(() => {
@@ -703,11 +705,12 @@ export default function HomePage() {
                 <MapTab
                   spots={spots}
                   activeSpot={activeSpot}
-                  onSelectSpot={(s) => { setActiveSpot(s); setDetailSpot(s); }}
+                  onSelectSpot={(s) => setActiveSpot(s)}
                   userLocation={userLocation}
                   setUserLocation={setUserLocation}
                   creatorProfiles={creatorProfiles}
                   onOpenDetail={setDetailSpot}
+                  deviceHeading={deviceHeading}
                   currentUser={currentUser || FALLBACK_CURRENT_USER}
                   activeChallenge={activeChallengeId ? db.getQuest(activeChallengeId) ?? null : null}
                   onClearChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
