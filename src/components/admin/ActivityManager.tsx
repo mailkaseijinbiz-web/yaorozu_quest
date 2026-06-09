@@ -18,6 +18,7 @@ const META: Record<ActivityType, { icon: string; label: string; color: string }>
   home_view:     { icon: '🏠', label: 'ホームタブを表示', color: 'text-slate-600' },
   map_move:      { icon: '🗺️', label: '地図を移動', color: 'text-teal-600' },
   spot_generate: { icon: '✨', label: '場を生成', color: 'text-purple-600' },
+  god_generate:  { icon: '🪷', label: '神を生成', color: 'text-fuchsia-600' },
   spot_delete:   { icon: '🗑️', label: '場を削除', color: 'text-rose-600' },
 };
 

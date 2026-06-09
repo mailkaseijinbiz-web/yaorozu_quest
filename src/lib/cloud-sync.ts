@@ -24,6 +24,8 @@ const SYNC_KEYS = [
   // API監視・認証
   'yaorozu_api_calls',
   'yaorozu_revoked_users',
+  // 人間の煩悩（覚りの調整素材）
+  'yaorozu_bonnou',
 ];
 
 // 単一ユーザーデモのためスナップショットIDは固定。将来は認証ユーザーIDに。

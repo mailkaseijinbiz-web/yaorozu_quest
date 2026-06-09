@@ -57,7 +57,7 @@ function coerceQuest(raw: unknown, n: number, spot: SpotInput, ts: number): Ques
   const r = (raw ?? {}) as Record<string, unknown>;
   const rawTasks = Array.isArray(r.tasks) ? r.tasks : [];
   if (rawTasks.length === 0) return null;
-  const tasks = rawTasks.slice(0, 8).map((t, i) => coerceTask(t, i, spot));
+  const tasks = rawTasks.slice(0, 4).map((t, i) => coerceTask(t, i, spot)); // クエストはタスク1〜4
   const difficulty = ([1, 2, 3].includes(Number(r.difficulty)) ? Number(r.difficulty) : 1) as 1 | 2 | 3;
   return {
     id: `uq-${spot.id || 'spot'}-${ts}-${n}`,
@@ -129,13 +129,17 @@ function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '
   return `${policy}${base}あなたは位置情報巡礼ゲーム「八百万クエスト」のクエストデザイナーです。
 以下の「場」を題材に、街歩き型のクエストを${count}個、日本語で考えてください。
 
-クエストは「タスクの集まり」です。各タスクは神の3つの働きのいずれかに属します:
-- 情報収集(sense): visit(来訪), photo(写真), context(今の様子), event(できごと), cleaning(清掃確認)
+クエストは「タスクの集まり」です。各タスクは「世界の値（活気=価値−課題 / 覚り=徳−煩悩）を調整する」か「調整に必要なコンテキストを生成する」かのいずれかで、神の3つの働きに属します:
+- 情報収集(sense)＝コンテキスト生成: visit(来訪), photo(写真), context(今の様子), event(できごと), cleaning(清掃確認), value_ask(この場の価値を人間に尋ねる→活気を上げる素材), issue_ask(この場の課題を人間に尋ねる→解決の素材), bonnou_ask(人間の煩悩を尋ねる→覚りの素材), avatar_photo(巡礼者自身の姿を撮りアバターにする)
 - 理解判断(understand): review(口コミ), eat(実食の声), evaluate(写真を評価), judge(投稿をジャッジ)
-- 操作(act): resolveIssue(課題解決), buy(買物報告), sns(SNS拡散)
+- 操作(act)＝世界の値を直接調整: resolveIssue(課題を解決し活気+2), buy(買物報告), sns(価値を外へ拡散), bonnou_resolve(人間の煩悩を一つ手放し覚り+1)
 
-各クエストには「情報収集・理解判断・操作」を最低1つずつ含め、3〜5タスクで構成してください。
-価値は「楽しみ方」から、操作タスクは「課題」から作ってください（課題があれば必ず resolveIssue を入れ、issueIndex で何番目の課題かを示す）。
+各クエストは1〜4タスクで構成してください（1タスクの軽量クエストも可）。複数タスクのときは、なるべく「情報収集」と「操作」を組み合わせて、コンテキスト収集→世界の値の調整、の流れになるようにします。
+生成の制約条件:
+- resolveIssue は「課題」が存在する場合のみ使用し、issueIndex で何番目の課題かを必ず示す（課題が無ければ使わない）。
+- value_ask / issue_ask は、価値・課題がまだ薄い場で特に有効（人間から集めて充実させる）。
+- bonnou_ask は人間の内面が対象で場に依存しない。bonnou_resolve は bonnou_ask の後に意味を持つ。
+- 価値タスクは「楽しみ方」から、操作タスクは「課題」から作ってください。
 
 場の名前: ${spot.name}
 カテゴリ: ${spot.category}

@@ -73,9 +73,10 @@ export function Blueprint() {
   const users = allUsers.length;
   const totalToku = allUsers.reduce((n, u) => n + (u.totalToku ?? 0), 0); // 徳の総和（スコア）
   const activities = db.getActivities().length;
-  // 究極目的：世界の幸福 = 場の活気（価値−課題）× 人間の覚り（徳−煩悩。煩悩は現状0）
+  // 究極目的：世界の幸福 = 場の活気（価値−課題） + 人間の覚り（徳−煩悩）
+  const bonnou = db.getUnresolvedBonnouCount(); // 全ユーザーの未解決煩悩
   const activeness = totalValue - totalIssues;
-  const enlightenment = totalToku - 0;
+  const enlightenment = totalToku - bonnou;
   const happiness = activeness + enlightenment;
   const quests = db.getAllQuests().length; // 静的＋生成クエスト
   const agents = db.getAgents().length; // 神（Agent）の実数
@@ -277,8 +278,8 @@ export function Blueprint() {
                   <p className="text-[10px] text-rose-600 mt-0.5 leading-tight">未浄化の欲・執着</p>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-lg font-black text-rose-700 tabular-nums leading-none">0</p>
-                  <p className="text-[9px] text-rose-500">総和</p>
+                  <p className="text-lg font-black text-rose-700 tabular-nums leading-none">{fmt(bonnou)}</p>
+                  <p className="text-[9px] text-rose-500">未解決</p>
                 </div>
               </div>
             </div>

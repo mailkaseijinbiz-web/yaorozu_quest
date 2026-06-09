@@ -7,7 +7,7 @@ import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from 
 import { distanceKm } from '../lib/geo';
 import { uploadImage } from '../lib/upload';
 import { shareToSns } from '../lib/share';
-import { grantGoShuin } from '../lib/goshuin';
+import { grantGoShuin, hasGoShuin } from '../lib/goshuin';
 
 // ── TTS（神の声）──────────────────────────────────────────
 const _ttsCache = new Map<string, string>();
@@ -136,6 +136,7 @@ export default function SpotDetail({
   const postPhotoInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false); // 写真アップロード中
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null); // アバター写真タスク用
   // クエスト写真の評価タスク
   const [evaluating, setEvaluating] = useState(false);
   const [evalIdx, setEvalIdx] = useState(0);
@@ -231,6 +232,27 @@ export default function SpotDetail({
     }
   };
 
+  // アバター写真タスク：撮影→アップロード→ユーザーのアバターに設定→達成
+  const onPickAvatar = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploading(true);
+    try {
+      const url = await uploadImage(file, `avatar-${currentUser.id}`);
+      db.setUserAvatar(currentUser.id, url);
+      db.completeGodTask(currentUser.id, spot.id, TASK_CATALOG.avatar_photo.reward);
+      db.recordTaskDone(currentUser.id, 'avatar_photo', spot.id, TASK_CATALOG.avatar_photo.reward);
+      setDoneTasks((prev) => ({ ...prev, avatar_photo: true }));
+      flashToast('🤳 アバターを設定！ +徳');
+      onChanged?.();
+    } catch {
+      flashToast('写真の処理に失敗しました');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   // 投稿モーダル：添付写真を選んで圧縮・アップロード
   const onPickPostPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -262,8 +284,8 @@ export default function SpotDetail({
     onChanged?.();
   };
 
-  // テキスト投稿が必要なタスク種別（コンテキスト収集・課題解決を含む）
-  const POST_TYPES = new Set(['context', 'review', 'event', 'eat', 'buy', 'resolveIssue']);
+  // テキスト投稿で達成するタスク種別（価値・課題・煩悩の収集を含む）
+  const POST_TYPES = new Set(['context', 'review', 'event', 'eat', 'buy', 'resolveIssue', 'value_ask', 'issue_ask', 'bonnou_ask', 'bonnou_resolve']);
 
   // ── 神の依頼タスク達成 ──
   const handleTask = async (task: GodTask) => {
@@ -271,6 +293,22 @@ export default function SpotDetail({
 
     if (task.type === 'photo') {
       handlePostPhoto(); // アップロード成功時に done にする
+      return;
+    } else if (task.type === 'avatar_photo') {
+      avatarInputRef.current?.click(); // 撮影→アバターに設定→達成
+      return;
+    } else if (task.type === 'goshuin') {
+      // 御朱印：既に授かっていれば即達成。未取得なら会話タブへ誘導（会話で授与される）。
+      if (hasGoShuin(currentUser.id, spot.id)) {
+        db.completeGodTask(currentUser.id, spot.id, task.reward);
+        db.recordTaskDone(currentUser.id, task.type, spot.id, task.reward);
+        setDoneTasks((prev) => ({ ...prev, [task.id]: true }));
+        flashToast(`🔴 御朱印を授かっている！ +${task.reward}徳`);
+        onChanged?.();
+      } else {
+        flashToast('「会話」タブで神と語らうと御朱印を授かれます');
+        setTab('chat');
+      }
       return;
     } else if (task.type === 'evaluate') {
       if (evalPhotos.length === 0) { flashToast('まだ評価できる写真がありません'); return; }
@@ -309,24 +347,36 @@ export default function SpotDetail({
     setDoneTasks((prev) => ({ ...prev, [task.id]: true }));
   };
 
-  // 投稿モーダルの送信（テキストまたは写真で投稿。課題解決はどちらか一方でも可）
+  // 投稿モーダルの送信（テキストまたは写真で投稿。タスク種別ごとに世界の値を調整する）
   const submitPost = () => {
     if (!postingTask) return;
     if (!postText.trim() && !postPhoto) return; // テキストも写真も無ければ送信しない
     if (postPhotoUploading) return;
-    db.addUgcPost(currentUser.id, spot.id, postText.trim(), {
-      imageUrl: postPhoto || undefined,
-      visibility: postVisibility,
-    }); // UGC投稿（+50徳）
-    db.recordTaskDone(currentUser.id, postingTask.type, spot.id, postingTask.reward);
-    const grow = enjoymentForTask(postingTask, spot.name);
-    if (grow) {
-      db.addEnjoyment(spot.id, grow);
+    const t = postingTask.type;
+    const text = postText.trim();
+
+    if (t === 'bonnou_ask') {
+      // 煩悩を打ち明ける：公開投稿はせず、本人の煩悩ストアに記録（覚りの調整素材）
+      db.addBonnou(currentUser.id, text, spot.id);
+      db.completeGodTask(currentUser.id, spot.id, postingTask.reward);
+    } else if (t === 'bonnou_resolve') {
+      // 煩悩を一つ手放す：未解決の煩悩を解決（覚り+1）
+      db.resolveBonnou(currentUser.id);
+      db.completeGodTask(currentUser.id, spot.id, postingTask.reward);
+    } else {
+      // 価値・課題・口コミ等：UGC として投稿（+50徳）
+      db.addUgcPost(currentUser.id, spot.id, text, { imageUrl: postPhoto || undefined, visibility: postVisibility });
+      // 世界の値を直接調整：価値→enjoyments / 課題→issues に加算
+      if (t === 'value_ask' && text) db.addEnjoyment(spot.id, text);
+      if (t === 'issue_ask' && text) db.addIssue(spot.id, text);
+      const grow = enjoymentForTask(postingTask, spot.name);
+      if (grow) db.addEnjoyment(spot.id, grow);
       setEnjoyments(db.getSpot(spot.id)?.enjoyments ?? []);
     }
+    db.recordTaskDone(currentUser.id, t, spot.id, postingTask.reward);
     setDoneTasks((prev) => ({ ...prev, [postingTask.id]: true }));
-    setUgcTick((t) => t + 1);
-    flashToast(`${postingTask.icon} 投稿しました！ +徳`);
+    setUgcTick((t2) => t2 + 1);
+    flashToast(`${postingTask.icon} 達成しました！`);
     onChanged?.();
     closePostModal();
   };
@@ -549,6 +599,7 @@ export default function SpotDetail({
                 {uploading ? '投稿中…' : '写真を投稿'}
               </button>
               <input ref={photoInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickPhoto} />
+              <input ref={avatarInputRef} type="file" accept="image/*" capture="user" className="hidden" onChange={onPickAvatar} />
             </div>
             {photos.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-center">

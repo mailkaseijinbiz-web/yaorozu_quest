@@ -27,7 +27,14 @@ export type TaskType =
   | 'cleaning'
   | 'visit' // sense — ジオフェンス来訪（旧 ChallengeStep の位置要素）
   | 'resolveIssue' // act — 場の課題(Spot.issues)を解決する
-  | 'judge'; // understand — 投稿物のジャッジ（evaluate の一般化）
+  | 'judge' // understand — 投稿物のジャッジ（evaluate の一般化）
+  // ── 世界の値（活気=価値−課題 / 覚り=徳−煩悩）を直接動かす拡張タスク ──
+  | 'value_ask' // sense — 人間からこの場の「価値」を集める → enjoyments に加算（活気+1）
+  | 'issue_ask' // sense — 人間からこの場の「課題」を集める → issues に加算（解決の素材）
+  | 'bonnou_ask' // sense — 人間の「煩悩」を神が問う → 煩悩ストアに記録（覚りの調整素材）
+  | 'bonnou_resolve' // act — 人間の煩悩を1つ浄化する → 未解決煩悩−1（覚り+1）
+  | 'avatar_photo' // sense — アバターになる写真を撮る → ユーザーのアバターに設定
+  | 'goshuin'; // sense — 神と会話し御朱印を授かる（写真不要・会話で完了する軽量クエスト）
 
 /** resolveIssue タスクが参照する課題 */
 export interface IssueRef {
@@ -227,6 +234,67 @@ export const TASK_CATALOG: Record<TaskType, CatalogTask> = {
     call: (p) => `${p}に集まった皆の声を、そなたの目で評しておくれ。佳きものを見極めるのじゃ。`,
     murmur: 'そなたの目で、集まった声を評しておくれ…',
   },
+  // ── 世界の値を動かす拡張タスク ──
+  value_ask: {
+    type: 'value_ask',
+    kind: 'sense',
+    icon: '💎',
+    label: '価値を伝える',
+    title: 'この場の価値を神に伝える',
+    reward: 30,
+    call: (p) => `${p}の、そなたが感じた「価値」——楽しみ方や魅力を、わしに教えておくれ。それがこの地の活気となる。`,
+    murmur: 'のう、この場の価値を教えておくれ…',
+  },
+  issue_ask: {
+    type: 'issue_ask',
+    kind: 'sense',
+    icon: '⚠️',
+    label: '課題を伝える',
+    title: 'この場の課題を神に伝える',
+    reward: 30,
+    call: (p) => `${p}で気になった「課題」——困りごとや改善すべき点を、わしに教えておくれ。解決の第一歩じゃ。`,
+    murmur: 'のう、この場の課題を教えておくれ…',
+  },
+  bonnou_ask: {
+    type: 'bonnou_ask',
+    kind: 'sense',
+    icon: '🌀',
+    label: '煩悩を打ち明ける',
+    title: '神に煩悩を打ち明ける',
+    reward: 20,
+    call: () => `そなたの心に巣食う「煩悩」——欲や執着を、正直に打ち明けてみよ。見つめることが浄化の始まりじゃ。`,
+    murmur: 'そなたの煩悩を、打ち明けてみぬか…',
+  },
+  bonnou_resolve: {
+    type: 'bonnou_resolve',
+    kind: 'act',
+    icon: '🕊️',
+    label: '煩悩を手放す',
+    title: '煩悩を一つ手放す',
+    reward: 50,
+    call: () => `打ち明けた煩悩の一つを、いまここで手放してみよ。どう乗り越えたか、わしに聞かせておくれ。`,
+    murmur: 'のう、煩悩を一つ手放してみぬか…',
+  },
+  avatar_photo: {
+    type: 'avatar_photo',
+    kind: 'sense',
+    icon: '🤳',
+    label: 'アバターを撮る',
+    title: '自らの姿を一枚撮る',
+    reward: 20,
+    call: (p) => `${p}を背に、そなた自身の姿を一枚撮っておくれ。それがそなたの巡礼者としての顔（アバター）になる。`,
+    murmur: 'そなた自身の姿を、一枚撮ってみぬか…',
+  },
+  goshuin: {
+    type: 'goshuin',
+    kind: 'sense',
+    icon: '🔴',
+    label: '御朱印をもらう',
+    title: '神から御朱印をもらう',
+    reward: 10,
+    call: (p) => `${p}に宿るわしのもとへ参り、言葉を交わして御朱印を受け取っておくれ。`,
+    murmur: '御朱印を授けよう。わしのもとへ参られよ…',
+  },
 };
 
 /** タスク種別 → どの神の機能を強化するか（TASK_CATALOG.kind と一致） */
@@ -275,9 +343,9 @@ export const COMMON_TASK_TYPES: TaskType[] = ['context', 'photo', 'evaluate', 'e
 
 /** 神の3機能（管理画面のグルーピング表示用） */
 export const GOD_FUNCTIONS: { key: TaskKind; icon: string; label: string; desc: string; tasks: TaskType[] }[] = [
-  { key: 'sense', icon: '👁️', label: '情報収集', desc: '場所の今・出来事・姿を集める', tasks: ['context', 'event', 'photo', 'cleaning', 'visit'] },
+  { key: 'sense', icon: '👁️', label: '情報収集', desc: '世界の値を調整するためのコンテキストを集める（価値・課題・煩悩・今の様子）', tasks: ['context', 'event', 'photo', 'cleaning', 'visit', 'value_ask', 'issue_ask', 'bonnou_ask', 'avatar_photo', 'goshuin'] },
   { key: 'understand', icon: '🧠', label: '理解判断', desc: '集めた情報・投稿をジャッジし、価値と課題を読み解く', tasks: ['review', 'eat', 'evaluate', 'judge'] },
-  { key: 'act', icon: '✋', label: '操作', desc: '価値を広げ、課題を解決し、世界へ働きかける', tasks: ['buy', 'sns', 'resolveIssue'] },
+  { key: 'act', icon: '✋', label: '操作', desc: '世界の値を直接動かす（価値を広げ、課題・煩悩を解決する）', tasks: ['buy', 'sns', 'resolveIssue', 'bonnou_resolve'] },
 ];
 
 /** タスク種別ごとのテーマ色（Tailwind 用） */
@@ -294,4 +362,10 @@ export const TASK_TONE: Record<TaskType, { text: string; bg: string; border: str
   visit: { text: 'text-lime-600', bg: 'bg-lime-50', border: 'border-lime-200' },
   resolveIssue: { text: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200' },
   judge: { text: 'text-fuchsia-600', bg: 'bg-fuchsia-50', border: 'border-fuchsia-200' },
+  value_ask: { text: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
+  issue_ask: { text: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-200' },
+  bonnou_ask: { text: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-200' },
+  bonnou_resolve: { text: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-200' },
+  avatar_photo: { text: 'text-pink-600', bg: 'bg-pink-50', border: 'border-pink-200' },
+  goshuin: { text: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200' },
 };

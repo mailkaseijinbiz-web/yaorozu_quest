@@ -153,6 +153,7 @@ export default function HomePage() {
       db.adminSaveAgent(agent);
       db.trackApiCall('ai_generate');
       db.logActivity({ type: 'spot_generate', userId: 'system', source: 'system', spotId: spot.id, detail: spot.name });
+      db.logActivity({ type: 'god_generate', userId: 'system', source: 'system', spotId: spot.id, detail: agent.name || spot.godName });
       refreshDatabaseStates();
       // アクティブスポットが未設定なら生成した場を選択（地図がその位置にパンされる）
       if (!activeSpotRef.current) {
@@ -657,6 +658,7 @@ export default function HomePage() {
                       home_view:      { icon: '🏠', bg: 'bg-slate-50',  text: 'text-slate-700',  label: () => 'ホームタブを表示' },
                       map_move:       { icon: '🗺️', bg: 'bg-teal-50',   text: 'text-teal-700',   label: () => '地図を移動' },
                       spot_generate:  { icon: '✨', bg: 'bg-purple-50', text: 'text-purple-700', label: (a) => `場を生成：${a.detail ?? '新しい場所'}` },
+                      god_generate:   { icon: '🪷', bg: 'bg-fuchsia-50',text: 'text-fuchsia-700',label: (a) => `神を生成：${a.detail ?? '新しい神'}` },
                       spot_delete:    { icon: '🗑️', bg: 'bg-rose-50',   text: 'text-rose-700',   label: (a) => `場を削除：${a.detail ?? '場所'}` },
                     };
 

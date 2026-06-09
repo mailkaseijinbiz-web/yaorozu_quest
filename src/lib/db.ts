@@ -78,6 +78,17 @@ export interface UgcPost {
   createdAt: string;
 }
 
+/** 人間が神に打ち明けた煩悩（欲・執着）。解決すると覚りが上がる（覚り=徳−未解決煩悩）。 */
+export interface Bonnou {
+  id: string;
+  userId: string;
+  text: string;
+  spotId?: string;     // 打ち明けた場所
+  resolved: boolean;   // 浄化（手放した）済みか
+  createdAt: string;
+  resolvedAt?: string;
+}
+
 export interface Agent {
   id: string;
   spotId: string;
@@ -546,26 +557,56 @@ const KEYS = {
   DAINICHI: 'yaorozu_dainichi_identity',
   API_CALLS: 'yaorozu_api_calls',     // AI / TTS API呼び出しログ（日別集計）
   REVOKED: 'yaorozu_revoked_users',   // 削除済みユーザーID（再ログイン強制用）
+  BONNOU: 'yaorozu_bonnou',           // 人間が打ち明けた煩悩（覚りの調整素材）
 };
 
 /** クエスト生成ルール（生成方針）の既定値。クエストタブで編集できる。 */
 export const DEFAULT_QUEST_RULES = `# クエスト生成ルール（生成方針）
 
 ## 原則
-- クエストはタスクから構成される。
-- タスクは「情報収集 / 理解判断 / 操作」の3種。
-- タスクは場の価値を増幅させ、場の課題を解決する。
-
-## 構成方針
-- 各クエストは 情報収集・理解判断・操作 を最低1つずつ含める（3〜5タスク）。
-- 価値（楽しみ方）から情報収集・理解判断のタスクを作る。
-- 課題があれば必ず「課題を解決」する操作タスクを入れる。
+- クエストはタスクの集まり（Quest = Task[]）。**1クエスト = 1〜4タスク**で構成する（御朱印のみの1タスク軽量クエストも可）。
+- すべてのタスクは次のどちらかである：
+  1. **世界の値を直接調整する**（活気=価値−課題 / 覚り=徳−煩悩 を動かす）＝ 操作(act)
+  2. **調整に必要なコンテキストを生成する**（人間から価値・課題・煩悩・今の様子を集める）＝ 情報収集(sense)
+  - 集めたコンテキストを評価して調整方針を決めるのが 理解判断(understand)。
+- 究極目的：世界の幸福（場の活気 + 人間の覚り）を最大化する向きにタスクを設計する。
 - 神の魂（口調・人格・世界観）に沿った語り口にする。
 
-## タスクの例
-- 情報収集：人間から場所の持つ価値を集める / 人間から課題を集める / 人間から課題の解決方法を提示
-- 理解判断：複数の解決方法から適切と思う方法を人間に尋ねる
-- 操作：選ばれた解決方法を実行して場の課題を解決する / 場の価値を世界へ広げる`;
+## 構成方針
+- 複数タスクのときは「情報収集（コンテキスト生成）→ 操作（値の調整）」の流れを基本にする。
+- 課題があるなら、その解決（resolveIssue）を操作タスクに必ず入れる。
+- 1タスククエストは「御朱印をもらう」「煩悩を打ち明ける」など、単独で完結する軽量体験に使う。
+
+## タスク種別の機能と例（kind / 役割 / 例 / 生成制約）
+
+### 情報収集 sense（＝コンテキストを生成）
+- **visit（来訪）**｜役割: その地に立ち、現地のコンテキストを起こす｜例:「鳥居の前に立ち、空気を感じる」｜制約: 位置情報（lat/lng）を持つ。
+- **photo（写真）**｜役割: 景観の一次情報を奉納｜例:「本堂の屋根の反りを一枚」｜制約: 位置情報を持つ。
+- **context（今の様子）**｜役割: 混雑・営業・雰囲気を集める｜例:「平日夕方の人通りを報告」｜制約: なし。
+- **event（できごと）**｜役割: 今この場の出来事を集める｜例:「縁日の屋台の様子を共有」｜制約: なし。
+- **cleaning（清掃確認）**｜役割: 衛生状態のコンテキスト｜例:「参道の清掃状況を確認」｜制約: なし。
+- **value_ask（価値を尋ねる）**｜役割: 人間からこの場の価値を集め enjoyments に加算（活気+1の素材）｜例:「あなたの感じた楽しみ方を教えて」｜制約: 価値が薄い場で特に有効。回答は enjoyments に直結。
+- **issue_ask（課題を尋ねる）**｜役割: 人間からこの場の課題を集め issues に加算（解決の素材）｜例:「気になった困りごとを教えて」｜制約: 課題が無い/薄い場で有効。回答は issues に直結。
+- **bonnou_ask（煩悩を問う）**｜役割: 人間の煩悩（欲・執着）を集める（覚りの調整素材）｜例:「心の執着を打ち明けて」｜制約: 場に依存しない（人間の内面が対象）。非公開で記録。
+- **avatar_photo（アバター写真）**｜役割: 巡礼者自身の姿を撮りアバターに設定｜例:「鳥居を背に自分を一枚」｜制約: 1回で十分。
+
+### 理解判断 understand（＝集めた情報を評価し調整方針を決める）
+- **review（口コミ）**｜役割: 価値を言語化し後続へ伝える｜例:「この地の良さを言伝て」。
+- **eat（実食の声）**｜役割: 飲食体験を評価｜例:「名物の味を報告」｜制約: 飲食がある場で。
+- **evaluate（写真を評価）**｜役割: 集まった写真を選別｜例:「佳い一枚に光を当てる」｜制約: 評価対象の写真が必要。
+- **judge（投稿をジャッジ）**｜役割: 集まった声を評する｜例:「投稿の中から良いものを選ぶ」。
+
+### 操作 act（＝世界の値を直接調整）
+- **resolveIssue（課題解決）**｜役割: 課題を一手動かす（課題−1・価値+1＝活気+2）｜例:「参道脇のゴミを一袋拾う」｜制約: **issues が存在する場合のみ**。issueIndex で対象課題を指定。テキスト or 写真で報告。
+- **bonnou_resolve（煩悩を手放す）**｜役割: 未解決の煩悩を一つ浄化（覚り+1）｜例:「執着をどう手放したか語る」｜制約: bonnou_ask の後に意味を持つ。
+- **sns（拡散）**｜役割: 価値を場の外へ広げる｜例:「この地をSNSで共有」｜制約: 実際の共有操作で完了。
+- **buy（買物報告）**｜役割: 経済的賑わいに寄与｜例:「名産を一つ買って報告」｜制約: 物販がある場で。
+
+### 御朱印 goshuin（軽量・単独クエスト向け）
+- **goshuin（御朱印をもらう）**｜役割: 神と一度会話し御朱印を授かる（写真・位置ゲート不要）｜例:「神に話しかけて御朱印を受け取る」｜制約: 価値・課題が薄い場のフォールバックとして1タスククエストで使う。会話＝授与で完了。
+
+## 報酬・徳
+- 各タスクは固定の徳を持つ（煩悩解決・課題解決は高め、御朱印は軽め）。達成で人間の徳（覚り）が増える。`;
 
 /** 場生成ルール（生成方針）の既定値。場タブで編集できる。 */
 export const DEFAULT_SPOT_RULES = `# 場の生成ルール（生成方針）
@@ -663,7 +704,7 @@ export interface ChallengeProgress {
 }
 
 // アクティビティ（クエスト参加・場所訪問・依頼達成などの行動記録）
-export type ActivityType = 'quest_join' | 'quest_step' | 'quest_complete' | 'visit' | 'task' | 'photo' | 'ugc' | 'home_view' | 'map_move' | 'spot_generate' | 'spot_delete';
+export type ActivityType = 'quest_join' | 'quest_step' | 'quest_complete' | 'visit' | 'task' | 'photo' | 'ugc' | 'home_view' | 'map_move' | 'spot_generate' | 'god_generate' | 'spot_delete';
 export type ActivitySource = 'human' | 'system';
 export interface Activity {
   id: string;
@@ -1082,6 +1123,50 @@ class MockDatabase {
     users[index].avatarUrl = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(displayName)}`;
     this.save(KEYS.USERS, users);
     return users[index];
+  }
+
+  /** ユーザーのアバター画像を設定（アバター写真タスクで撮影した一枚など）。 */
+  setUserAvatar(userId: string, url: string): User | undefined {
+    const users = this.getUsers();
+    const index = users.findIndex(u => u.id === userId);
+    if (index === -1) return undefined;
+    users[index].avatarUrl = url;
+    this.save(KEYS.USERS, users);
+    return users[index];
+  }
+
+  // ────────────────────────────────────────────────
+  // 煩悩（覚り = 徳 − 未解決煩悩）
+  // ────────────────────────────────────────────────
+  getBonnou(userId: string): Bonnou[] {
+    return this.load<Bonnou[]>(KEYS.BONNOU, []).filter(b => b.userId === userId);
+  }
+
+  /** 未解決の煩悩数（覚りの減算項）。 */
+  getUnresolvedBonnouCount(userId?: string): number {
+    const all = this.load<Bonnou[]>(KEYS.BONNOU, []);
+    return all.filter(b => !b.resolved && (userId ? b.userId === userId : true)).length;
+  }
+
+  /** 煩悩を打ち明ける（記録）。bonnou_ask タスクの完了処理。 */
+  addBonnou(userId: string, text: string, spotId?: string): Bonnou {
+    const all = this.load<Bonnou[]>(KEYS.BONNOU, []);
+    const b: Bonnou = { id: `bn-${Date.now()}`, userId, text, spotId, resolved: false, createdAt: new Date().toISOString() };
+    all.push(b);
+    this.save(KEYS.BONNOU, all);
+    return b;
+  }
+
+  /** 煩悩を一つ手放す（浄化）。id 指定が無ければ最も古い未解決を解決。bonnou_resolve タスクの完了処理。 */
+  resolveBonnou(userId: string, bonnouId?: string): Bonnou | undefined {
+    const all = this.load<Bonnou[]>(KEYS.BONNOU, []);
+    const idx = bonnouId
+      ? all.findIndex(b => b.id === bonnouId && b.userId === userId)
+      : all.findIndex(b => b.userId === userId && !b.resolved);
+    if (idx === -1) return undefined;
+    all[idx] = { ...all[idx], resolved: true, resolvedAt: new Date().toISOString() };
+    this.save(KEYS.BONNOU, all);
+    return all[idx];
   }
 
   // ────────────────────────────────────────────────
