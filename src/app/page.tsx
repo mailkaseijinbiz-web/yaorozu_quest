@@ -886,6 +886,7 @@ export default function HomePage() {
         {reviewQuest && (() => {
           const ch = reviewQuest;
           const photoMap = db.getChallengePhotos(ch.id);
+          const commentMap = db.getChallengeComments(ch.id);
           const photos = ch.tasks.map((s) => photoMap[s.id]).filter((p): p is string => !!p);
           return (
             <div className="absolute inset-0 z-[4000] bg-black/50 flex items-end sm:items-center justify-center" onClick={() => setReviewQuest(null)}>
@@ -916,6 +917,7 @@ export default function HomePage() {
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-black text-gray-900">{s.title}</p>
                           {s.trivia && <p className="text-[13px] text-gray-600 leading-snug mt-0.5">{s.triviaCategory ? `${s.triviaCategory}｜` : ''}{s.trivia}</p>}
+                          {commentMap[s.id] && <p className="text-[12px] text-gray-700 leading-snug mt-1 bg-white border border-gray-200 rounded-lg px-2 py-1">💬 {commentMap[s.id]}</p>}
                         </div>
                       </div>
                     ))}

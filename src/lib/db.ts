@@ -546,6 +546,7 @@ const KEYS = {
   STATS: 'yaorozu_user_stats',
   CHALLENGE: 'yaorozu_challenge_progress',
   CHALLENGE_PHOTOS: 'yaorozu_challenge_photos',
+  CHALLENGE_COMMENTS: 'yaorozu_challenge_comments', // 証拠写真に添えるコメント
   QUESTS: 'yaorozu_quests_v2', // v2: リセット（空からスタート）
   QUEST_RULES: 'yaorozu_quest_rules', // クエスト生成のルール（方針）
   SPOT_RULES: 'yaorozu_spot_rules', // 場の生成のルール（方針）
@@ -1509,6 +1510,19 @@ class MockDatabase {
     const all = this.load<{ [cid: string]: { [sid: string]: string } }>(KEYS.CHALLENGE_PHOTOS, {});
     all[challengeId] = { ...(all[challengeId] || {}), [stepId]: dataUrl };
     this.save(KEYS.CHALLENGE_PHOTOS, all);
+  }
+
+  /** 証拠写真に添えるコメント。challengeId→stepId→text */
+  getChallengeComments(challengeId: string): { [stepId: string]: string } {
+    const all = this.load<{ [cid: string]: { [sid: string]: string } }>(KEYS.CHALLENGE_COMMENTS, {});
+    return all[challengeId] || {};
+  }
+
+  saveChallengeComment(challengeId: string, stepId: string, text: string): void {
+    if (!text.trim()) return;
+    const all = this.load<{ [cid: string]: { [sid: string]: string } }>(KEYS.CHALLENGE_COMMENTS, {});
+    all[challengeId] = { ...(all[challengeId] || {}), [stepId]: text.trim() };
+    this.save(KEYS.CHALLENGE_COMMENTS, all);
   }
 
   /** 全クエスト（チャレンジ）の証拠写真URLを平坦化して返す（写真評価タスク用） */

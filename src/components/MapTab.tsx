@@ -149,6 +149,7 @@ export default function MapTab({
   // チャレンジ：証拠写真モーダル & 達成演出
   const [proofStep, setProofStep] = useState<ChallengeStep | null>(null);
   const [proofPhoto, setProofPhoto] = useState<string | null>(null);
+  const [proofComment, setProofComment] = useState(''); // 証拠写真に添えるコメント
   const [uploadingProof, setUploadingProof] = useState(false);
   // 達成ビート（豆知識つき・手動で次へ）
   const [celebrate, setCelebrate] = useState<
@@ -229,6 +230,8 @@ export default function MapTab({
     const doneNow = new Set(db.getChallengeProgress().done[activeChallenge.id] || []);
     const willComplete = doneNow.size + 1 >= activeChallenge.tasks.length;
     const cleared = proofStep;
+    // 証拠写真に添えるコメントを保存
+    if (proofComment.trim()) db.saveChallengeComment(activeChallenge.id, cleared.id, proofComment);
     onAdvanceChallenge?.(cleared.id, proofPhoto);
     // 達成ビート：このステップで得た豆知識を“次の文章”として見せてから次へ進む
     setCelebrate({
@@ -240,6 +243,7 @@ export default function MapTab({
     });
     setProofStep(null);
     setProofPhoto(null);
+    setProofComment('');
     // 自動で閉じない（豆知識を読んでから手動で次へ）
   };
 
@@ -603,7 +607,7 @@ export default function MapTab({
 
       {/* 証拠写真モーダル（この目的地を達成するには写真が必要） */}
       {proofStep && (
-        <div className="absolute inset-0 z-[2000] bg-black/50 flex items-end" onClick={() => { setProofStep(null); setProofPhoto(null); }}>
+        <div className="absolute inset-0 z-[2000] bg-black/50 flex items-end" onClick={() => { setProofStep(null); setProofPhoto(null); setProofComment(''); }}>
           <div className="w-full bg-white rounded-t-3xl p-4 pb-6 animate-in" onClick={(e) => e.stopPropagation()}>
             <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-3" />
             <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5"><Camera className="w-4 h-4 text-[#2563eb]" />証拠写真を撮影</h3>
@@ -625,8 +629,17 @@ export default function MapTab({
               <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickProof} disabled={uploadingProof} />
             </label>
 
+            {/* 証拠写真に添えるコメント（任意） */}
+            <textarea
+              value={proofComment}
+              onChange={(e) => setProofComment(e.target.value)}
+              rows={2}
+              placeholder="コメントを添える（任意）— 感じたこと・気づきなど"
+              className="mt-2 w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-[13px] text-gray-800 focus:outline-none focus:border-[#2563eb] transition-all resize-none"
+            />
+
             <div className="flex gap-2 mt-2">
-              <button onClick={() => { setProofStep(null); setProofPhoto(null); }} className="flex-1 bg-gray-100 text-gray-500 text-sm font-black py-2.5 rounded-xl cursor-pointer">やめる</button>
+              <button onClick={() => { setProofStep(null); setProofPhoto(null); setProofComment(''); }} className="flex-1 bg-gray-100 text-gray-500 text-sm font-black py-2.5 rounded-xl cursor-pointer">やめる</button>
               <button onClick={confirmProof} disabled={!proofPhoto} className="flex-1 bg-[#2563eb] text-white text-sm font-black py-2.5 rounded-xl disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5">
                 <Check className="w-4 h-4" />この写真で達成
               </button>

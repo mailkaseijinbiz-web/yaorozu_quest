@@ -10,6 +10,7 @@ const SYNC_KEYS = [
   'yaorozu_user_stats',
   'yaorozu_challenge_progress',
   'yaorozu_challenge_photos',
+  'yaorozu_challenge_comments',
   'yaorozu_activities',
   'yaorozu_goshuin_user-self',
   // 管理者が作成するコンテンツ
