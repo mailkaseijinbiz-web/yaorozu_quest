@@ -657,6 +657,7 @@ export default function HomePage() {
                       home_view:      { icon: '🏠', bg: 'bg-slate-50',  text: 'text-slate-700',  label: () => 'ホームタブを表示' },
                       map_move:       { icon: '🗺️', bg: 'bg-teal-50',   text: 'text-teal-700',   label: () => '地図を移動' },
                       spot_generate:  { icon: '✨', bg: 'bg-purple-50', text: 'text-purple-700', label: (a) => `場を生成：${a.detail ?? '新しい場所'}` },
+                      spot_delete:    { icon: '🗑️', bg: 'bg-rose-50',   text: 'text-rose-700',   label: (a) => `場を削除：${a.detail ?? '場所'}` },
                     };
 
                     if (activities.length === 0) return (

@@ -18,16 +18,24 @@ function emptySpot(): Spot {
   };
 }
 
+// 生成/削除日時の表示（ja-JP）
+function fmtDt(iso?: string): string {
+  return iso ? new Date(iso).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+}
+
 export function SpotsManager({ spots, onChange }: { spots: Spot[]; onChange: () => void }) {
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<Spot | null>(null);
   const [page, setPage] = useState(0);
+  const [showDeleted, setShowDeleted] = useState(false); // 削除済み（ゴミ箱）を表示
 
   // 場の生成ルール（八百万神の「神の生成ルール」と同様にインライン編集）
   const [spotRules, setSpotRules] = useState(() => db.getSpotRules());
   const [spotRulesSaved, setSpotRulesSaved] = useState(false);
 
-  const filtered = spots.filter(s => s.name.includes(search) || s.category.includes(search));
+  // spots は生存のみ。トグル時は削除済みを末尾に連結。
+  const base = showDeleted ? [...spots, ...db.getDeletedSpots()] : spots;
+  const filtered = base.filter(s => s.name.includes(search) || s.category.includes(search));
   const pageItems = filtered.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE);
 
   return (
@@ -46,19 +54,28 @@ export function SpotsManager({ spots, onChange }: { spots: Spot[]; onChange: () 
       </div>
 
       <Toolbar search={search} setSearch={(v) => { setSearch(v); setPage(0); }} />
-      <p className="text-[11px] text-gray-400 mb-2">全 {filtered.length} 件</p>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[11px] text-gray-400">全 {filtered.length} 件</p>
+        <label className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500 cursor-pointer">
+          <input type="checkbox" checked={showDeleted} onChange={(e) => { setShowDeleted(e.target.checked); setPage(0); }} className="cursor-pointer" />
+          🗑️ 削除済みも表示
+        </label>
+      </div>
       <div className="grid gap-2">
         {pageItems.map(s => (
           <Card key={s.id}>
-            <div className="flex items-start gap-3">
+            <div className={`flex items-start gap-3 ${s.deletedAt ? 'opacity-60' : ''}`}>
               {s.imageUrl
                 // eslint-disable-next-line @next/next/no-img-element
                 ? <img src={s.imageUrl} alt={s.name} className="w-12 h-12 rounded-lg object-cover shrink-0" />
                 : <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center shrink-0"><MapPin className="w-5 h-5 text-gray-400" /></div>}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-black text-gray-900 truncate">{s.name || '(無題)'}</span>
                   <span className="text-[9px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full shrink-0">{s.category}</span>
+                  {s.deletedAt && (
+                    <span className="text-[9px] font-black bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-full shrink-0">🗑️ 削除 {fmtDt(s.deletedAt)}</span>
+                  )}
                   {(() => {
                     const v = spotVitality(s);
                     return (
@@ -72,7 +89,7 @@ export function SpotsManager({ spots, onChange }: { spots: Spot[]; onChange: () 
                   })()}
                 </div>
                 <p className="text-[11px] text-gray-500 truncate">{s.description}</p>
-                <p className="text-[10px] text-gray-400 mt-0.5">📍 {s.latitude.toFixed(3)}, {s.longitude.toFixed(3)}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">📍 {s.latitude.toFixed(3)}, {s.longitude.toFixed(3)} ・ 生成 {fmtDt(s.createdAt)}</p>
                 {/* 価値・課題を一覧でも確認できるように表示 */}
                 {((s.enjoyments?.length ?? 0) > 0 || (s.issues?.length ?? 0) > 0) && (
                   <div className="mt-1.5 flex flex-col gap-1">
@@ -95,10 +112,12 @@ export function SpotsManager({ spots, onChange }: { spots: Spot[]; onChange: () 
                   </div>
                 )}
               </div>
-              <div className="flex items-center shrink-0">
-                <EditBtn onClick={() => setEditing(s)} />
-                <DeleteBtn onClick={() => { if (confirm(`「${s.name}」を削除しますか？（関連UGC・神様AIも削除されます）`)) { db.adminDeleteSpot(s.id); onChange(); } }} />
-              </div>
+              {!s.deletedAt && (
+                <div className="flex items-center shrink-0">
+                  <EditBtn onClick={() => setEditing(s)} />
+                  <DeleteBtn onClick={() => { if (confirm(`「${s.name}」を削除しますか？（関連UGC・神様AIも削除されます）`)) { db.adminDeleteSpot(s.id); onChange(); } }} />
+                </div>
+              )}
             </div>
           </Card>
         ))}

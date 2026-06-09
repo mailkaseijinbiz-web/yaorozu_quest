@@ -38,6 +38,8 @@ export interface Spot {
   // ※ Identity.md / Soul.md は「場」ではなく八百万神（Agent）が持つ
   issues?: string[]; // 課題（この場が解決すべき課題。神の知識へ反映）
   expiresAt?: string; // ISO 8601 — 設定されていると期限切れで自動削除（GPS 生成スポット用）
+  createdAt?: string; // ISO 8601 — 生成・作成日時。旧レコードは undefined（'—' 表示）。
+  deletedAt?: string; // ISO 8601 — ソフト削除日時。undefined = 生存。
 }
 
 /**
@@ -88,6 +90,8 @@ export interface Agent {
   voiceTone: '厳格' | '親しみやすい' | '神秘的' | '高飛車' | '賢者';
   identityMd?: string; // この神のアイデンティティ文書（事実・価値・課題）。未設定なら生成。
   soulMd?: string; // この神の魂文書（人格・語り口・世界観）。未設定なら生成。
+  createdAt?: string; // ISO 8601 — 生成・作成日時。旧レコードは undefined。
+  deletedAt?: string; // ISO 8601 — ソフト削除日時。undefined = 生存。
 }
 
 export interface AffiliateLink {
@@ -659,7 +663,7 @@ export interface ChallengeProgress {
 }
 
 // アクティビティ（クエスト参加・場所訪問・依頼達成などの行動記録）
-export type ActivityType = 'quest_join' | 'quest_step' | 'quest_complete' | 'visit' | 'task' | 'photo' | 'ugc' | 'home_view' | 'map_move' | 'spot_generate';
+export type ActivityType = 'quest_join' | 'quest_step' | 'quest_complete' | 'visit' | 'task' | 'photo' | 'ugc' | 'home_view' | 'map_move' | 'spot_generate' | 'spot_delete';
 export type ActivitySource = 'human' | 'system';
 export interface Activity {
   id: string;
@@ -750,23 +754,54 @@ class MockDatabase {
     return users;
   }
 
-  getSpots(): Spot[] {
-    const all = this.load<Spot[]>(KEYS.SPOTS, INITIAL_SPOTS);
-    const now = Date.now();
-    const expired = all.filter(s => s.expiresAt && new Date(s.expiresAt).getTime() <= now);
-    const live = all.filter(s => !s.expiresAt || new Date(s.expiresAt).getTime() > now);
-    // 期限切れがあればスポット＋対応エージェントをまとめて掃除
-    if (expired.length > 0) {
-      this.save(KEYS.SPOTS, live);
-      const expiredIds = new Set(expired.map(s => s.id));
-      this.save(KEYS.AGENTS, this.getAgents().filter(a => !expiredIds.has(a.spotId)));
-    }
-    return live;
+  /** 削除済みも含む全スポット（監査・mutator の保存用）。 */
+  private getSpotsRaw(): Spot[] {
+    return this.load<Spot[]>(KEYS.SPOTS, INITIAL_SPOTS);
   }
 
+  /** 削除済みも含む全エージェント（監査・mutator の保存用）。 */
+  private getAgentsRaw(): Agent[] {
+    return this.load<Agent[]>(KEYS.AGENTS, INITIAL_AGENTS);
+  }
+
+  getSpots(): Spot[] {
+    const stored = this.getSpotsRaw();
+    const now = Date.now();
+    // TTL 期限切れ → ソフト削除（deletedAt 打刻）。ハード削除はせず監査ログを残す。
+    let mutated = false;
+    const withTtl = stored.map(s => {
+      if (!s.deletedAt && s.expiresAt && new Date(s.expiresAt).getTime() <= now) {
+        mutated = true;
+        return { ...s, deletedAt: new Date().toISOString() };
+      }
+      return s;
+    });
+    if (mutated) {
+      this.save(KEYS.SPOTS, withTtl);
+      // カスケード：期限切れになった場の神もソフト削除
+      const justExpired = new Set(
+        withTtl.filter(s => s.deletedAt && !stored.find(o => o.id === s.id)?.deletedAt).map(s => s.id)
+      );
+      if (justExpired.size) {
+        this.save(KEYS.AGENTS, this.getAgentsRaw().map(a =>
+          justExpired.has(a.spotId) && !a.deletedAt ? { ...a, deletedAt: new Date().toISOString() } : a));
+      }
+    }
+    return withTtl.filter(s => !s.deletedAt);
+  }
+
+  /** 削除済みスポット（生成/削除日時の監査ビュー用）。 */
+  getDeletedSpots(): Spot[] {
+    return this.getSpotsRaw().filter(s => s.deletedAt);
+  }
 
   getAgents(): Agent[] {
-    return this.load(KEYS.AGENTS, INITIAL_AGENTS);
+    return this.getAgentsRaw().filter(a => !a.deletedAt);
+  }
+
+  /** 削除済みの神（監査ビュー用）。 */
+  getDeletedAgents(): Agent[] {
+    return this.getAgentsRaw().filter(a => a.deletedAt);
   }
 
   getUgc(): UgcPost[] {
@@ -1026,8 +1061,8 @@ class MockDatabase {
   }
 
   updateAgent(spotId: string, updates: Partial<Agent>): Agent {
-    const agents = this.getAgents();
-    const index = agents.findIndex(a => a.spotId === spotId);
+    const agents = this.getAgentsRaw(); // 削除済みも保持したまま更新
+    const index = agents.findIndex(a => a.spotId === spotId && !a.deletedAt);
     if (index === -1) throw new Error('Agent not found');
 
     const updatedAgent = { ...agents[index], ...updates };
@@ -1053,21 +1088,32 @@ class MockDatabase {
   // Admin operations (管理者ダッシュボード用)
   // ────────────────────────────────────────────────
 
-  // Upsert a spot (create if id is new, otherwise update)
+  // Upsert a spot (create if id is new, otherwise update)。raw リストで保存し削除済みを失わない。
   adminSaveSpot(spot: Spot): Spot {
-    const spots = this.getSpots();
+    const spots = this.getSpotsRaw();
     const index = spots.findIndex(s => s.id === spot.id);
-    if (index === -1) spots.push(spot);
-    else spots[index] = spot;
+    const nowIso = new Date().toISOString();
+    if (index === -1) {
+      spots.push({ ...spot, createdAt: spot.createdAt ?? nowIso });
+    } else {
+      // 更新時は createdAt を維持（リセットしない）
+      spots[index] = { ...spot, createdAt: spot.createdAt ?? spots[index].createdAt };
+    }
     this.save(KEYS.SPOTS, spots);
     return spot;
   }
 
+  // ソフト削除：deletedAt を打刻し、神もカスケードでソフト削除。UGC はハード削除。
   adminDeleteSpot(id: string): void {
-    this.save(KEYS.SPOTS, this.getSpots().filter(s => s.id !== id));
-    // Cascade: remove agent + UGC tied to this spot
-    this.save(KEYS.AGENTS, this.getAgents().filter(a => a.spotId !== id));
+    const ts = new Date().toISOString();
+    const spots = this.getSpotsRaw();
+    const target = spots.find(s => s.id === id);
+    this.save(KEYS.SPOTS, spots.map(s => s.id === id && !s.deletedAt ? { ...s, deletedAt: ts } : s));
+    this.save(KEYS.AGENTS, this.getAgentsRaw().map(a => a.spotId === id && !a.deletedAt ? { ...a, deletedAt: ts } : a));
     this.save(KEYS.UGC, this.getUgc().filter(p => p.spotId !== id));
+    // 生成クエストはハード削除（再生成可能・orphan を残さない）
+    this.save(KEYS.QUESTS, this.getGeneratedQuests().filter(q => q.spotId !== id));
+    this.logActivity({ type: 'spot_delete', userId: 'system', source: 'system', spotId: id, detail: target?.name });
   }
 
   // Upsert a user
@@ -1089,18 +1135,24 @@ class MockDatabase {
     this.save(KEYS.UGC, this.getUgc().filter(p => p.id !== id));
   }
 
-  // Upsert an agent (神様AI)
+  // Upsert an agent (神様AI)。raw リストで保存し削除済みを失わない。
   adminSaveAgent(agent: Agent): Agent {
-    const agents = this.getAgents();
+    const agents = this.getAgentsRaw();
     const index = agents.findIndex(a => a.id === agent.id);
-    if (index === -1) agents.push(agent);
-    else agents[index] = agent;
+    const nowIso = new Date().toISOString();
+    if (index === -1) {
+      agents.push({ ...agent, createdAt: agent.createdAt ?? nowIso });
+    } else {
+      agents[index] = { ...agent, createdAt: agent.createdAt ?? agents[index].createdAt };
+    }
     this.save(KEYS.AGENTS, agents);
     return agent;
   }
 
+  // ソフト削除（deletedAt 打刻）。既に削除済みならタイムスタンプを保持。
   adminDeleteAgent(id: string): void {
-    this.save(KEYS.AGENTS, this.getAgents().filter(a => a.id !== id));
+    const ts = new Date().toISOString();
+    this.save(KEYS.AGENTS, this.getAgentsRaw().map(a => a.id === id && !a.deletedAt ? { ...a, deletedAt: ts } : a));
   }
 
   // Reset all data back to initial seeds
@@ -1134,8 +1186,8 @@ class MockDatabase {
 
   /** 写真を投稿（神への奉納）。初投稿ならスポット写真がセットされる。+30徳 */
   addSpotPhoto(userId: string, spotId: string, url: string): Spot | undefined {
-    const spots = this.getSpots();
-    const idx = spots.findIndex(s => s.id === spotId);
+    const spots = this.getSpotsRaw(); // 削除済みを保持したまま更新
+    const idx = spots.findIndex(s => s.id === spotId && !s.deletedAt);
     if (idx === -1) return undefined;
 
     const spot = spots[idx];
@@ -1152,8 +1204,8 @@ class MockDatabase {
 
   /** 不適切な写真を却下（削除）。誰でも実行可能なコミュニティモデレーション */
   rejectSpotPhoto(spotId: string, url: string): Spot | undefined {
-    const spots = this.getSpots();
-    const idx = spots.findIndex(s => s.id === spotId);
+    const spots = this.getSpotsRaw(); // 削除済みを保持したまま更新
+    const idx = spots.findIndex(s => s.id === spotId && !s.deletedAt);
     if (idx === -1) return undefined;
 
     const spot = spots[idx];
@@ -1167,12 +1219,27 @@ class MockDatabase {
 
   /** 神がUGCによって成長：楽しみ方を1つ追加 */
   addEnjoyment(spotId: string, text: string): Spot | undefined {
-    const spots = this.getSpots();
-    const idx = spots.findIndex(s => s.id === spotId);
+    const spots = this.getSpotsRaw(); // 削除済みを保持したまま更新
+    const idx = spots.findIndex(s => s.id === spotId && !s.deletedAt);
     if (idx === -1) return undefined;
     const spot = spots[idx];
     if (!spot.enjoyments.includes(text)) {
       spot.enjoyments = [...spot.enjoyments, text];
+      spots[idx] = spot;
+      this.save(KEYS.SPOTS, spots);
+    }
+    return spot;
+  }
+
+  /** 神がUGCによって観測：課題を1つ追加（重複は弾く）。価値・課題のループ素材。 */
+  addIssue(spotId: string, text: string): Spot | undefined {
+    const spots = this.getSpotsRaw();
+    const idx = spots.findIndex(s => s.id === spotId && !s.deletedAt);
+    if (idx === -1) return undefined;
+    const spot = spots[idx];
+    const issues = spot.issues ?? [];
+    if (!issues.includes(text)) {
+      spot.issues = [...issues, text];
       spots[idx] = spot;
       this.save(KEYS.SPOTS, spots);
     }
@@ -1456,8 +1523,8 @@ class MockDatabase {
   // The creator is the user who has generated the most Toku points (likes*10 + posts*50) at this specific spot.
   // The minimum Toku required at a spot to become creator is the spot's `tokuRequirement`.
   private recalculateSpotCreator(spotId: string): void {
-    const spots = this.getSpots();
-    const spotIndex = spots.findIndex(s => s.id === spotId);
+    const spots = this.getSpotsRaw(); // 削除済みを保持したまま保存し直す（監査ログを失わない）
+    const spotIndex = spots.findIndex(s => s.id === spotId && !s.deletedAt);
     if (spotIndex === -1) return;
 
     const spot = spots[spotIndex];

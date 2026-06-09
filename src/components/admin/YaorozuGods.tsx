@@ -15,6 +15,11 @@ import { buildDainichiIdentityMd } from '../../lib/dainichi';
 
 const VOICE_TONES: Agent['voiceTone'][] = ['厳格', '親しみやすい', '神秘的', '高飛車', '賢者'];
 
+// 生成/削除日時の表示（ja-JP）
+function fmtGodDt(iso?: string): string {
+  return iso ? new Date(iso).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+}
+
 function defaultBrain(spot: Spot, godName: string): string {
   return `あなたは「${spot.name}」(${spot.category})に宿る神霊「${godName}」です。アマテラスの働きの分身として、(1)場所の価値を増幅し (2)場所や人間の課題を解決し (3)人間に試練を与えます。${spot.description} 親しみやすくも神々しい口調で案内し、近くのクエストや依頼を前向きに勧めてください。返答は150字以内。`;
 }
@@ -45,15 +50,18 @@ export function YaorozuGods({ spots, onChange }: { spots: Spot[]; onChange: () =
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const [editing, setEditing] = useState<EditState | null>(null);
+  const [showDeleted, setShowDeleted] = useState(false); // 削除済みの神を表示
 
   // アマテラス = 神の生成ルール（全神の基底）。クエストタブと同じ構成でインライン編集。
   const [godRules, setGodRules] = useState(() => db.getDainichiIdentity() ?? buildDainichiIdentityMd());
   const [godRulesSaved, setGodRulesSaved] = useState(false);
 
-  // エージェント（AI人格）が登録されている場のみ表示
-  const agentSpotIds = new Set(db.getAgents().map((a) => a.spotId));
-  const filtered = spots
-    .filter((s) => agentSpotIds.has(s.id))
+  // エージェント（AI人格）が登録されている場のみ表示。トグル時は削除済みの神も含める。
+  const liveAgentSpotIds = new Set(db.getAgents().map((a) => a.spotId));
+  const deletedAgentSpotIds = new Set(db.getDeletedAgents().map((a) => a.spotId));
+  const base = showDeleted ? [...spots, ...db.getDeletedSpots()] : spots;
+  const filtered = base
+    .filter((s) => liveAgentSpotIds.has(s.id) || (showDeleted && deletedAgentSpotIds.has(s.id)))
     .filter((s) => (s.godName || '').includes(search) || s.name.includes(search) || s.category.includes(search));
   const pageItems = filtered.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE);
 
@@ -124,7 +132,13 @@ export function YaorozuGods({ spots, onChange }: { spots: Spot[]; onChange: () =
         className="w-full max-w-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 focus:outline-none focus:border-blue-500 mb-2"
         placeholder="神名・場所・カテゴリで検索…"
       />
-      <p className="text-[11px] text-gray-400 mb-2">全 {filtered.length} 柱（八百万神はアマテラスを継承。Identity.md/Soul.md は各神に格納）</p>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[11px] text-gray-400">全 {filtered.length} 柱（八百万神はアマテラスを継承。Identity.md/Soul.md は各神に格納）</p>
+        <label className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500 cursor-pointer shrink-0 ml-2">
+          <input type="checkbox" checked={showDeleted} onChange={(e) => { setShowDeleted(e.target.checked); setPage(0); }} className="cursor-pointer" />
+          🗑️ 削除済みも表示
+        </label>
+      </div>
 
       <div className="grid gap-2">
         {pageItems.map((s) => {
@@ -137,14 +151,18 @@ export function YaorozuGods({ spots, onChange }: { spots: Spot[]; onChange: () =
           const spotQuests = db.getQuestsForSpot(s.id); // この神が所持するクエスト（複数）
           return (
             <Card key={s.id}>
-              <div className="flex items-center gap-3">
+              <div className={`flex items-center gap-3 ${s.deletedAt ? 'opacity-60' : ''}`}>
                 <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-100 flex items-center justify-center text-2xl shrink-0">{s.godEmoji || '⛩️'}</div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-black text-gray-900 truncate">{s.godName || `${s.name}の守り神`}</span>
                     <span className="text-[9px] font-black bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full shrink-0" title="知性の充実度">神格 {lv}</span>
+                    {s.deletedAt && (
+                      <span className="text-[9px] font-black bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-full shrink-0">🗑️ 削除 {fmtGodDt(s.deletedAt)}</span>
+                    )}
                   </div>
                   <p className="text-[11px] text-gray-500 truncate">{s.name}・{s.category}</p>
+                  <p className="text-[10px] text-gray-400">生成 {fmtGodDt(s.createdAt)}</p>
                   <div className="flex items-center gap-1 mt-1 flex-wrap text-[10px] font-bold">
                     <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">口調 {tone}</span>
                     <span className="px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">クエスト {spotQuests.length}</span>
@@ -158,14 +176,17 @@ export function YaorozuGods({ spots, onChange }: { spots: Spot[]; onChange: () =
                     </div>
                   )}
                 </div>
-                <div className="shrink-0 flex items-center gap-1">
-                  <button onClick={() => openGod(s)} title="知性を調整" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer">
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  <button onClick={() => { if (confirm(`「${s.godName || s.name}」を削除しますか？`)) { db.adminDeleteSpot(s.id); db.adminDeleteAgent(db.getAgentBySpot(s.id)?.id || ''); } }} title="削除" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                {!s.deletedAt && (
+                  <div className="shrink-0 flex items-center gap-1">
+                    <button onClick={() => openGod(s)} title="知性を調整" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer">
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    {/* adminDeleteSpot が神もカスケードでソフト削除するため adminDeleteAgent は不要 */}
+                    <button onClick={() => { if (confirm(`「${s.godName || s.name}」を削除しますか？`)) { db.adminDeleteSpot(s.id); onChange(); } }} title="削除" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
               </div>
             </Card>
           );
