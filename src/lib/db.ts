@@ -615,10 +615,16 @@ class MockDatabase {
   getSpots(): Spot[] {
     const stored = this.getSpotsRaw();
     const now = Date.now();
-    // TTL 期限切れ → ソフト削除（deletedAt 打刻）。ハード削除はせず監査ログを残す。
+    // 読み取り時の退役処理（ソフト削除＝deletedAt 打刻。ハード削除はせず監査ログを残す）:
+    //   ① TTL 期限切れ。
+    //   ② 寺社以外の場 — 場は実在の神社・寺院のみとする方針のため、旧仕様で生成された
+    //      公園・商店街・史跡などの場を退役させる。
     let mutated = false;
     const withTtl = stored.map(s => {
-      if (!s.deletedAt && s.expiresAt && new Date(s.expiresAt).getTime() <= now) {
+      if (s.deletedAt) return s;
+      const ttlExpired = s.expiresAt != null && new Date(s.expiresAt).getTime() <= now;
+      const notShrineOrTemple = s.category !== '神社' && s.category !== '寺院';
+      if (ttlExpired || notShrineOrTemple) {
         mutated = true;
         return { ...s, deletedAt: new Date().toISOString() };
       }
@@ -626,13 +632,13 @@ class MockDatabase {
     });
     if (mutated) {
       this.save(KEYS.SPOTS, withTtl);
-      // カスケード：期限切れになった場の神もソフト削除
-      const justExpired = new Set(
+      // カスケード：退役（TTL or 寺社以外）になった場の神もソフト削除
+      const justRetired = new Set(
         withTtl.filter(s => s.deletedAt && !stored.find(o => o.id === s.id)?.deletedAt).map(s => s.id)
       );
-      if (justExpired.size) {
+      if (justRetired.size) {
         this.save(KEYS.AGENTS, this.getAgentsRaw().map(a =>
-          justExpired.has(a.spotId) && !a.deletedAt ? { ...a, deletedAt: new Date().toISOString() } : a));
+          justRetired.has(a.spotId) && !a.deletedAt ? { ...a, deletedAt: new Date().toISOString() } : a));
       }
     }
     return withTtl.filter(s => !s.deletedAt);

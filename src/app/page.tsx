@@ -709,7 +709,6 @@ export default function HomePage() {
                   creatorProfiles={creatorProfiles}
                   onOpenDetail={setDetailSpot}
                   currentUser={currentUser || FALLBACK_CURRENT_USER}
-                  onStartChallenge={(cid) => { subscribePush(); db.setActiveChallenge(cid); setActiveChallengeId(cid); }}
                   activeChallenge={activeChallengeId ? db.getQuest(activeChallengeId) ?? null : null}
                   onClearChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
                   onMapMove={(center) => {
