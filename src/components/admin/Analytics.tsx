@@ -26,9 +26,9 @@ const METRICS: { key: string; label: string; color: string; get: (s: Metrics) =>
   { key: 'ttsCalls', label: 'TTS リクエスト数', color: '#0e7490', get: (s) => s.ttsCalls ?? 0 },
 ];
 
-function Sparkline({ values, color }: { values: number[]; color: string }) {
+function Sparkline({ values, color, className = 'w-full h-9' }: { values: number[]; color: string; className?: string }) {
   if (values.length < 2) {
-    return <div className="h-9 flex items-center text-[9px] text-gray-300">計測中… 変化が記録されると推移が表示されます</div>;
+    return <div className={`${className} flex items-center text-[9px] text-gray-300`}>計測中… 変化が記録されると推移が表示されます</div>;
   }
   const w = 200, h = 36, pad = 3;
   const min = Math.min(...values);
@@ -38,11 +38,27 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
   const y = (v: number) => h - pad - ((v - min) / range) * (h - 2 * pad);
   const pts = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full h-9">
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className={className}>
       <polyline points={pts} fill="none" stroke={color} strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
       <circle cx={x(values.length - 1)} cy={y(values[values.length - 1])} r={2.5} fill={color} />
     </svg>
   );
+}
+
+/** 現在のメトリクスから「世界がどうあるべきか」のアドバイスを導く（ルールベース）。 */
+function buildAdvice(c: Omit<MetricsSnapshot, 'ts'>, bonnou: number, happinessDelta: number): string[] {
+  const out: string[] = [];
+  const activeness = c.value - c.issues;
+  const enlightenment = c.toku - bonnou;
+  if (c.issues > c.value) out.push('⚠️ 課題が価値を上回っています。神に「課題を解決」タスクを鋳造させ、活気（価値−課題）を取り戻しましょう。');
+  else if (c.value < 3) out.push('💎 価値が乏しい状態です。「価値を尋ねる」タスクで人間から魅力を集め、活気を底上げしましょう。');
+  if (c.quests === 0) out.push('🚩 クエストがありません。場を生成してクエストを補充してください。');
+  if (bonnou > 0) out.push(`🌀 未解決の煩悩が ${fmt(bonnou)} あります。「煩悩を手放す」タスクで覚り（徳−煩悩）を高めましょう。`);
+  if (c.spots < 3) out.push('📍 場が少なめです。GPSで歩き、神の宿る場を増やしましょう。');
+  if (happinessDelta < 0) out.push('📉 世界の幸福が低下傾向です。価値の追加と課題解決を最優先に。');
+  else if (happinessDelta > 0 && activeness > 0 && enlightenment > 0) out.push('🌅 世界は良い方向に育っています。この調子で価値を広げ、煩悩を浄化し続けましょう。');
+  if (out.length === 0) out.push('✅ 大きな偏りはありません。価値の充実と課題・煩悩の解消をバランスよく続けましょう。');
+  return out;
 }
 
 export function Analytics() {
@@ -68,9 +84,42 @@ export function Analytics() {
         <p className="text-[13px] text-gray-500 mt-0.5">各項目の<b>時系列での変化</b>を確認できます。表示するたびに現在値が記録され、推移として蓄積されます（記録点 {fmt(snaps.length)}）。</p>
       </div>
 
-      {/* 指標ごとの現在値＋推移 */}
+      {/* メイングラフ：世界の幸福（活気+覚り）＋アドバイス */}
+      {(() => {
+        const m = METRICS[0]; // happiness
+        const series = snaps.map((s) => m.get(s));
+        const lastVal = m.get(current);
+        const delta = series.length ? lastVal - series[0] : 0;
+        const bonnou = db.getUnresolvedBonnouCount();
+        const advice = buildAdvice(current, bonnou, delta);
+        return (
+          <div className="bg-white border-2 border-pink-200 rounded-2xl p-4">
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm font-black text-gray-800">{m.label}</span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-black tabular-nums" style={{ color: m.color }}>{fmt(lastVal)}</span>
+                {snaps.length >= 2 && delta !== 0 && (
+                  <span className={`text-xs font-black ${delta > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{delta > 0 ? '▲' : '▼'}{fmt(Math.abs(delta))}</span>
+                )}
+              </div>
+            </div>
+            <Sparkline values={series} color={m.color} className="w-full h-24" />
+            {/* 世界がどうあるべきかのアドバイス */}
+            <div className="mt-3 rounded-xl bg-pink-50/60 border border-pink-100 p-3">
+              <p className="text-[11px] font-black text-pink-700 mb-1.5">🔮 世界への助言</p>
+              <ul className="space-y-1">
+                {advice.map((a, i) => (
+                  <li key={i} className="text-[12px] text-gray-700 leading-snug">{a}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 指標ごとの現在値＋推移（幸福はメイングラフに集約済み） */}
       <div className="grid sm:grid-cols-2 gap-2">
-        {METRICS.map((m) => {
+        {METRICS.slice(1).map((m) => {
           const series = snaps.map((s) => m.get(s));
           const first = series.length ? series[0] : 0;
           const lastVal = m.get(current);
