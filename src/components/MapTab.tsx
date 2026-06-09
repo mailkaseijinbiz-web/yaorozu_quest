@@ -641,12 +641,64 @@ export default function MapTab({
       {/* 達成ビート（案内役の精霊がコメント＋豆知識をフキダシで語る） */}
       {celebrate && (
         <div className="absolute inset-0 z-[2100] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/45 celebrate-fade" onClick={() => { if (celebrate.complete) onClearChallenge?.(); setCelebrate(null); }} />
+          <div className="absolute inset-0 bg-black/55" onClick={() => { if (celebrate.complete) onClearChallenge?.(); setCelebrate(null); }} />
+
+          {/* ── バッジ獲得：紙吹雪パーティクル ── */}
+          {celebrate.complete && (() => {
+            const COLORS = ['#f59e0b','#ef4444','#3b82f6','#10b981','#8b5cf6','#ec4899','#f97316','#fbbf24','#06b6d4','#a3e635'];
+            const items = [
+              { l:5,  d:0.0, dur:1.8, w:8,  h:12 },
+              { l:12, d:0.2, dur:2.1, w:10, h:7  },
+              { l:20, d:0.05,dur:1.6, w:7,  h:10 },
+              { l:28, d:0.35,dur:2.3, w:12, h:8  },
+              { l:36, d:0.1, dur:1.9, w:9,  h:13 },
+              { l:44, d:0.45,dur:2.0, w:11, h:7  },
+              { l:52, d:0.15,dur:1.7, w:8,  h:11 },
+              { l:60, d:0.3, dur:2.2, w:10, h:9  },
+              { l:68, d:0.0, dur:1.5, w:7,  h:12 },
+              { l:76, d:0.4, dur:2.4, w:12, h:8  },
+              { l:84, d:0.2, dur:1.8, w:9,  h:10 },
+              { l:92, d:0.1, dur:2.1, w:11, h:7  },
+              { l:9,  d:0.5, dur:1.9, w:8,  h:13 },
+              { l:25, d:0.6, dur:2.0, w:10, h:8  },
+              { l:47, d:0.55,dur:1.6, w:7,  h:11 },
+              { l:63, d:0.65,dur:2.3, w:12, h:9  },
+              { l:80, d:0.7, dur:1.7, w:9,  h:12 },
+              { l:95, d:0.8, dur:2.2, w:11, h:8  },
+            ];
+            return items.map((p, i) => (
+              <div
+                key={i}
+                className="confetti-piece"
+                style={{
+                  left: `${p.l}%`,
+                  width: p.w,
+                  height: p.h,
+                  backgroundColor: COLORS[i % COLORS.length],
+                  animationDuration: `${p.dur}s`,
+                  animationDelay: `${p.d}s`,
+                  borderRadius: i % 3 === 0 ? '50%' : '2px',
+                }}
+              />
+            ));
+          })()}
+
           <div className="relative celebrate-pop w-full max-w-sm">
             {/* 達成エンブレム */}
             <div className="text-center">
-              <div className={`text-6xl ${celebrate.complete ? 'animate-bounce' : ''}`}>{celebrate.icon}</div>
-              <p className="text-[11px] font-black tracking-[0.2em] text-white drop-shadow mt-1">{celebrate.complete ? 'CHALLENGE COMPLETE' : 'STEP CLEAR'}</p>
+              {celebrate.complete ? (
+                <div className="relative inline-block">
+                  <div className="badge-ring" />
+                  <div className="badge-ring badge-ring-2" />
+                  <div className="text-7xl badge-acquired leading-none">{celebrate.icon}</div>
+                  <p className="badge-get-text text-[11px] font-black tracking-[0.25em] text-amber-300 drop-shadow mt-1.5">BADGE GET!</p>
+                </div>
+              ) : (
+                <>
+                  <div className="text-6xl">{celebrate.icon}</div>
+                  <p className="text-[11px] font-black tracking-[0.2em] text-white drop-shadow mt-1">STEP CLEAR</p>
+                </>
+              )}
             </div>
             {/* 案内役の精霊＋フキダシ（コメント＋豆知識） */}
             <div className="flex items-end gap-2 mt-3">
@@ -668,13 +720,10 @@ export default function MapTab({
             </div>
             <button
               onClick={() => { if (celebrate.complete) onClearChallenge?.(); setCelebrate(null); }}
-              className="w-full mt-4 bg-[#2563eb] text-white text-[15px] font-black py-3 rounded-full hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer"
+              className={`w-full mt-4 text-white text-[15px] font-black py-3 rounded-full hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer ${celebrate.complete ? 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-lg shadow-amber-500/40' : 'bg-[#2563eb]'}`}
             >
-              {celebrate.complete ? 'クエストを終える' : '次の目的地へ →'}
+              {celebrate.complete ? '🏆 クエストを終える' : '次の目的地へ →'}
             </button>
-            {celebrate.complete && (
-              <div className="mt-2 text-2xl celebrate-confetti text-center">🎉 ✨ 🎊</div>
-            )}
           </div>
         </div>
       )}
