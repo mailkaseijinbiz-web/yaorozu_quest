@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Loader2, Sparkles } from 'lucide-react';
 import { db, DEFAULT_SYSTEM_ROLE } from '../../lib/db';
-import { GOD_FUNCTIONS } from '../../data/tasks';
+import { GOD_FUNCTIONS, TASK_CATALOG } from '../../data/tasks';
 import { buildDainichiIdentityMd } from '../../lib/dainichi';
 import { RulesPanel } from './RulesPanel';
 
@@ -78,8 +78,12 @@ export function Blueprint() {
   const activeness = totalValue - totalIssues;
   const enlightenment = totalToku - bonnou;
   const happiness = activeness + enlightenment;
-  const quests = db.getAllQuests().length; // 静的＋生成クエスト
+  const allQuests = db.getAllQuests();
+  const quests = allQuests.length; // 静的＋生成クエスト
   const agents = db.getAgents().length; // 神（Agent）の実数
+  // タスク種別ごとの使用数（全クエスト横断）
+  const taskTypeCounts: Record<string, number> = {};
+  allQuests.forEach((q) => (q.tasks ?? []).forEach((t) => { taskTypeCounts[t.type] = (taskTypeCounts[t.type] ?? 0) + 1; }));
 
   // システムの一括更新：生成ルール＋神の魂を反映して、神・クエストを生成AIでアップデートする
   const [updating, setUpdating] = useState(false);
@@ -227,10 +231,28 @@ export function Blueprint() {
             <div className="grid grid-cols-3 gap-2">
               {GOD_FUNCTIONS.map((fn) => {
                 const st = KIND_STYLE[fn.key];
+                const kindTotal = fn.tasks.reduce((n, t) => n + (taskTypeCounts[t] ?? 0), 0);
                 return (
                   <div key={fn.key} className={`rounded-lg border px-2.5 py-2 ${st.border}`}>
-                    <p className={`text-[12px] font-black ${st.text}`}>{fn.label}</p>
+                    <div className="flex items-baseline justify-between gap-1">
+                      <p className={`text-[12px] font-black ${st.text}`}>{fn.label}</p>
+                      <span className={`text-[9px] font-black tabular-nums ${st.text} opacity-70`} title="この機能のタスク総数">{kindTotal}</span>
+                    </div>
                     <p className={`text-[10px] mt-0.5 leading-tight ${st.text} opacity-80`}>{KIND_ACTIVITY[fn.key] ?? fn.desc}</p>
+                    {/* タスクの種類を数字（使用数）とともに一覧 */}
+                    <div className="mt-1.5 flex flex-col gap-0.5">
+                      {fn.tasks.map((t) => {
+                        const c = TASK_CATALOG[t];
+                        const n = taskTypeCounts[t] ?? 0;
+                        return (
+                          <div key={t} className="flex items-center gap-1 text-[9px]">
+                            <span className="leading-none">{c.icon}</span>
+                            <span className={`flex-1 truncate ${st.text} opacity-90`}>{c.label}</span>
+                            <span className={`tabular-nums font-black ${n > 0 ? st.text : 'text-gray-300'}`}>{n}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })}
