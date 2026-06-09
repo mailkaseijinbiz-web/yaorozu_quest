@@ -14,7 +14,7 @@ const SYNC_KEYS = [
   'yaorozu_activities',
   'yaorozu_goshuin_user-self',
   // 管理者が作成するコンテンツ
-  'yaorozu_spots_v3',
+  'yaorozu_spots_v4',
   'yaorozu_agents_v2',
   'yaorozu_quests_v2',
   // ルール・設定

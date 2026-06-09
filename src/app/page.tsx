@@ -172,7 +172,21 @@ export default function HomePage() {
     lng: number,
     opts: { selectActive?: boolean; chainQuests?: boolean } = {},
   ) => {
+    // 既存スポットを再利用するときの共通処理：アクティブ選択し、クエストが無ければ生成する
+    // （chainQuests を取りこぼさない＝場はあるがクエスト0、を防ぐ）。
+    const reuseExisting = (existing: Spot) => {
+      if (opts.selectActive && !activeSpotRef.current) setActiveSpot(existing);
+      if (opts.chainQuests && db.getQuestsForSpot(existing.id).length === 0) {
+        generateQuestsForSpot(existing, db.getAgentBySpot(existing.id) ?? null, true);
+      }
+    };
     try {
+      // 実在優先：既に近く（~120m）に場があれば再生成しない（重複・無駄な API 呼び出しを防ぐ）。
+      const near = db.getSpots().find(s => distanceKm(lat, lng, s.latitude, s.longitude) < 0.12);
+      if (near) {
+        reuseExisting(near);
+        return;
+      }
       const res = await fetch('/api/generate-spot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -180,10 +194,20 @@ export default function HomePage() {
       });
       if (!res.ok) return;
       const { spot: rawSpot, agent } = await res.json() as { spot: Spot; agent: Agent };
-      // TTL を付与（30 日後に自動期限切れ）
-      // TTL は System タブの設定（spotTtlDays）に従う。未設定時は既定の SPOT_TTL_MS。
+      // 管理者が削除した実在スポット（安定 ID）は、再訪しても復活させない（削除を尊重）。
+      if (db.getDeletedSpots().some(s => s.id === rawSpot.id)) return;
+      // 同一 ID（実在スポットは安定 ID）の場が既にあれば上書きしない＝蓄積した写真・口コミを守る。
+      const dup = db.getSpots().find(s => s.id === rawSpot.id);
+      if (dup) {
+        reuseExisting(dup);
+        return;
+      }
+      // 実在(verified)スポットは TTL を付けない＝期限切れで消えない。
+      // AI 生成スポットだけ TTL を付与（System タブの spotTtlDays。未設定は既定 SPOT_TTL_MS）。
       const ttlMs = (db.getAppSettings().spotTtlDays || (SPOT_TTL_MS / 86_400_000)) * 86_400_000;
-      const spot: Spot = { ...rawSpot, expiresAt: new Date(Date.now() + ttlMs).toISOString() };
+      const spot: Spot = rawSpot.verified
+        ? rawSpot
+        : { ...rawSpot, expiresAt: new Date(Date.now() + ttlMs).toISOString() };
       db.adminSaveSpot(spot);
       db.adminSaveAgent(agent);
       db.trackApiCall('ai_generate');
@@ -222,12 +246,11 @@ export default function HomePage() {
     if (!force && prev && now - prev.at < 5 * 60_000 && distanceKm(centerLat, centerLng, prev.lat, prev.lng) < 0.5) return;
     lastGenRef.current = { lat: centerLat, lng: centerLng, at: now };
     // 各距離帯にランダムな方位で1件ずつ。最初の1件だけアクティブにする。
-    await Promise.all(
-      VARIED_SPOT_DISTANCES_KM.map((km, i) => {
-        const { lat, lng } = destinationPoint(centerLat, centerLng, km, Math.random() * 360);
-        return generateSpotAt(lat, lng, { selectActive: i === 0, chainQuests: true });
-      }),
-    );
+    // 直列実行：Overpass を同一 IP から同時多発で叩いて「busy/429」を自分で誘発しないため。
+    for (let i = 0; i < VARIED_SPOT_DISTANCES_KM.length; i++) {
+      const { lat, lng } = destinationPoint(centerLat, centerLng, VARIED_SPOT_DISTANCES_KM[i], Math.random() * 360);
+      await generateSpotAt(lat, lng, { selectActive: i === 0, chainQuests: true });
+    }
   }, [generateSpotAt]);
 
   // Initial load
