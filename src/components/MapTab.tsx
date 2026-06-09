@@ -80,8 +80,8 @@ function speakJa(text: string) {
     u.lang = 'ja-JP';
     const v = pickJaVoice();
     if (v) u.voice = v;
-    u.rate = 0.95; // 少しゆっくり＝落ち着いた精霊の語り
-    u.pitch = 1.05;
+    u.rate = 1.05;
+    u.pitch = 1.45;
     synth.speak(u);
   } catch {
     /* TTS非対応環境は無視 */

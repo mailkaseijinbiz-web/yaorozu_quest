@@ -50,8 +50,8 @@ function _speakJa(text: string) {
     u.lang = 'ja-JP';
     const v = _pickJaVoice();
     if (v) u.voice = v;
-    u.rate = 0.9;
-    u.pitch = 1.0;
+    u.rate = 1.05;
+    u.pitch = 1.45;
     synth.speak(u);
   } catch { /* TTS非対応環境は無視 */ }
 }
