@@ -467,8 +467,8 @@ export default function MapTab({
             <Flag className="w-2.5 h-2.5" />挑戦中
           </span>
           <h4 className="flex-1 min-w-0 text-sm font-black truncate">{activeChallenge.title}</h4>
-          <button onClick={onClearChallenge} aria-label="チャレンジを終了" className="w-7 h-7 rounded-full hover:bg-white/20 flex items-center justify-center flex-shrink-0 cursor-pointer">
-            <X className="w-4 h-4" />
+          <button onClick={onClearChallenge} aria-label="チャレンジを中断" className="flex items-center gap-0.5 text-[11px] font-black bg-white/20 hover:bg-white/30 px-2 py-1 rounded-full flex-shrink-0 cursor-pointer transition-colors">
+            中断<X className="w-3 h-3" />
           </button>
         </div>
       )}
