@@ -90,7 +90,7 @@ export function Blueprint() {
     setUpdating(true);
     setUpdateMsg(null);
     const rules = db.getQuestRules();
-    const godRules = db.getDainichiIdentity() ?? buildDainichiIdentityMd(); // 大日如来＝全神の基底
+    const godRules = db.getDainichiIdentity() ?? buildDainichiIdentityMd(); // アマテラス＝全神の基底
     const spotRules = db.getSpotRules(); // 場の生成ルール（背景文脈）
     const targets = db.getSpots().slice(0, 5); // 標本（全件は多数のため一部を更新）
     let ok = 0;
@@ -203,8 +203,8 @@ export function Blueprint() {
 
         {/* ② 鋳造（神・工房） */}
         <Stage tag="神" sub="場に宿る神が、価値・課題・魂から クエスト を鋳造する" color="#d97706">
-          {/* 大日如来（根源・一者） */}
-          <Node icon="☸️" name="大日如来" count={1} />
+          {/* アマテラス（根源・一者） */}
+          <Node icon="☸️" name="アマテラス" count={1} />
           {/* 場に宿る神（Agent）＝ 工房の主 */}
           <Node icon="🦊" name="八百万の神 (Agent)" count={spots} />
           <div className="flex items-center gap-2 pl-6 text-[11px] font-bold text-gray-400">└─ が鋳造する ─▶</div>

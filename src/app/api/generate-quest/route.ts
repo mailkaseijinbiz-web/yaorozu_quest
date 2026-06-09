@@ -122,8 +122,8 @@ function buildFallbackQuest(spot: SpotInput, count: number, ts: number): Quest[]
 function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '', spotRules = ''): string {
   const soul = spot.soulMd ? `\n神の魂（口調・人格・世界観。これに沿った語り口で）:\n${spot.soulMd.slice(0, 1200)}` : '';
   const policy = rules.trim() ? `【生成ルール（最優先で厳守）】\n${rules.trim().slice(0, 2500)}\n\n` : '';
-  // 大日如来＝全神の基底（普遍原則）。最優先の生成ルールと衝突する場合は生成ルールを優先する。
-  const base = godRules.trim() ? `【神の普遍原則（大日如来・全神の基底）】\n${godRules.trim().slice(0, 600)}\n（普遍原則。上の生成ルールと衝突する場合は生成ルールを優先する）\n\n` : '';
+  // アマテラス＝全神の基底（普遍原則）。最優先の生成ルールと衝突する場合は生成ルールを優先する。
+  const base = godRules.trim() ? `【神の普遍原則（アマテラス・全神の基底）】\n${godRules.trim().slice(0, 600)}\n（普遍原則。上の生成ルールと衝突する場合は生成ルールを優先する）\n\n` : '';
   // 場の生成ルールは「この場の価値・課題がどう整備されたか」の背景文脈として短く添える（生成指示ではない）。
   const spotPolicy = spotRules.trim() ? `\nこの場の価値・課題は次の方針で整備されている（背景。価値・課題の読み解きの参考に）:\n${spotRules.trim().slice(0, 600)}` : '';
   return `${policy}${base}あなたは位置情報巡礼ゲーム「八百万クエスト」のクエストデザイナーです。
