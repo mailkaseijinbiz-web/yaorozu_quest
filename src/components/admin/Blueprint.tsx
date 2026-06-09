@@ -236,7 +236,7 @@ export function Blueprint() {
                   <div key={fn.key} className={`rounded-lg border px-2.5 py-2 ${st.border}`}>
                     <div className="flex items-baseline justify-between gap-1">
                       <p className={`text-[12px] font-black ${st.text}`}>{fn.label}</p>
-                      <span className={`text-2xl font-black tabular-nums leading-none ${st.text}`} title="この機能のタスク総数">{kindTotal}</span>
+                      <span className={`text-lg font-black tabular-nums leading-none ${st.text}`} title="この機能のタスク総数">{kindTotal}</span>
                     </div>
                     <p className={`text-[10px] mt-0.5 leading-tight ${st.text} opacity-80`}>{KIND_ACTIVITY[fn.key] ?? fn.desc}</p>
                     {/* タスクの種類を「対象（場の活気 / 人間の覚り）」でさらに分類し、数字（使用数）とともに一覧 */}
