@@ -300,13 +300,13 @@ export default function LeafletMap({
 
       const spotHtml = showBubble
         ? `
-        <div class="relative flex flex-col items-center" style="${dim}">
+        <div class="relative flex flex-col items-center">
           <div class="god-ripple ${isActive ? 'god-ripple-active' : ''}"></div>
-          <div class="relative flex items-start gap-1.5 bg-white ${isActive ? 'border-2' : 'border'} ${borderCls} rounded-2xl px-2.5 py-1.5 shadow-lg" style="max-width:190px;">
+          <div class="relative flex items-start gap-1.5 rounded-2xl px-2.5 py-1.5 shadow-lg ${isActive ? 'border-2' : 'border'} ${borderCls}" style="max-width:190px;background:#ffffff;">
             <span style="font-size:15px;line-height:1.15;flex-shrink:0;">${iconEmoji}</span>
             <span class="spot-voice text-[11px] font-bold leading-snug text-gray-800" data-spotid="${spot.id}" data-vi="${voiceIdx}" style="word-break:break-word;transition:opacity 0.3s ease;">${voice}</span>
           </div>
-          <div class="w-2.5 h-2.5 bg-white rotate-45 -mt-1.5 border-r-2 border-b-2 ${borderCls}"></div>
+          <div class="${isActive ? 'border-r-2 border-b-2' : 'border-r border-b'} ${borderCls} -mt-1.5 rotate-45" style="width:10px;height:10px;background:#ffffff;"></div>
           <span class="map-spot-name ${isActive ? 'map-spot-name-active' : ''}">${spot.name}</span>
         </div>
       `
