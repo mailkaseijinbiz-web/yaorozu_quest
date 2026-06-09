@@ -72,7 +72,11 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
   return (
     <div className="flex flex-col h-full overflow-y-auto bg-[#f5f7fa]">
       {/* ── ブランドヘッダー ── */}
-      <div className="px-5 pt-8 pb-4 flex flex-col items-center text-center">
+      {/* 上部はステータスバー/Dynamic Island を避けるため safe-area-inset-top を加算（端末以外では 0） */}
+      <div
+        className="px-5 pb-4 flex flex-col items-center text-center"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 2rem)' }}
+      >
         <h1 className="text-2xl font-black tracking-tight leading-none">
           <span className="text-shrine-red">YAOROZU</span>
           <span className="text-gray-900"> QUEST</span>
