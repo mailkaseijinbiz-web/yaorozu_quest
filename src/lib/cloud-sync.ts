@@ -34,9 +34,14 @@ const SYNC_KEYS = [
 // スナップショットID。未ログインは 'user-self'、OAuth ログイン中は認証ユーザーIDに切り替える。
 let SNAPSHOT_ID = 'user-self';
 
+// 最後にサーバーと同期した版(updated_at)。push 時に baseUpdatedAt として送り、
+// サーバー側の楽観的並行制御に使う（別端末の後続書込を検出してマージさせる）。
+let lastSyncedAt: string | null = null;
+
 /** 同期対象ユーザー（クラウドスナップショットの分離キー）を設定する。認証ログイン/ログアウト時に呼ぶ。 */
 export function setSyncUser(id: string | null): void {
   SNAPSHOT_ID = id || 'user-self';
+  lastSyncedAt = null; // ユーザーが変わればスナップショットも別物なので版をリセット
 }
 
 let cloudEnabled: boolean | null = null;
@@ -57,6 +62,7 @@ export async function pullSnapshot(): Promise<boolean> {
     cloudEnabled = !!json.enabled;
     if (!json.enabled || !json.data) return false;
 
+    lastSyncedAt = json.updatedAt ?? lastSyncedAt;
     suspendPush = true;
     let applied = false;
     for (const key of SYNC_KEYS) {
@@ -101,10 +107,26 @@ async function pushNow(): Promise<void> {
     const res = await fetch('/api/persist', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: SNAPSHOT_ID, data }),
+      body: JSON.stringify({ userId: SNAPSHOT_ID, data, baseUpdatedAt: lastSyncedAt }),
     });
     const json = await res.json();
     cloudEnabled = !!json.enabled;
+    if (json.updatedAt) lastSyncedAt = json.updatedAt;
+    // サーバーが別端末の変更とマージした場合は、その正本をローカルへ反映する。
+    // これをしないと、次回 push でローカルの古い内容がマージ結果を再び上書きしてしまう。
+    if (json.merged && json.data) {
+      suspendPush = true;
+      try {
+        for (const key of SYNC_KEYS) {
+          if (!(key in json.data) || json.data[key] == null) continue;
+          const v = json.data[key];
+          if (key === 'yaorozu_users' && (!Array.isArray(v) || v.length === 0)) continue;
+          localStorage.setItem(key, JSON.stringify(v));
+        }
+      } finally {
+        suspendPush = false;
+      }
+    }
   } catch {
     /* オフライン等は次回に委ねる */
   }
