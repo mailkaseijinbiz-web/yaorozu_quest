@@ -35,60 +35,6 @@ function composeGuideText(step: ChallengeStep, near = false): string {
   return `${intro}${action}${photoLine}`;
 }
 
-// Web Speech API による読み上げ（端末内蔵の最良の日本語ボイスを選択）。
-function pickJaVoice(): SpeechSynthesisVoice | null {
-  if (typeof window === 'undefined' || !window.speechSynthesis) return null;
-  const voices = window.speechSynthesis.getVoices().filter((v) => /^ja/i.test(v.lang));
-  if (!voices.length) return null;
-  return (
-    voices.find((v) => /(enhanced|premium|neural|siri)/i.test(v.name)) ||
-    voices.find((v) => /google/i.test(v.name)) ||
-    voices.find((v) => /(kyoko|o-?ren|otoya|hattori|ichiro|nanami)/i.test(v.name)) ||
-    voices[0]
-  );
-}
-// ElevenLabs（サーバ /api/tts）で生成した自然な音声をメッセージ単位でキャッシュ。
-const ttsCache = new Map<string, string>(); // text -> object URL
-async function fetchTtsUrl(text: string): Promise<string | null> {
-  if (!text) return null;
-  const cached = ttsCache.get(text);
-  if (cached) return cached;
-  try {
-    const res = await fetch('/api/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    });
-    const ct = res.headers.get('content-type') || '';
-    if (res.ok && ct.includes('audio')) {
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      ttsCache.set(text, url);
-      return url;
-    }
-  } catch {
-    /* ネットワーク失敗時は Web Speech にフォールバック */
-  }
-  return null; // キー未設定/失敗 → クライアントは Web Speech を使う
-}
-
-function speakJa(text: string) {
-  try {
-    const synth = window.speechSynthesis;
-    if (!synth || !text) return;
-    synth.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'ja-JP';
-    const v = pickJaVoice();
-    if (v) u.voice = v;
-    u.rate = 1.05;
-    u.pitch = 1.45;
-    synth.speak(u);
-  } catch {
-    /* TTS非対応環境は無視 */
-  }
-}
-
 type GuideMsg = { role: 'spirit' | 'user'; text: string };
 
 // 現在のクエスト進捗から、精霊が語ってきた会話ログを再構成する（序章→現在の目的地まで）。
@@ -184,31 +130,6 @@ export default function MapTab({
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   // 上部ガイドのフキダシ本文（3行＋スクロール）の自動スクロール用
   const guideScrollRef = useRef<HTMLDivElement | null>(null);
-  // 読み上げ（TTS）：ElevenLabs（自然な音声）を優先し、失敗/キー無しは Web Speech にフォールバック
-  const [ttsOn] = useState(false); // TTS は UI 非表示・常時 OFF
-  const ttsOnRef = useRef(false);
-  const briefFullRef = useRef(''); // 現在のガイド全文（トグルON時に読み上げる）
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const stopSpeak = () => {
-    try { audioRef.current?.pause(); audioRef.current = null; } catch {}
-    try { window.speechSynthesis?.cancel(); } catch {}
-  };
-  const speak = async (text: string) => {
-    stopSpeak();
-    if (!text) return;
-    const url = await fetchTtsUrl(text); // ElevenLabs（キーが無ければ null）
-    if (!ttsOnRef.current) return; // 取得中にOFFになったら鳴らさない
-    if (url) {
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.play().catch(() => speakJa(text)); // 自動再生ブロック時は Web Speech
-    } else {
-      speakJa(text); // フォールバック（端末内蔵）
-    }
-  };
-  // TTS（読み上げ）は UI から非表示。常に OFF（自動再生しない）。機能コードは残置。
-  useEffect(() => { ttsOnRef.current = ttsOn; }, [ttsOn]);
-  useEffect(() => () => { stopSpeak(); }, []);
 
   const onPickProof = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -384,8 +305,6 @@ export default function MapTab({
     // 「次は『title』へ」ではなく、土地の紹介 → 現地で写真を撮ろう、という自然な語りにする。
     // 目的地名・距離は下部カードに表示するため、ここでは触れない。
     const full = composeGuideText(nextStep, near);
-    briefFullRef.current = full;
-    if (ttsOnRef.current) speak(full); // 読み上げONなら、メッセージ確定と同時に発話（ElevenLabs優先）
     setBriefTyped('');
     setGuideDone(false);
     let i = 0;
@@ -509,10 +428,7 @@ export default function MapTab({
               </span>
             </button>
             <div className="relative flex-1 bg-white rounded-2xl rounded-tl-sm shadow-xl px-4 py-3">
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] font-black tracking-wider text-amber-600">道案内の精霊</p>
-                {/* TTS（読み上げ）UI は非表示。機能コードは残置。 */}
-              </div>
+              <p className="text-[11px] font-black tracking-wider text-amber-600">道案内の精霊</p>
               <div ref={guideScrollRef} className="mt-0.5 max-h-[4.4rem] overflow-y-auto pointer-events-auto pr-1">
                 <p className="text-sm text-gray-800 leading-relaxed">{briefTyped}<span className="animate-pulse text-amber-500">▌</span></p>
               </div>
