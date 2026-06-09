@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Noto_Sans_JP, Outfit } from "next/font/google";
 import "./globals.css";
+import PwaRegister from "../components/PwaRegister";
 
 const noto = Noto_Sans_JP({
   subsets: ["latin"],
@@ -20,12 +21,19 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
+  themeColor: "#e60012",
 };
 
 export const metadata: Metadata = {
   title: "Yaorozu God Quest - 八百万の神が息づく位置情報ARプラットフォーム",
   description: "あなたの貢献（UGC）でロケーションの神様（AIエージェント）を育てよう！現実とデジタルが交差する位置情報WebARプラットフォーム。",
   keywords: "位置情報, AR, WebAR, UGC, AIエージェント, 神社仏閣, ゲーミフィケーション",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, statusBarStyle: "default", title: "ヤオロズ" },
+  icons: {
+    icon: "/icon.svg",
+    apple: "/icon.svg",
+  },
 };
 
 export default function RootLayout({
@@ -39,6 +47,7 @@ export default function RootLayout({
       className={`${noto.variable} ${outfit.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-dark-bg text-foreground font-sans">
+        <PwaRegister />
         {children}
       </body>
     </html>

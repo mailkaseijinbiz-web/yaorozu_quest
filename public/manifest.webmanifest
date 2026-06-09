@@ -1,0 +1,15 @@
+{
+  "name": "八百万クエスト (Yaorozu Quest)",
+  "short_name": "ヤオロズ",
+  "description": "現実の場所を巡り、八百万の神とともに世界の幸福を育てる位置情報巡礼ゲーム。",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f7fa",
+  "theme_color": "#e60012",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
