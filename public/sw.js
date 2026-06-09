@@ -19,8 +19,8 @@ self.addEventListener('push', (event) => {
   const title = data.title || '八百万クエスト';
   const options = {
     body: data.body || '新しいクエストが現れました。',
-    icon: '/icon.svg',
-    badge: '/icon.svg',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
     data: { url: data.url || '/' },
   };
   event.waitUntil(self.registration.showNotification(title, options));

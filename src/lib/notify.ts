@@ -19,7 +19,7 @@ export async function ensureNotifyPermission(): Promise<boolean> {
 export async function notifyNewQuest(title: string, body: string): Promise<void> {
   if (typeof window === 'undefined' || !('Notification' in window)) return;
   if (Notification.permission !== 'granted') return;
-  const options: NotificationOptions = { body, icon: '/icon.svg', badge: '/icon.svg', data: { url: '/' } };
+  const options: NotificationOptions = { body, icon: '/icon-192.png', badge: '/icon-192.png', data: { url: '/' } };
   try {
     const reg = await navigator.serviceWorker?.getRegistration();
     if (reg) { await reg.showNotification(title, options); return; }

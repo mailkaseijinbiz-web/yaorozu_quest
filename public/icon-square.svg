@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#e60012"/>
+  <!-- 鳥居をセーフゾーン（中央80%）に収めて配置（maskable / apple-touch 用） -->
+  <g transform="translate(51.2,51.2) scale(0.8)" fill="#ffffff">
+    <path d="M96 150 q160 -40 320 0 l0 34 q-160 -34 -320 0 Z"/>
+    <rect x="120" y="196" width="272" height="30" rx="6"/>
+    <rect x="238" y="226" width="36" height="34" rx="4"/>
+    <rect x="150" y="196" width="40" height="210" rx="8"/>
+    <rect x="322" y="196" width="40" height="210" rx="8"/>
+  </g>
+</svg>
