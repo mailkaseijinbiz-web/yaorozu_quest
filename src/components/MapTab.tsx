@@ -5,6 +5,7 @@ import { Compass, ChevronRight, Flag, X, Camera, Check, MapPin, Clock, Navigatio
 import dynamic from 'next/dynamic';
 import { Spot, User, db } from '../lib/db';
 import { uploadImage } from '../lib/upload';
+import { hasGoShuin } from '../lib/goshuin';
 import { distanceKm, bearingDeg } from '../lib/geo';
 import { getHeartVoices } from '../data/god-tasks';
 import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
@@ -562,20 +563,45 @@ export default function MapTab({
                   );
                 })()}
               </div>
-              {/* アクション（達成には証拠写真が必要・500m以内で解放）。次の案内は上部の進捗ガイドに集約 */}
+              {/* アクション。御朱印タスクは写真・距離ゲートなし（会話で授かって達成）。その他は証拠写真＋500m以内。 */}
               <div className="mt-3">
-                <button
-                  onClick={() => {
-                    if (tooFar) { setFarNotice(true); return; }
-                    setProofStep(nextStep); setProofPhoto(null);
-                  }}
-                  className={`w-full text-[15px] font-black py-3 rounded-full transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                    tooFar ? 'bg-gray-200 text-gray-400' : 'bg-[#2563eb] text-white hover:opacity-90 active:scale-[0.99]'
-                  }`}
-                >
-                  <Camera className="w-4 h-4" />証拠写真を撮影
-                </button>
-                {farNotice && tooFar && (
+                {nextStep.type === 'goshuin' ? (
+                  <button
+                    onClick={() => {
+                      const held = nextStep.spotId ? hasGoShuin(currentUser.id, nextStep.spotId) : false;
+                      if (held) {
+                        const doneNow = new Set(db.getChallengeProgress().done[activeChallenge!.id] || []);
+                        const willComplete = doneNow.size + 1 >= activeChallenge!.tasks.length;
+                        onAdvanceChallenge?.(nextStep.id, null);
+                        setCelebrate({
+                          title: willComplete ? `「${activeChallenge!.badgeName}」獲得！` : `${nextStep.title} 達成！`,
+                          icon: willComplete ? activeChallenge!.badgeIcon : '🔴',
+                          complete: willComplete, trivia: nextStep.trivia, triviaCategory: nextStep.triviaCategory,
+                        });
+                      } else {
+                        // 未取得 → 神のページ（会話タブ）を開いて授かりに行く
+                        const target = (nextStep.spotId ? spots.find((s) => s.id === nextStep.spotId) : null) ?? activeSpot;
+                        if (target) onOpenDetail?.(target);
+                      }
+                    }}
+                    className="w-full text-[15px] font-black py-3 rounded-full transition-all cursor-pointer flex items-center justify-center gap-2 bg-[#2563eb] text-white hover:opacity-90 active:scale-[0.99]"
+                  >
+                    <MessageCircle className="w-4 h-4" />御朱印をもらいに行く
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      if (tooFar) { setFarNotice(true); return; }
+                      setProofStep(nextStep); setProofPhoto(null);
+                    }}
+                    className={`w-full text-[15px] font-black py-3 rounded-full transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                      tooFar ? 'bg-gray-200 text-gray-400' : 'bg-[#2563eb] text-white hover:opacity-90 active:scale-[0.99]'
+                    }`}
+                  >
+                    <Camera className="w-4 h-4" />証拠写真を撮影
+                  </button>
+                )}
+                {farNotice && tooFar && nextStep.type !== 'goshuin' && (
                   <p className="text-center text-[12px] font-black text-rose-500 mt-2">📍 目的地に近づいてください（500m以内で達成できます）</p>
                 )}
               </div>

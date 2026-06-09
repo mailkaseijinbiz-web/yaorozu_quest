@@ -158,6 +158,9 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
                     <div className="flex items-center gap-1.5">
                       {active && <span className="text-[13px] font-black bg-white/25 text-white px-1.5 py-0.5 rounded-full flex-shrink-0">挑戦中</span>}
                       {completed && !active && <span className="text-[11px] font-black bg-gold text-white px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5"><Check className="w-3 h-3" />達成済み</span>}
+                      {ch.tasks.length === 1 && ch.tasks[0].type === 'goshuin' && (
+                        <span className={`text-[11px] font-black px-1.5 py-0.5 rounded-full flex-shrink-0 ${active ? 'bg-white/25 text-white' : 'bg-rose-100 text-rose-700'}`}>🔴 御朱印</span>
+                      )}
                       <h3 className={`text-base font-black truncate ${active ? 'text-white' : 'text-gray-900'}`}>{ch.title}</h3>
                     </div>
                     {(() => {

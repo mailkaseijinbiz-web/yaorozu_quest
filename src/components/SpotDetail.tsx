@@ -77,6 +77,8 @@ interface SpotDetailProps {
   onMessageSent?: () => void;
   onStartChallenge?: (challengeId: string) => void; // クエストタブから挑戦開始
   onGoShuinGranted?: () => void; // 御朱印を授かったとき親へ通知
+  activeChallenge?: import('../data/tasks').Quest | null; // 挑戦中クエスト（御朱印ステップの自動達成用）
+  onAdvanceChallenge?: (stepId: string, photo?: string | null) => void; // ステップ達成を親へ通知
 }
 
 // タスク達成時に「楽しみ方」へ追加されるテキスト（神がUGCで成長する）
@@ -118,6 +120,8 @@ export default function SpotDetail({
   onMessageSent,
   onStartChallenge,
   onGoShuinGranted,
+  activeChallenge,
+  onAdvanceChallenge,
 }: SpotDetailProps) {
   const [tab, setTab] = useState<'chat' | 'requests' | 'photos' | 'leaderboard'>('chat');
   const [agent] = useState<Agent>(() => resolveAgent(spot));
@@ -435,6 +439,12 @@ export default function SpotDetail({
       if (stamp) {
         flashToast(`🔴 ${spot.name} の御朱印を授かった！`);
         onGoShuinGranted?.();
+      }
+      // 御朱印のみクエストが進行中なら、御朱印取得済み（今授与 or 既取得）で自動的にステップ達成
+      const pending = activeChallenge?.tasks.find((t) => t.type === 'goshuin' && t.spotId === spot.id);
+      if (pending && onAdvanceChallenge && hasGoShuin(currentUser.id, spot.id)) {
+        onAdvanceChallenge(pending.id, null);
+        flashToast(`✅ 「${pending.title}」達成！`);
       }
       // TTS（読み上げ）は UI から非表示の方針につき自動再生しない。機能コードは残置。
       // if (greetSpokenRef.current !== spot.id) { greetSpokenRef.current = spot.id; speak(greet); }

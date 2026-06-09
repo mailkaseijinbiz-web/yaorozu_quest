@@ -879,6 +879,15 @@ export default function HomePage() {
             onGoShuinGranted={() => {
               if (currentUser) setGoShuinList(getGoShuinList(currentUser.id));
             }}
+            activeChallenge={activeChallengeId ? db.getQuest(activeChallengeId) ?? null : null}
+            onAdvanceChallenge={(stepId, photo) => {
+              if (!activeChallengeId || !currentUser) return;
+              const ch = db.getQuest(activeChallengeId);
+              if (!ch) return;
+              if (photo) db.saveChallengePhoto(activeChallengeId, stepId, photo);
+              db.completeChallengeStep(currentUser.id, activeChallengeId, stepId, ch.tasks.length);
+              refreshDatabaseStates();
+            }}
           />
         )}
 

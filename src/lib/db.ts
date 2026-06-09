@@ -4,6 +4,7 @@ import { generateTrivia } from '../data/trivia-seed';
 import { schedulePush } from './cloud-sync';
 import type { Quest } from '../data/tasks';
 import { CHALLENGES } from '../data/challenges';
+import { hasGoShuin } from './goshuin';
 
 export interface User {
   id: string;
@@ -1483,6 +1484,11 @@ class MockDatabase {
 
   /** チャレンジのステップを達成。+rewardの徳。全ステップ達成でcompletedに追加（バッジ獲得） */
   completeChallengeStep(userId: string, challengeId: string, stepId: string, totalSteps: number, reward = 20): ChallengeProgress {
+    // 御朱印タスクは、その場の御朱印を授かっていなければ完了させない
+    const task = this.getQuest(challengeId)?.tasks.find((t) => t.id === stepId);
+    if (task?.type === 'goshuin' && task.spotId && !hasGoShuin(userId, task.spotId)) {
+      return this.getChallengeProgress();
+    }
     const p = this.getChallengeProgress();
     const done = new Set(p.done[challengeId] || []);
     if (!done.has(stepId)) {
