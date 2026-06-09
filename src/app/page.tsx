@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, MessageSquare, Heart, Share2, X } from 'lucide-react';
-import { db, Spot, Agent, User as UserType, UserContribution } from '../lib/db';
+import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, Clock, Share2, X } from 'lucide-react';
+import { db, Spot, Agent, User as UserType, UserContribution, Activity } from '../lib/db';
 import { pullSnapshot } from '../lib/cloud-sync';
 import { distanceKm } from '../lib/geo';
 import HomeTab from '../components/HomeTab';
@@ -71,7 +71,7 @@ export default function HomePage() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
-  const [mypageTab, setMypageTab] = useState<'posts' | 'badges' | 'quests'>('posts');
+  const [mypageTab, setMypageTab] = useState<'activity' | 'badges' | 'quests'>('activity');
   // 達成クエストの振り返り modal
   const [reviewQuest, setReviewQuest] = useState<Challenge | null>(null);
 
@@ -445,7 +445,7 @@ export default function HomePage() {
                 {/* タブ */}
                 <div className="flex border-b border-black/5 bg-white sticky top-0 z-10">
                   {([
-                    { key: 'posts', label: '投稿', icon: MessageSquare },
+                    { key: 'activity', label: 'アクティビティ', icon: Clock },
                     { key: 'quests', label: '達成クエスト', icon: Flag },
                     { key: 'badges', label: 'バッジ', icon: Trophy },
                   ] as const).map(({ key, label, icon: Icon }) => (
@@ -457,31 +457,56 @@ export default function HomePage() {
 
                 {/* タブ内容 */}
                 <div className="p-4">
-                  {/* 投稿コンテンツ（自分の口コミ・できごと等） */}
-                  {mypageTab === 'posts' && (() => {
-                    const myPosts = db.getUgc().filter((u) => u.userId === currentUser.id).sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
-                    const spotName = (id: string) => db.getSpot(id)?.name || 'スポット';
-                    return myPosts.length === 0 ? (
+                  {/* アクティビティ（訪問・クエスト参加・依頼達成などの履歴） */}
+                  {mypageTab === 'activity' && (() => {
+                    const activities = db.getActivities()
+                      .filter((a) => a.userId === currentUser.id)
+                      .slice(0, 60);
+
+                    const TASK_LABEL: Record<string, string> = {
+                      context: 'コンテキスト収集', photo: '写真奉納', evaluate: '写真評価',
+                      event: 'できごと報告', review: 'クチコミ', sns: 'SNS共有',
+                      buy: '買い物体験', eat: '食事体験', cleaning: '清掃奉仕',
+                      visit: '来訪', resolveIssue: '課題解決', judge: '評価',
+                    };
+                    const ACT_CFG: Record<Activity['type'], { icon: string; bg: string; text: string; label: (a: Activity) => string }> = {
+                      visit:          { icon: '📍', bg: 'bg-blue-50',   text: 'text-blue-700',   label: (a) => `${db.getSpot(a.spotId ?? '')?.name ?? a.spotId ?? '場所'} を訪問` },
+                      quest_join:     { icon: '🏴', bg: 'bg-indigo-50', text: 'text-indigo-700', label: (a) => `「${db.getQuest(a.challengeId ?? '')?.title ?? 'クエスト'}」に参加` },
+                      quest_step:     { icon: '✅', bg: 'bg-emerald-50',text: 'text-emerald-700',label: (a) => `クエストのミッションを達成` },
+                      quest_complete: { icon: '🏆', bg: 'bg-amber-50',  text: 'text-amber-700',  label: (a) => `「${db.getQuest(a.challengeId ?? '')?.title ?? 'クエスト'}」を制覇！` },
+                      task:           { icon: '⭐', bg: 'bg-violet-50', text: 'text-violet-700', label: (a) => `${db.getSpot(a.spotId ?? '')?.name ?? '場所'} で${TASK_LABEL[a.detail ?? ''] ?? '依頼'}を達成` },
+                      photo:          { icon: '📸', bg: 'bg-rose-50',   text: 'text-rose-700',   label: (a) => `${db.getSpot(a.spotId ?? '')?.name ?? '場所'} に写真を奉納` },
+                      ugc:            { icon: '💬', bg: 'bg-sky-50',    text: 'text-sky-700',    label: (a) => `${db.getSpot(a.spotId ?? '')?.name ?? '場所'} に口コミを投稿` },
+                    };
+
+                    if (activities.length === 0) return (
                       <div className="text-center py-12">
-                        <MessageSquare className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                        <p className="text-xs text-gray-400">まだ投稿がありません。<br />スポットで神の依頼に応えて投稿しよう。</p>
+                        <Clock className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                        <p className="text-xs text-gray-400">まだアクティビティがありません。<br />スポットを訪問してクエストに挑もう。</p>
                       </div>
-                    ) : (
-                      <div className="space-y-2.5">
-                        {myPosts.map((post) => (
-                          <div key={post.id} className="bg-white rounded-2xl p-3.5 border border-black/5 shadow-sm">
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span className="text-[13px] font-black text-shrine-red bg-shrine-red/10 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                <MapPin className="w-2.5 h-2.5" />{spotName(post.spotId)}
-                              </span>
-                              <span className="text-[11px] text-gray-400 flex items-center gap-1">
-                                <Heart className="w-2.5 h-2.5 fill-shrine-red text-shrine-red" />{post.likesCount}
-                              </span>
+                    );
+
+                    return (
+                      <div className="space-y-2">
+                        {activities.map((a) => {
+                          const cfg = ACT_CFG[a.type] ?? ACT_CFG.task;
+                          return (
+                            <div key={a.id} className="flex items-start gap-3 bg-white rounded-2xl p-3 border border-black/5 shadow-sm">
+                              <div className={`w-9 h-9 rounded-full flex items-center justify-center text-lg flex-shrink-0 ${cfg.bg}`}>
+                                {cfg.icon}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-xs font-bold leading-snug ${cfg.text}`}>{cfg.label(a)}</p>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <p className="text-[11px] text-gray-400">{new Date(a.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                                  {a.reward != null && a.reward > 0 && (
+                                    <span className="text-[11px] font-black text-amber-600">+{a.reward}徳</span>
+                                  )}
+                                </div>
+                              </div>
                             </div>
-                            <p className="text-xs text-gray-700 leading-relaxed">{post.content}</p>
-                            <p className="text-[11px] text-gray-400 mt-1.5">{new Date(post.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     );
                   })()}
