@@ -27,6 +27,11 @@ export async function POST(request: Request) {
   const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(dataUrl);
   if (!match) return NextResponse.json({ error: 'unsupported data url' }, { status: 400 });
   const contentType = match[1];
+  // 許可する画像形式のみ受け付ける。image/svg+xml は <script> 実行（stored XSS）の恐れがあるため除外。
+  const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+  if (!ALLOWED_TYPES.has(contentType)) {
+    return NextResponse.json({ error: 'unsupported image type' }, { status: 415 });
+  }
   const ext = contentType.split('/')[1].replace('jpeg', 'jpg');
   const buffer = Buffer.from(match[2], 'base64');
 

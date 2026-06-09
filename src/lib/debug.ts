@@ -18,6 +18,9 @@ export interface DebugLatLng {
 /** デバッグモードが有効か。URL の ?debug=1/0 を反映してから localStorage を見る。 */
 export function isDebugEnabled(): boolean {
   if (typeof window === 'undefined') return false;
+  // 本番ビルドでは無効化（位置偽装によるチャレンジのジオフェンス回避を防ぐ）。
+  // process.env.NODE_ENV はビルド時に静的置換されるため、クライアントでも安全に分岐できる。
+  if (process.env.NODE_ENV !== 'development') return false;
   try {
     const params = new URLSearchParams(window.location.search);
     const q = params.get('debug');

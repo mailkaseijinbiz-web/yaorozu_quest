@@ -1,5 +1,11 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## 開発環境の前提
+
+- **Node.js は 20.9 以上（推奨 v22）**。Next.js 16 は Node 18 ではビルドできません。`.nvmrc` があるので `nvm use` でバージョンを揃えられます。
+- ビルドが型エラーになる場合、削除済みルートを参照する古いキャッシュが原因のことがあります。`rm -rf .next` してから `npm run build` し直してください。
+- 環境変数は `.env.local`（gitignore 済み）に置きます。`ADMIN_PASSWORD` は管理画面（`/admin`）のログインに必須です。**本番では必ず強固な値に変更**してください（未設定だと管理画面にログインできません）。
+
 ## Getting Started
 
 First, run the development server:
