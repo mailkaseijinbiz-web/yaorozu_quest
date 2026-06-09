@@ -29,11 +29,13 @@ interface LeafletMapProps {
   userLocation: { lat: number; lng: number };
   setUserLocation: (loc: { lat: number; lng: number }) => void;
   ugcCounts: { [spotId: string]: number };
-  goal?: { lat: number; lng: number; name: string } | null; // チャレンジのゴール
+  goal?: { lat: number; lng: number; name: string; godEmoji?: string } | null; // チャレンジのゴール（godEmoji=挑戦中の神のアイコン）
   controlsBottom?: number; // 現在地ボタンの下端からの位置（下部オーバーレイの上端+余白）
   focusGoalToken?: number; // 値が変わると目的地を地図中央へ寄せる
   hideControls?: boolean; // 導入表示中は現在地ボタンを隠し、解除時にふわっと出す
   onMapMove?: (center: { lat: number; lng: number }) => void; // ユーザーが地図を移動させたとき（スロットル済み）
+  cardFocus?: { lat: number; lng: number } | null; // インタラクティブカードが指す場所
+  cardFocusToken?: number; // 値が変わるとカードの場所へ地図を寄せる（スワイプ連動）
 }
 
 export default function LeafletMap({
@@ -48,6 +50,8 @@ export default function LeafletMap({
   focusGoalToken,
   hideControls = false,
   onMapMove,
+  cardFocus,
+  cardFocusToken,
 }: LeafletMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -240,19 +244,22 @@ export default function LeafletMap({
   const goalLat = goal && typeof goal.lat === 'number' && !isNaN(goal.lat) ? goal.lat : null;
   const goalLng = goal && typeof goal.lng === 'number' && !isNaN(goal.lng) ? goal.lng : null;
   const goalName = goal?.name ?? '';
+  const goalEmoji = goal?.godEmoji || '⛩️';
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     if (goalMarkerRef.current) { goalMarkerRef.current.remove(); goalMarkerRef.current = null; }
     if (goalLat == null || goalLng == null) return;
-    // 青のフキダシ：目的地での行動（写真撮影）を促す
+    // 青のフキダシ（目的地での写真撮影を促す）＋その下に「挑戦中の神」のアイコンを青い丸で表示。
+    // アンカーは下端の青い丸の中心＝目的地座標に合わせる。
     const goalHtml = `
-      <div style="position:relative;display:flex;flex-direction:column;align-items:center;padding-bottom:4px;">
+      <div style="position:relative;display:flex;flex-direction:column;align-items:center;">
         <div style="background:#2563eb;color:#fff;font-weight:900;font-size:11px;white-space:nowrap;padding:3px 11px;border-radius:9999px;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);">📸 ここで写真を撮る！</div>
-        <div style="width:10px;height:10px;background:#2563eb;transform:rotate(45deg);margin-top:-6px;border-right:2px solid #fff;border-bottom:2px solid #fff;"></div>
+        <div style="width:9px;height:9px;background:#2563eb;transform:rotate(45deg);margin-top:-5px;border-right:2px solid #fff;border-bottom:2px solid #fff;"></div>
+        <div style="margin-top:2px;width:38px;height:38px;border-radius:9999px;background:#2563eb;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:20px;line-height:1;">${goalEmoji}</div>
       </div>`;
     goalMarkerRef.current = L.marker([goalLat, goalLng], {
-      icon: L.divIcon({ html: goalHtml, className: 'custom-goal-icon', iconSize: [180, 44], iconAnchor: [90, 40] }),
+      icon: L.divIcon({ html: goalHtml, className: 'custom-goal-icon', iconSize: [180, 80], iconAnchor: [90, 52] }),
       zIndexOffset: 1500,
     }).addTo(map);
 
@@ -264,7 +271,7 @@ export default function LeafletMap({
       map.flyTo([u.lat, u.lng], targetZoom, { duration: 0.9 });
     }, 1700);
     return () => clearTimeout(t);
-  }, [goalLat, goalLng, goalName]);
+  }, [goalLat, goalLng, goalName, goalEmoji]);
 
   // 「次の目的地」タップ：目的地を地図中央へ寄せる（初回トークンは無視）
   const focusInitRef = useRef(true);
@@ -276,6 +283,17 @@ export default function LeafletMap({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusGoalToken]);
+
+  // インタラクティブカードのスワイプ：対応する場所へ地図を寄せる（初回トークンは無視）
+  const cardFocusInitRef = useRef(true);
+  useEffect(() => {
+    if (cardFocusInitRef.current) { cardFocusInitRef.current = false; return; }
+    const map = mapRef.current;
+    if (map && cardFocus) {
+      map.flyTo([cardFocus.lat, cardFocus.lng], Math.max(map.getZoom(), 15), { duration: 0.6 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardFocusToken]);
 
   // 3. Manage Spot Markers (Sauna-ikitai style tag bubble pins)
   useEffect(() => {
@@ -324,8 +342,15 @@ export default function LeafletMap({
     visibleSpots.forEach((spot) => {
       const isActive = activeSpot?.id === spot.id;
       const iconEmoji = spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏');
-      // 最も近い神（と選択中）だけフキダシを表示。被る場合は優先度の高いひとつのみ。クエスト中は青のフキダシを出さない。
-      const showBubble = bubbleIds.has(spot.id);
+      // 現在地マーカーとフキダシ本体が画面上で重なるスポットは、フキダシを出さずドット表示にする
+      // （フキダシが現在地に被るのを防ぐ）。フキダシ本体は地点の上方に開くため、現在地が
+      // 地点の真上〜同位置（横≲116px・縦 spotPt.y-82〜+2）にあるときを「被り」とみなす。
+      const spotPt = map.latLngToContainerPoint([spot.latitude, spot.longitude]);
+      const bubbleOverlapsUser =
+        Math.abs(userPt.x - spotPt.x) < 116 && userPt.y > spotPt.y - 82 && userPt.y < spotPt.y + 2;
+      // 最も近い神（と選択中）だけフキダシを表示。被る場合は優先度の高いひとつのみ。
+      // クエスト中は青のフキダシを出さない。現在地と被るときも出さない。
+      const showBubble = bubbleIds.has(spot.id) && !bubbleOverlapsUser;
       // フキダシの中身は「ここの神のつぶやき（心の声）」。スポット毎に変化させ、一定間隔で動的に切り替える
       let voice = '';
       let voiceIdx = 0;
@@ -336,16 +361,6 @@ export default function LeafletMap({
         voice = truncVoice(voicesRef.current[spot.id][voiceIdx]);
       }
       const borderCls = isActive ? 'border-[#2563eb]' : 'border-[#2563eb]/40';
-
-      // 現在地マーカー(上方向に約44px)とフキダシ(既定では上方向に開く)が被る場合は、
-      // 切り込み(しっぽ)を上側に変えて下方向に開き、現在地マーカーとぶつからないようにする
-      let flipDown = false;
-      if (showBubble) {
-        const spotPt = map.latLngToContainerPoint([spot.latitude, spot.longitude]);
-        const nearX = Math.abs(userPt.x - spotPt.x) < 110;
-        const userAbove = userPt.y < spotPt.y && userPt.y > spotPt.y - 80;
-        flipDown = nearX && userAbove;
-      }
 
       const spotHtml = showBubble
         ? `
@@ -360,7 +375,7 @@ export default function LeafletMap({
       `
         : `
         <div class="relative flex flex-col items-center">
-          <div class="w-3 h-3 rounded-full bg-[#2563eb]/70 border-2 border-white shadow-sm"></div>
+          <div class="w-4 h-4 rounded-full bg-[#2563eb]/70 border-2 border-white shadow-sm"></div>
         </div>
       `;
 
@@ -369,7 +384,7 @@ export default function LeafletMap({
         className: 'custom-spot-icon',
         iconSize: showBubble ? [210, 108] : [120, 30],
         // アンカー（＝この場の地理座標＝現在地ドット位置）を下げ、フキダシを上へ持ち上げてドットとの重なりを防ぐ
-        iconAnchor: showBubble ? [105, 60] : [60, 6],
+        iconAnchor: showBubble ? [105, 60] : [60, 8],
       });
 
       const marker = L.marker([spot.latitude, spot.longitude], {

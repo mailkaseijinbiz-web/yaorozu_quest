@@ -1,14 +1,12 @@
-// Overpass (OpenStreetMap) で GPS 周辺の「実在する場所」を引くサーバー専用ユーティリティ。
-// 返すのは場（Spot）の素材＝実在の名称・座標・カテゴリのみ。
+// Overpass (OpenStreetMap) で GPS 周辺の「実在する寺社（神社・寺院）」を引くサーバー専用ユーティリティ。
+// 返すのは場（Spot）の素材＝実在の名称・座標・カテゴリ（神社/寺院）のみ。
 // 説明・楽しみ方・課題・神格は呼び出し側（/api/generate-spot）で付与する。
 //
-// 設計意図: 「場は意味のある実在の場所であるべき」。AI に場を発明させるのではなく、
-// 実在の POI（神社・寺院・公園・史跡・自然・文化施設…）を一次情報として採用する。
+// 設計意図: 「場は実在の寺社であるべき」。AI に場を発明させるのではなく、
+// 実在の神社・寺院を一次情報（ベース）として採用する。
 
-/** 場のカテゴリ（唯一の真実）。/api/generate-spot と共有する。 */
-export const CATEGORIES = [
-  '神社', '寺院', '公園', '商店街', '広場', '史跡', '自然', '文化施設', '川・池', '坂・路地',
-] as const;
+/** 場のカテゴリ（唯一の真実）。実在の寺社のみを場とする。/api/generate-spot と共有する。 */
+export const CATEGORIES = ['神社', '寺院'] as const;
 export type Category = (typeof CATEGORIES)[number];
 
 /** Overpass から得た実在スポット1件。 */
@@ -43,12 +41,9 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): num
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
 }
 
-const inSet = (v: string | undefined, ...vals: string[]): boolean =>
-  v != null && vals.includes(v);
-
 /**
- * OSM タグ群を場の 10 カテゴリへ写像する。対象外なら null。
- * 優先順位: 神社/寺院（テーマの中核）→ 文化施設 → 史跡 → 川・池 → 自然 → 公園 → 広場 → 商店街 → 坂・路地。
+ * OSM タグ群を場のカテゴリ（神社/寺院）へ写像する。寺社以外なら null。
+ * 神道→神社・仏教→寺院。religion 未指定の宗教施設は名称から推定（教会・モスク等は除外）。
  */
 function mapCategory(tags: Record<string, string>): Category | null {
   const name = tags['name:ja'] || tags.name || '';
@@ -57,58 +52,23 @@ function mapCategory(tags: Record<string, string>): Category | null {
   if (tags.religion === 'shinto' || tags.building === 'shrine') return '神社';
   // 寺院（仏教）
   if (tags.religion === 'buddhist' || tags.building === 'temple') return '寺院';
-  // 宗教施設だが religion 未指定 → 名称から推定
-  if (tags.amenity === 'place_of_worship') {
+  // religion 未指定の宗教施設 → 名称から神社/寺院を推定（religion 明示の教会・モスク等は対象外）
+  if (tags.amenity === 'place_of_worship' && !tags.religion) {
     if (/神社|神宮|大社|天満宮|八幡|稲荷|宮|社$/.test(name)) return '神社';
     if (/寺|院|大師|不動|観音|地蔵|堂/.test(name)) return '寺院';
-    return '神社'; // 鳥居がテーマの中心。既定は神社。
+    return '神社'; // 鳥居がテーマの中心。推定不能な無指定は神社扱い。
   }
 
-  // 文化施設
-  if (inSet(tags.tourism, 'museum', 'gallery') || inSet(tags.amenity, 'theatre', 'library', 'arts_centre')) {
-    return '文化施設';
-  }
-  // 史跡
-  if (tags.historic) return '史跡';
-  // 川・池
-  if (tags.natural === 'water' || tags.water || inSet(tags.waterway, 'river', 'stream', 'canal')) {
-    return '川・池';
-  }
-  // 自然
-  if (inSet(tags.natural, 'wood', 'peak', 'spring', 'grassland', 'tree') || tags.leisure === 'nature_reserve') {
-    return '自然';
-  }
-  // 公園
-  if (inSet(tags.leisure, 'park', 'garden')) return '公園';
-  // 広場
-  if (tags.place === 'square') return '広場';
-  // 商店街
-  if (tags.shop === 'mall' || tags.landuse === 'retail') return '商店街';
-  // 坂・路地（名称に「坂」を含む道）
-  if (tags.highway && /坂/.test(name)) return '坂・路地';
-  // 観光名所など → 史跡扱い
-  if (inSet(tags.tourism, 'attraction', 'artwork')) return '史跡';
-
-  return null;
+  return null; // 寺社以外は場にしない
 }
 
-/** 指定座標・半径の周辺 POI を引く Overpass QL を組み立てる。 */
+/** 指定座標・半径の周辺の寺社（神社・寺院）を引く Overpass QL を組み立てる。 */
 function buildQuery(lat: number, lng: number, radiusM: number): string {
   const c = `${Math.round(radiusM)},${lat.toFixed(6)},${lng.toFixed(6)}`;
   return `[out:json][timeout:10];
 (
   nwr(around:${c})["amenity"="place_of_worship"]["name"];
   nwr(around:${c})["building"~"^(shrine|temple)$"]["name"];
-  nwr(around:${c})["leisure"~"^(park|garden|nature_reserve)$"]["name"];
-  nwr(around:${c})["historic"]["name"];
-  nwr(around:${c})["tourism"~"^(museum|gallery|artwork|attraction)$"]["name"];
-  nwr(around:${c})["amenity"~"^(theatre|library|arts_centre)$"]["name"];
-  nwr(around:${c})["natural"~"^(water|wood|peak|spring|grassland|tree)$"]["name"];
-  nwr(around:${c})["waterway"~"^(river|stream|canal)$"]["name"];
-  nwr(around:${c})["place"="square"]["name"];
-  nwr(around:${c})["shop"="mall"]["name"];
-  nwr(around:${c})["landuse"="retail"]["name"];
-  nwr(around:${c})["highway"]["name"~"坂"];
 );
 out center 100;`;
 }

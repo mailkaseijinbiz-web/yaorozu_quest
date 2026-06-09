@@ -25,40 +25,16 @@ function randomId(prefix: string) {
 const PERSONA: Record<Category, { emoji: string; god: string; tone: VoiceTone }> = {
   '神社': { emoji: '⛩️', god: '杜の守り神', tone: '神秘的' },
   '寺院': { emoji: '🙏', god: '御仏の使い', tone: '賢者' },
-  '公園': { emoji: '🌳', god: '緑の精霊', tone: '親しみやすい' },
-  '商店街': { emoji: '🏮', god: '賑わいの神', tone: '親しみやすい' },
-  '広場': { emoji: '🕊️', god: '集いの精霊', tone: '親しみやすい' },
-  '史跡': { emoji: '🏯', god: '時を見守る古霊', tone: '厳格' },
-  '自然': { emoji: '🌿', god: '山野の精霊', tone: '神秘的' },
-  '文化施設': { emoji: '🎭', god: '文の守り神', tone: '賢者' },
-  '川・池': { emoji: '🌊', god: '水辺の精霊', tone: '神秘的' },
-  '坂・路地': { emoji: '🛤️', god: '路の道祖神', tone: '親しみやすい' },
 };
 
 function templateFlavor(name: string, category: Category): { enjoyments: string[]; issues: string[] } {
   const enjoy: Record<Category, string[]> = {
     '神社': [`${name}の鳥居をくぐり参道を歩く`, '静かに参拝して心を整える', '境内の四季の移ろいを感じる'],
     '寺院': [`${name}の山門をくぐり本堂を仰ぐ`, '線香の香りの中で手を合わせる', '庭や石畳の静けさを味わう'],
-    '公園': [`${name}の緑陰をゆっくり散歩する`, 'ベンチで季節の風を感じる', '広場で深呼吸して体をほぐす'],
-    '商店街': [`${name}を端から端まで歩いて店を覗く`, '気になる一軒で買い物をする', '店主や常連と一言交わす'],
-    '広場': [`${name}でひと休みして人の流れを眺める`, '待ち合わせや集いの場として使う', '空と街並みを見渡す'],
-    '史跡': [`${name}の由来を読み解き歴史を想う`, '残された遺構をじっくり観察する', '当時の風景を心に描く'],
-    '自然': [`${name}の自然の中を歩いて五感を開く`, '生き物や植物の気配を探す', '空気と光の変化を味わう'],
-    '文化施設': [`${name}で展示や催しに触れる`, '静かな空間で作品と向き合う', '学びを一つ持ち帰る'],
-    '川・池': [`${name}の水辺に沿って歩く`, '水面の光や水鳥を眺める', 'せせらぎの音に耳を澄ます'],
-    '坂・路地': [`${name}を上り下りして街の起伏を体で感じる`, '路地の小さな発見を探す', '坂の上の景色を楽しむ'],
   };
   const issue: Record<Category, string[]> = {
     '神社': ['参道脇の落ち葉やゴミを一袋拾う', '由緒書きの薄れた箇所を写真に残す'],
     '寺院': ['案内の薄い角に道標写真を一枚足す', '静けさを乱す放置ゴミを一つ片付ける'],
-    '公園': ['遊歩道沿いのゴミを一袋拾う', '人通りの少ない一角の魅力を一件発信する'],
-    '商店街': ['平日昼の人通りの少なさを一件の来店で動かす', '空き店舗前の様子を記録して共有する'],
-    '広場': ['ベンチ周りの散乱ゴミを片付ける', '案内の薄い角に道標写真を一枚足す'],
-    '史跡': ['説明板の読みにくい箇所を聞き書きして残す', '草に埋もれた標石の写真を記録する'],
-    '自然': ['遊歩道の外れに落ちたゴミを拾う', '見頃の自然の様子を一件発信する'],
-    '文化施設': ['分かりにくい順路を写真で補う', '催しの感想を一件残して次の来館者へ繋ぐ'],
-    '川・池': ['水辺に流れ着いたゴミを一つ拾う', '護岸沿いの見どころを一件発信する'],
-    '坂・路地': ['見通しの悪い角の様子を記録して注意を促す', '坂沿いの隠れた名所を一件発信する'],
   };
   return { enjoyments: enjoy[category], issues: issue[category] };
 }
@@ -224,7 +200,7 @@ function fallbackSpot(lat: number, lng: number) {
       longitude: lng,
       creatorId: null,
       imageUrl: '',
-      category: '史跡',
+      category: '神社',
       tokuRequirement: 0,
       enjoyments: ['その場の空気を感じる'],
       difficulty: 1,
@@ -254,14 +230,14 @@ function fallbackSpot(lat: number, lng: number) {
 async function inventWithGemini(lat: number, lng: number, geminiKey: string) {
   const prompt = `
 あなたは日本の地域情報に詳しいAIです。
-以下のGPS座標（日本国内）に実在しそうな場所（神社・寺・公園・商店街・史跡など）を1件生成してください。
+以下のGPS座標（日本国内）に実在しそうな寺社（神社または寺院）を1件生成してください。
 
 緯度: ${lat.toFixed(6)}
 経度: ${lng.toFixed(6)}
 
 以下のJSON形式で出力してください（コードブロック・説明文は不要、JSONのみ）:
 {
-  "name": "場所の名前（実在感のある和風の名前）",
+  "name": "寺社の名前（実在感のある和風の名前）",
   "description": "場所の説明（2〜3文、80字以内）",
   "category": "${CATEGORIES.join(' | ')} のいずれか",
   "godName": "この場に宿る神の名前（例: 〜の守り神、〜の精霊）",
@@ -300,7 +276,7 @@ async function inventWithGemini(lat: number, lng: number, geminiKey: string) {
     longitude: lng,
     creatorId: null,
     imageUrl: '',
-    category: CATEGORIES.includes(g.category) ? g.category : '史跡',
+    category: CATEGORIES.includes(g.category) ? g.category : '神社',
     tokuRequirement: 0,
     enjoyments: Array.isArray(g.enjoyments) ? g.enjoyments.slice(0, 5).map(String) : [],
     difficulty: 1,
@@ -342,10 +318,11 @@ export async function POST(request: Request) {
 
   const geminiKey = process.env.GEMINI_API_KEY;
 
-  // 1) 実在優先：OSM(Overpass) で近くの実在スポットを探す（単一半径・低レイテンシ優先）
+  // 1) 実在優先：OSM(Overpass) で近くの実在の寺社（神社・寺院）を探す。
+  //    寺社のみに絞った分ヒット密度が下がるため、半径を広げて取りこぼしを防ぐ（最寄り1件を採用）。
   let real: RealPlace | null = null;
   try {
-    real = (await lookupRealPlaces(lat, lng, 1500, 8))[0] ?? null;
+    real = (await lookupRealPlaces(lat, lng, 2500, 8))[0] ?? null;
   } catch (err) {
     console.error('[generate-spot] overpass error:', err);
   }
