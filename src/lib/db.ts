@@ -360,7 +360,7 @@ const KEYS = {
   TRIVIA: 'yaorozu_trivia',
   ACTIVITIES: 'yaorozu_activities',
   DAINICHI: 'yaorozu_dainichi_identity',
-  API_CALLS: 'yaorozu_api_calls',     // AI / TTS API呼び出しログ（日別集計）
+  API_CALLS: 'yaorozu_api_calls',     // AI API呼び出しログ（日別集計）
   REVOKED: 'yaorozu_revoked_users',   // 削除済みユーザーID（再ログイン強制用）
   BONNOU: 'yaorozu_bonnou',           // 人間が打ち明けた煩悩（覚りの調整素材）
   APP_SETTINGS: 'yaorozu_app_settings', // アプリ全体の設定（System タブ）
@@ -497,11 +497,10 @@ export interface MetricsSnapshot {
   activities: number;// アクティビティ
   toku: number;      // 徳の総和
   aiCalls: number;   // AI API 累計リクエスト数
-  ttsCalls: number;  // TTS API 累計リクエスト数
 }
 
-// API 呼び出しログ: { [YYYY-MM-DD]: { ai_chat: n, ai_generate: n, tts: n } }
-export type ApiCallType = 'ai_chat' | 'ai_generate' | 'tts';
+// API 呼び出しログ: { [YYYY-MM-DD]: { ai_chat: n, ai_generate: n } }
+export type ApiCallType = 'ai_chat' | 'ai_generate';
 export type ApiCallsByDay = Record<string, Partial<Record<ApiCallType, number>>>;
 
 // チャレンジ進捗
@@ -732,10 +731,9 @@ class MockDatabase {
     const spots = this.getSpots();
     const users = this.getUsers();
     const apiByDay = this.getApiCallsByDay();
-    let aiCalls = 0, ttsCalls = 0;
+    let aiCalls = 0;
     for (const day of Object.values(apiByDay)) {
       aiCalls += (day.ai_chat ?? 0) + (day.ai_generate ?? 0);
-      ttsCalls += day.tts ?? 0;
     }
     return {
       spots: spots.length,
@@ -746,7 +744,6 @@ class MockDatabase {
       activities: this.getActivities().length,
       toku: users.reduce((n, u) => n + (u.totalToku ?? 0), 0),
       aiCalls,
-      ttsCalls,
     };
   }
 

@@ -9,56 +9,6 @@ import { uploadImage } from '../lib/upload';
 import { shareToSns } from '../lib/share';
 import { grantGoShuin, hasGoShuin } from '../lib/goshuin';
 
-// ── TTS（神の声）──────────────────────────────────────────
-const _ttsCache = new Map<string, string>();
-async function _fetchTtsUrl(text: string): Promise<string | null> {
-  if (!text) return null;
-  const cached = _ttsCache.get(text);
-  if (cached) return cached;
-  try {
-    const res = await fetch('/api/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    });
-    const ct = res.headers.get('content-type') || '';
-    if (res.ok && ct.includes('audio')) {
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      _ttsCache.set(text, url);
-      db.trackApiCall('tts');
-      return url;
-    }
-  } catch { /* fallback */ }
-  return null;
-}
-function _pickJaVoice(): SpeechSynthesisVoice | null {
-  if (typeof window === 'undefined' || !window.speechSynthesis) return null;
-  const voices = window.speechSynthesis.getVoices().filter((v) => /^ja/i.test(v.lang));
-  if (!voices.length) return null;
-  return (
-    voices.find((v) => /(enhanced|premium|neural|siri)/i.test(v.name)) ||
-    voices.find((v) => /google/i.test(v.name)) ||
-    voices.find((v) => /(kyoko|o-?ren|otoya|hattori|ichiro|nanami)/i.test(v.name)) ||
-    voices[0]
-  );
-}
-function _speakJa(text: string) {
-  try {
-    const synth = window.speechSynthesis;
-    if (!synth || !text) return;
-    synth.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'ja-JP';
-    const v = _pickJaVoice();
-    if (v) u.voice = v;
-    u.rate = 1.05;
-    u.pitch = 1.45;
-    synth.speak(u);
-  } catch { /* TTS非対応環境は無視 */ }
-}
-// ────────────────────────────────────────────────────────────
-
 interface Message {
   id: string;
   sender: 'user' | 'agent';
@@ -150,25 +100,6 @@ export default function SpotDetail({
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
-  const greetSpokenRef = useRef<string | null>(null); // 読み上げ済みスポットID（二重再生防止）
-  const stopAudio = () => {
-    try { ttsAudioRef.current?.pause(); ttsAudioRef.current = null; } catch {}
-    try { window.speechSynthesis?.cancel(); } catch {}
-  };
-  const speak = async (text: string) => {
-    stopAudio();
-    const url = await _fetchTtsUrl(text);
-    // 取得中に他の speak が走っていたら鳴らさない
-    if (ttsAudioRef.current !== null) return;
-    if (url) {
-      const audio = new Audio(url);
-      ttsAudioRef.current = audio;
-      audio.play().catch(() => _speakJa(text));
-    } else {
-      _speakJa(text);
-    }
-  };
 
   // 「あなただけ」の投稿は本人以外には見せない（AIの参照対象からも除外）
   const ugc = useMemo(
@@ -446,10 +377,7 @@ export default function SpotDetail({
         onAdvanceChallenge(pending.id, null);
         flashToast(`✅ 「${pending.title}」達成！`);
       }
-      // TTS（読み上げ）は UI から非表示の方針につき自動再生しない。機能コードは残置。
-      // if (greetSpokenRef.current !== spot.id) { greetSpokenRef.current = spot.id; speak(greet); }
     }
-    return () => { stopAudio(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, messages.length, agent.name, spot.name, currentUser.displayName, nearbyChallenge]);
 

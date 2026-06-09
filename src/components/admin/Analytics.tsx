@@ -23,7 +23,6 @@ const METRICS: { key: string; label: string; color: string; get: (s: Metrics) =>
   { key: 'activities', label: 'アクティビティ', color: '#0891b2', get: (s) => s.activities },
   { key: 'toku',     label: '徳 総和',          color: '#ca8a04', get: (s) => s.toku },
   { key: 'aiCalls',  label: 'AI リクエスト数',  color: '#6d28d9', get: (s) => s.aiCalls ?? 0 },
-  { key: 'ttsCalls', label: 'TTS リクエスト数', color: '#0e7490', get: (s) => s.ttsCalls ?? 0 },
 ];
 
 function Sparkline({ values, color, className = 'w-full h-9' }: { values: number[]; color: string; className?: string }) {
@@ -160,12 +159,11 @@ export function Analytics() {
         )}
       </div>
 
-      {/* AI / TTS API リクエストの日別推移 */}
+      {/* AI API リクエストの日別推移 */}
       {(() => {
         const API_TYPES: { key: ApiCallType; label: string; color: string }[] = [
           { key: 'ai_chat',    label: 'AI チャット', color: '#6d28d9' },
           { key: 'ai_generate',label: 'AI 生成',    color: '#9333ea' },
-          { key: 'tts',        label: 'TTS',         color: '#0e7490' },
         ];
         const apiDays = Object.keys(apiByDay).sort();
         const maxApi = apiDays.length
@@ -173,8 +171,8 @@ export function Analytics() {
           : 0;
         return (
           <div className="bg-white border border-gray-200 rounded-2xl p-4">
-            <h3 className="text-sm font-black text-gray-800">AI / TTS リクエスト（日別）</h3>
-            <p className="text-[11px] text-gray-400 mt-0.5 mb-3">生成AI（Gemini）とTTS（ElevenLabs）への API 呼び出し件数。</p>
+            <h3 className="text-sm font-black text-gray-800">AI リクエスト（日別）</h3>
+            <p className="text-[11px] text-gray-400 mt-0.5 mb-3">生成AI（Gemini）への API 呼び出し件数。</p>
             <div className="flex items-center gap-4 mb-3 flex-wrap">
               {API_TYPES.map((t) => (
                 <span key={t.key} className="flex items-center gap-1 text-[11px] font-black" style={{ color: t.color }}>
