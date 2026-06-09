@@ -27,6 +27,8 @@ const SYNC_KEYS = [
   'yaorozu_revoked_users',
   // 人間の煩悩（覚りの調整素材）
   'yaorozu_bonnou',
+  // アプリ設定
+  'yaorozu_app_settings',
 ];
 
 // 単一ユーザーデモのためスナップショットIDは固定。将来は認証ユーザーIDに。
@@ -35,6 +37,11 @@ const SNAPSHOT_ID = 'user-self';
 let cloudEnabled: boolean | null = null;
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let suspendPush = false; // pull適用中の自己発火を防ぐ
+
+/** クラウド同期が有効か（null=未確認、true/false=判明済み）。System タブの表示用。 */
+export function isCloudEnabled(): boolean | null {
+  return cloudEnabled;
+}
 
 /** 起動時：クラウドのスナップショットを localStorage へ復元。適用したら true。 */
 export async function pullSnapshot(): Promise<boolean> {

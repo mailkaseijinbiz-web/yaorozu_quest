@@ -148,7 +148,9 @@ export default function HomePage() {
       if (!res.ok) return;
       const { spot: rawSpot, agent } = await res.json() as { spot: Spot; agent: Agent };
       // TTL を付与（30 日後に自動期限切れ）
-      const spot: Spot = { ...rawSpot, expiresAt: new Date(Date.now() + SPOT_TTL_MS).toISOString() };
+      // TTL は System タブの設定（spotTtlDays）に従う。未設定時は既定の SPOT_TTL_MS。
+      const ttlMs = (db.getAppSettings().spotTtlDays || (SPOT_TTL_MS / 86_400_000)) * 86_400_000;
+      const spot: Spot = { ...rawSpot, expiresAt: new Date(Date.now() + ttlMs).toISOString() };
       db.adminSaveSpot(spot);
       db.adminSaveAgent(agent);
       db.trackApiCall('ai_generate');

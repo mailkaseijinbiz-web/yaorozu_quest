@@ -79,6 +79,11 @@ export interface UgcPost {
   createdAt: string;
 }
 
+/** アプリ全体の設定（管理画面 System タブで編集）。 */
+export interface AppSettings {
+  spotTtlDays: number; // GPS生成スポットが自動削除されるまでの日数
+}
+
 /** 人間が神に打ち明けた煩悩（欲・執着）。解決すると覚りが上がる（覚り=徳−未解決煩悩）。 */
 export interface Bonnou {
   id: string;
@@ -560,6 +565,7 @@ const KEYS = {
   API_CALLS: 'yaorozu_api_calls',     // AI / TTS API呼び出しログ（日別集計）
   REVOKED: 'yaorozu_revoked_users',   // 削除済みユーザーID（再ログイン強制用）
   BONNOU: 'yaorozu_bonnou',           // 人間が打ち明けた煩悩（覚りの調整素材）
+  APP_SETTINGS: 'yaorozu_app_settings', // アプリ全体の設定（System タブ）
 };
 
 /** クエスト生成ルール（生成方針）の既定値。クエストタブで編集できる。 */
@@ -1127,6 +1133,16 @@ class MockDatabase {
     users[index].avatarUrl = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(displayName)}`;
     this.save(KEYS.USERS, users);
     return users[index];
+  }
+
+  // ────────────────────────────────────────────────
+  // アプリ設定（System タブ）
+  // ────────────────────────────────────────────────
+  getAppSettings(): AppSettings {
+    return this.load<AppSettings>(KEYS.APP_SETTINGS, { spotTtlDays: SPOT_TTL_MS / 86_400_000 });
+  }
+  saveAppSettings(s: AppSettings): void {
+    this.save(KEYS.APP_SETTINGS, s);
   }
 
   /** ユーザーのアバター画像を設定（アバター写真タスクで撮影した一枚など）。 */
