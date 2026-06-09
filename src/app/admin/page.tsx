@@ -13,9 +13,7 @@ import { ChallengesManager } from '../../components/admin/ChallengesManager';
 import { UsersManager } from '../../components/admin/UsersManager';
 import { SystemPanel } from '../../components/admin/SystemPanel';
 
-const ADMIN_PASSWORD = 'Kaseijinbiz1';
-const AUTH_KEY = 'yaorozu_admin_auth';
-
+// 認証はサーバー側（/api/admin/login + HttpOnly Cookie）で行う。パスワードはクライアントに持たない。
 type AdminTab = 'blueprint' | 'analytics' | 'spots' | 'gods' | 'users' | 'challenges' | 'activity' | 'system';
 
 const TABS: { key: AdminTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -49,29 +47,45 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
-    const ok = sessionStorage.getItem(AUTH_KEY) === '1';
-    setAuthed(ok);
-    setChecking(false);
-    if (ok) {
-      // Supabase からスナップショットを復元してから画面を更新
-      pullSnapshot().then(() => refresh());
-    }
+    // サーバーに現在のセッション状態を問い合わせる（Cookie は HttpOnly のため JS から読めない）。
+    fetch('/api/admin/login')
+      .then(r => r.json())
+      .then((d: { authed?: boolean }) => {
+        const ok = !!d.authed;
+        setAuthed(ok);
+        setChecking(false);
+        if (ok) {
+          // Supabase からスナップショットを復元してから画面を更新
+          pullSnapshot().then(() => refresh());
+        }
+      })
+      .catch(() => setChecking(false));
   }, []);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (pw === ADMIN_PASSWORD) {
-      sessionStorage.setItem(AUTH_KEY, '1');
-      setAuthed(true);
-      setPwError(false);
-      refresh();
-    } else {
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw }),
+      });
+      if (res.ok) {
+        setAuthed(true);
+        setPwError(false);
+        setPw('');
+        await pullSnapshot();
+        refresh();
+      } else {
+        setPwError(true);
+      }
+    } catch {
       setPwError(true);
     }
   };
 
-  const handleLogout = () => {
-    sessionStorage.removeItem(AUTH_KEY);
+  const handleLogout = async () => {
+    try { await fetch('/api/admin/login', { method: 'DELETE' }); } catch { /* ignore */ }
     setAuthed(false);
     setPw('');
   };

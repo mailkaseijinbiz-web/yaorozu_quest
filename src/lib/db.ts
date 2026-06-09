@@ -832,13 +832,18 @@ class MockDatabase {
     const user = users.find(u => u.id === userId);
     if (!user) throw new Error('User not found');
 
+    // 入力検証（defense-in-depth）。表示側は React が自動エスケープするが、保存値も健全化する。
+    const UGC_CONTENT_MAX = 1000;
+    const safeContent = (content ?? '').trim().slice(0, UGC_CONTENT_MAX);
+    if (!safeContent && !opts?.imageUrl) throw new Error('content or image required');
+
     const posts = this.getUgc();
     const newPost: UgcPost = {
       id: `ugc-${Date.now()}`,
       userId,
       userDisplayName: user.displayName,
       spotId,
-      content,
+      content: safeContent,
       imageUrl: opts?.imageUrl,
       visibility: opts?.visibility ?? 'all',
       likesCount: 0,
