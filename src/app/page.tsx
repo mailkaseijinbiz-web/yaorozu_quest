@@ -376,7 +376,26 @@ export default function HomePage() {
     );
   }, []);
 
-  useEffect(() => { requestLocation(); }, [requestLocation]);
+  // GPS を継続監視して、歩いて移動しても現在地が追従して更新されるようにする
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGeoStatus('error');
+      return;
+    }
+    setGeoStatus('locating');
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setGeoStatus('ok');
+      },
+      (err) => {
+        // 取得失敗時は既定の現在地（東京中心）を維持しつつ、状態を明示
+        setGeoStatus(err.code === err.PERMISSION_DENIED ? 'denied' : 'error');
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, []);
 
   // デバッグ：指定座標を現在地として設定し、その地点の場を生成する
   const applyDebugLocation = useCallback((loc: DebugLatLng) => {

@@ -5,7 +5,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Navigation } from 'lucide-react';
 import { Spot, isVerifiedSpot } from '../lib/db';
-import { roughDistance } from '../lib/geo';
+import { roughDistance, distanceKm } from '../lib/geo';
 import { getHeartVoices } from '../data/god-tasks';
 
 // フキダシのつぶやきは長すぎたら省略
@@ -62,6 +62,8 @@ export default function LeafletMap({
   // onMapMove を ref 化してクロージャ内から最新コールバックを呼べるようにする
   const onMapMoveRef = useRef(onMapMove);
   onMapMoveRef.current = onMapMove;
+  // 自動センタリング判定用：前回パンした現在地（初回取得・ワープ判定に使う）
+  const lastPanLocRef = useRef<{ lat: number; lng: number } | null>(null);
 
   // 地図の移動に追従して再描画するためのバージョン
   const [mapVersion, setMapVersion] = useState(0);
@@ -210,7 +212,6 @@ export default function LeafletMap({
         <div style="position:absolute;left:22px;top:22px;transform:translate(-50%,-50%) rotate(${heading}deg);transform-origin:center;">
           <div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:11px solid #1d4ed8;position:absolute;left:-5px;top:-22px;"></div>
         </div>
-        <div class="animate-ping" style="position:absolute;left:22px;top:22px;transform:translate(-50%,-50%);width:30px;height:30px;border-radius:9999px;border:1px solid #2563eb;opacity:.4;"></div>
         <div style="position:absolute;left:22px;top:22px;transform:translate(-50%,-50%);width:16px;height:16px;border-radius:9999px;background:#2563eb;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.35);"></div>
         <div style="position:absolute;left:22px;top:34px;transform:translateX(-50%);white-space:nowrap;" class="text-[8px] font-black text-[#2563eb] bg-white/85 px-1 rounded">現在地</div>
       </div>
@@ -296,11 +297,35 @@ export default function LeafletMap({
     // クエストモード（目的地あり）では青のフキダシを出さず、赤い目的地に集中させる
     const questMode = goalLat != null && goalLng != null;
 
+    // フキダシ表示候補（優先度順：選択中 > 最寄り）。
+    // 画面上でフキダシ同士が被る場合は、優先度の高いひとつだけ表示する。
+    const bubbleIds = new Set<string>();
+    if (!questMode) {
+      const candidateIds: string[] = [];
+      if (activeSpot && visibleSpots.some((s) => s.id === activeSpot.id)) candidateIds.push(activeSpot.id);
+      if (nearestId && nearestId !== activeSpot?.id) candidateIds.push(nearestId);
+
+      const acceptedPts: { x: number; y: number }[] = [];
+      candidateIds.forEach((id) => {
+        const s = visibleSpots.find((v) => v.id === id);
+        if (!s) return;
+        const pt = map.latLngToContainerPoint([s.latitude, s.longitude]);
+        // フキダシのおおよそのサイズ（横210px / 縦90px）の範囲に既存フキダシがあれば被りとみなす
+        const overlaps = acceptedPts.some((p) => Math.abs(p.x - pt.x) < 190 && Math.abs(p.y - pt.y) < 80);
+        if (overlaps) return;
+        bubbleIds.add(id);
+        acceptedPts.push({ x: pt.x, y: pt.y });
+      });
+    }
+
+    // 現在地マーカーの画面座標（フキダシとの衝突判定に使う）
+    const userPt = map.latLngToContainerPoint([userLocation.lat, userLocation.lng]);
+
     visibleSpots.forEach((spot) => {
       const isActive = activeSpot?.id === spot.id;
       const iconEmoji = spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏');
-      // 最も近い神（と選択中）だけフキダシを表示。クエスト中は青のフキダシを出さない。
-      const showBubble = !questMode && (spot.id === nearestId || isActive);
+      // 最も近い神（と選択中）だけフキダシを表示。被る場合は優先度の高いひとつのみ。クエスト中は青のフキダシを出さない。
+      const showBubble = bubbleIds.has(spot.id);
       // フキダシの中身は「ここの神のつぶやき（心の声）」。スポット毎に変化させ、一定間隔で動的に切り替える
       let voice = '';
       let voiceIdx = 0;
@@ -312,10 +337,17 @@ export default function LeafletMap({
       }
       const borderCls = isActive ? 'border-[#2563eb]' : 'border-[#2563eb]/40';
 
-      const spotHtml = showBubble
-        ? `
-        <div class="relative flex flex-col items-center">
-          <div class="god-ripple ${isActive ? 'god-ripple-active' : ''}"></div>
+      // 現在地マーカー(上方向に約44px)とフキダシ(既定では上方向に開く)が被る場合は、
+      // 切り込み(しっぽ)を上側に変えて下方向に開き、現在地マーカーとぶつからないようにする
+      let flipDown = false;
+      if (showBubble) {
+        const spotPt = map.latLngToContainerPoint([spot.latitude, spot.longitude]);
+        const nearX = Math.abs(userPt.x - spotPt.x) < 110;
+        const userAbove = userPt.y < spotPt.y && userPt.y > spotPt.y - 80;
+        flipDown = nearX && userAbove;
+      }
+
+      const bubbleBox = `
           <div class="relative flex items-start gap-1.5 rounded-2xl px-2.5 py-1.5 shadow-lg ${isActive ? 'border-2' : 'border'} ${borderCls}" style="max-width:190px;background:#ffffff;">
             <span style="font-size:15px;line-height:1.15;flex-shrink:0;">${iconEmoji}</span>
             <span class="spot-voice text-[11px] font-bold leading-snug text-gray-800" data-spotid="${spot.id}" data-vi="${voiceIdx}" style="word-break:break-word;transition:opacity 0.3s ease;">${voice}</span>
@@ -380,14 +412,22 @@ export default function LeafletMap({
     }
   }, [activeSpot]);
 
-  // 5. Warp support
+  // 5. Warp support / 現在地への自動センタリング。
+  //    GPS は歩行中に細かく更新されるため、毎回パンすると手動操作を妨げる。
+  //    初回の現在地取得時とワープ（大きく移動）した時のみ中央へ寄せ、
+  //    通常の歩行による小移動では地図を勝手に動かさない（現在地ボタンで手動復帰可能）。
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    
-    if (!activeSpot) {
+    if (activeSpot) { lastPanLocRef.current = userLocation; return; }
+
+    const prev = lastPanLocRef.current;
+    const isFirstFix = prev == null;
+    const warped = prev != null && distanceKm(prev.lat, prev.lng, userLocation.lat, userLocation.lng) > 0.3;
+    if (isFirstFix || warped) {
       map.panTo([userLocation.lat, userLocation.lng]);
     }
+    lastPanLocRef.current = userLocation;
   }, [userLocation, activeSpot]);
 
   return (
