@@ -516,7 +516,6 @@ export default function HomePage() {
                     {(() => {
                       const lvInfo = getLevelInfo(currentUser.totalToku);
                       const pct = Math.round(lvInfo.progress * 100);
-                      const nextMin = lvInfo.next ? lvInfo.next.minToku : currentUser.totalToku;
                       return (
                         <>
                           {/* メダリオン（アバター＋装飾フレーム＋PILGRIMリボン） */}
@@ -581,9 +580,9 @@ export default function HomePage() {
                             <div className="text-left">
                               <div className="flex items-baseline gap-1">
                                 <span className="text-2xl font-black text-gray-900 tabular-nums leading-none">{currentUser.totalToku}</span>
-                                <span className="text-sm font-black text-gold">徳</span>
+                                <span className="text-sm font-black text-gray-900">徳</span>
                               </div>
-                              <div className="relative mt-1.5">
+                              <div className="relative mt-1.5 pr-2">
                                 <div className="h-5 rounded-full bg-slate-200 overflow-hidden border border-slate-300/60">
                                   <div
                                     className="h-full rounded-full bg-gradient-to-r from-sky-400 via-blue-500 to-blue-600 relative transition-all duration-700"
@@ -591,15 +590,8 @@ export default function HomePage() {
                                   >
                                   </div>
                                 </div>
-                                {lvInfo.next && (
-                                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                    <span className="text-[10px] font-black text-white tabular-nums" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.45)' }}>
-                                      {currentUser.totalToku} / {nextMin} 徳
-                                    </span>
-                                  </div>
-                                )}
-                                {/* ゴール旗 */}
-                                <Flag className="absolute -right-1 -top-1.5 w-3.5 h-3.5 text-shrine-red fill-shrine-red drop-shadow-sm" />
+                                {/* ゴール旗（大きめ） */}
+                                <Flag className="absolute -right-1 -top-2.5 w-6 h-6 text-shrine-red fill-shrine-red drop-shadow-sm" />
                               </div>
                               <div className="flex items-center justify-between mt-1.5">
                                 {lvInfo.next ? (
@@ -637,8 +629,10 @@ export default function HomePage() {
                 <div className="p-4">
                   {/* アクティビティ（訪問・クエスト参加・依頼達成などの履歴） */}
                   {mypageTab === 'activity' && (() => {
+                    // ユーザーのアクティビティでは「ホームタブを表示」「地図を移動」などの操作ログは出さない
+                    const HIDDEN_USER_ACTS = new Set(['home_view', 'map_move', 'spot_generate', 'god_generate', 'spot_delete']);
                     const activities = db.getActivities()
-                      .filter((a) => a.userId === currentUser.id)
+                      .filter((a) => a.userId === currentUser.id && !HIDDEN_USER_ACTS.has(a.type))
                       .slice(0, 60);
 
                     const TASK_LABEL: Record<string, string> = {
