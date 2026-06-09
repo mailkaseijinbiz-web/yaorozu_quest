@@ -136,15 +136,6 @@ export function Blueprint() {
       <div className="mb-3">
         <div className="flex items-start justify-between gap-2">
           <h2 className="text-lg font-black text-gray-900 flex items-center gap-2">🪷 God</h2>
-          <button
-            onClick={runUpdate}
-            disabled={updating}
-            className="shrink-0 flex items-center gap-1.5 text-xs font-black text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-3 py-2 rounded-lg cursor-pointer transition-all"
-            title="生成ルールと神の魂を反映して、神・クエストを生成AIで更新する"
-          >
-            {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            {updating ? '更新中…' : 'Update（AIで神・クエスト更新）'}
-          </button>
         </div>
         {updateMsg && <p className="text-[11px] font-bold text-emerald-600 mt-1">{updateMsg}</p>}
       </div>

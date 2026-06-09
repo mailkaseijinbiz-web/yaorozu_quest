@@ -390,21 +390,9 @@ export default function HomePage() {
                           )}
                           <p className="text-[13px] font-bold text-gray-500 mt-0.5">{lvInfo.current.title}</p>
 
-                          {/* XPシールド＋徳バー */}
-                          <div className="w-full mt-5 flex items-center gap-3">
-                            {/* XPシールドバッジ */}
-                            <div className="relative flex-shrink-0 w-14 h-16">
-                              <div className="absolute inset-0 drop-shadow-sm" style={{ clipPath: XP_SHIELD, background: 'linear-gradient(150deg, #fcd34d, #f59e0b)' }} />
-                              <div className="absolute inset-[2px]" style={{ clipPath: XP_SHIELD, background: 'linear-gradient(150deg, #fde68a, #f59e0b)' }} />
-                              <div className="absolute inset-0 flex flex-col items-center justify-center text-white leading-none pb-2">
-                                <span className="text-[15px] font-black tracking-wider" style={{ textShadow: '0 1px 1px rgba(0,0,0,0.2)' }}>XP</span>
-                                <span className="text-[7px] font-black opacity-90 mt-0.5">LEVEL</span>
-                                <span className="text-lg font-black leading-none" style={{ textShadow: '0 1px 1px rgba(0,0,0,0.2)' }}>{lvInfo.current.level}</span>
-                              </div>
-                            </div>
-
-                            {/* 徳プログレスバー */}
-                            <div className="flex-1 min-w-0 text-left">
+                          {/* 徳バー */}
+                          <div className="w-full mt-5">
+                            <div className="text-left">
                               <div className="flex items-baseline gap-1">
                                 <span className="text-2xl font-black text-gray-900 tabular-nums leading-none">{currentUser.totalToku}</span>
                                 <span className="text-sm font-black text-gold">徳</span>
