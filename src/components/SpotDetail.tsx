@@ -7,6 +7,55 @@ import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from 
 import { distanceKm } from '../lib/geo';
 import { uploadImage } from '../lib/upload';
 
+// ── TTS（神の声）──────────────────────────────────────────
+const _ttsCache = new Map<string, string>();
+async function _fetchTtsUrl(text: string): Promise<string | null> {
+  if (!text) return null;
+  const cached = _ttsCache.get(text);
+  if (cached) return cached;
+  try {
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('audio')) {
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      _ttsCache.set(text, url);
+      return url;
+    }
+  } catch { /* fallback */ }
+  return null;
+}
+function _pickJaVoice(): SpeechSynthesisVoice | null {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return null;
+  const voices = window.speechSynthesis.getVoices().filter((v) => /^ja/i.test(v.lang));
+  if (!voices.length) return null;
+  return (
+    voices.find((v) => /(enhanced|premium|neural|siri)/i.test(v.name)) ||
+    voices.find((v) => /google/i.test(v.name)) ||
+    voices.find((v) => /(kyoko|o-?ren|otoya|hattori|ichiro|nanami)/i.test(v.name)) ||
+    voices[0]
+  );
+}
+function _speakJa(text: string) {
+  try {
+    const synth = window.speechSynthesis;
+    if (!synth || !text) return;
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'ja-JP';
+    const v = _pickJaVoice();
+    if (v) u.voice = v;
+    u.rate = 0.9;
+    u.pitch = 1.0;
+    synth.speak(u);
+  } catch { /* TTS非対応環境は無視 */ }
+}
+// ────────────────────────────────────────────────────────────
+
 interface Message {
   id: string;
   sender: 'user' | 'agent';
@@ -87,6 +136,18 @@ export default function SpotDetail({
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
+  const speak = async (text: string) => {
+    try { ttsAudioRef.current?.pause(); ttsAudioRef.current = null; } catch {}
+    const url = await _fetchTtsUrl(text);
+    if (url) {
+      const audio = new Audio(url);
+      ttsAudioRef.current = audio;
+      audio.play().catch(() => _speakJa(text));
+    } else {
+      _speakJa(text);
+    }
+  };
 
   const ugc = useMemo(() => db.getUgcBySpot(spot.id), [spot.id, ugcTick]);
   const affiliates = db.getAffiliatesBySpot(spot.name);
@@ -241,7 +302,9 @@ export default function SpotDetail({
       setMessages([
         { id: `greet-${Date.now()}`, sender: 'agent', text: greet, createdAt: new Date().toISOString() },
       ]);
+      speak(greet);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, messages.length, agent.name, spot.name, currentUser.displayName, nearbyChallenge]);
 
   useEffect(() => {
