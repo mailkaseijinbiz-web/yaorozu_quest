@@ -220,15 +220,36 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
         const ok = userLevel >= confirmCh.minLevel;
         return (
           <div className="fixed inset-0 z-[4000] bg-black/40 flex items-center justify-center p-6" onClick={() => setConfirmCh(null)}>
-            <div className="w-full max-w-[320px] bg-white rounded-3xl p-5 text-center animate-in" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full max-w-[320px] max-h-[85vh] overflow-y-auto bg-white rounded-3xl p-5 text-center animate-in" onClick={(e) => e.stopPropagation()}>
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-100 to-amber-100 flex items-center justify-center text-4xl mx-auto mb-3">{confirmCh.badgeIcon}</div>
               <h3 className="text-lg font-black text-gray-900">{confirmCh.title}</h3>
+              {(() => {
+                const godName = confirmCh.spotId ? db.getSpot(confirmCh.spotId)?.godName : null;
+                return godName ? <p className="text-[11px] font-bold text-gray-400 mt-0.5">by {godName}</p> : null;
+              })()}
               <p className="text-[13px] text-gray-500 mt-1 leading-relaxed">{confirmCh.description}</p>
               <div className="flex items-center justify-center gap-2 mt-3 text-[13px] text-gray-500">
                 <span className="flex items-center gap-0.5"><Clock className="w-3 h-3" />約{confirmCh.estMinutes}分</span>
                 <span>・</span>
                 <span>🏆 {confirmCh.badgeName}</span>
               </div>
+
+              {/* クエスト詳細：タスク一覧 */}
+              {confirmCh.tasks.length > 0 && (
+                <div className="mt-4 text-left">
+                  <p className="text-[11px] font-black text-gray-500 mb-1.5">クエストの内容（全{confirmCh.tasks.length}タスク）</p>
+                  <div className="space-y-1.5">
+                    {confirmCh.tasks.map((t, i) => (
+                      <div key={t.id} className="flex items-center gap-2 bg-gray-50 rounded-xl px-2.5 py-2">
+                        <span className="w-5 h-5 rounded-full bg-shrine-red text-white text-[11px] font-black flex items-center justify-center flex-shrink-0">{i + 1}</span>
+                        <span className="text-base flex-shrink-0">{t.icon}</span>
+                        <span className="flex-1 min-w-0 text-[12px] font-bold text-gray-800 truncate">{t.title}</span>
+                        <span className="text-[11px] font-black text-amber-600 flex-shrink-0">+{t.reward}徳</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="mt-4">
                 {isActive ? (
