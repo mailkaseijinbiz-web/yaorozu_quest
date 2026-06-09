@@ -98,6 +98,8 @@ export interface Quest {
   tasks: Task[];
   /** 出自 */
   source?: 'static' | 'generated' | 'simple';
+  /** 生成日時（ISO 8601）。生成クエストの TTL 判定に使う（未参加で期限切れなら削除） */
+  createdAt?: string;
 }
 
 /** カタログ用のタスク雛形（id / spotId / ステップ固有値を除いた固定定義）。 */

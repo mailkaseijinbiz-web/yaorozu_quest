@@ -779,17 +779,30 @@ class MockDatabase {
 
   // ── 生成クエスト（場の 価値・課題・魂 から生成。プレイヤーが読む実ストア） ──
   getGeneratedQuests(): Quest[] {
-    return this.load<Quest[]>(KEYS.QUESTS, []);
+    const all = this.load<Quest[]>(KEYS.QUESTS, []);
+    const now = Date.now();
+    const prog = this.getChallengeProgress();
+    // 「参加済み」＝挑戦中 / 制覇済み / ステップ進捗あり。これらは TTL 対象外。
+    const isJoined = (q: Quest) =>
+      prog.activeId === q.id || prog.completed.includes(q.id) || (prog.done[q.id]?.length ?? 0) > 0;
+    // 生成後 QUEST_TTL_MS を過ぎても未参加なら削除（createdAt 無しの旧データは残す）
+    const live = all.filter(
+      (q) => !(q.createdAt && now - new Date(q.createdAt).getTime() > QUEST_TTL_MS && !isJoined(q))
+    );
+    if (live.length !== all.length) this.save(KEYS.QUESTS, live);
+    return live;
   }
 
   getQuestsForSpot(spotId: string): Quest[] {
     return this.getGeneratedQuests().filter((q) => q.spotId === spotId);
   }
 
-  /** その場の生成クエストを差し替え保存（再公開＝置換。重複を避ける）。 */
+  /** その場の生成クエストを差し替え保存（再公開＝置換。重複を避ける）。生成時刻を打刻し TTL を起算。 */
   saveGeneratedQuests(spotId: string, quests: Quest[]): void {
     const others = this.getGeneratedQuests().filter((q) => q.spotId !== spotId);
-    this.save(KEYS.QUESTS, [...quests, ...others]);
+    const nowIso = new Date().toISOString();
+    const stamped = quests.map((q) => ({ ...q, createdAt: q.createdAt ?? nowIso }));
+    this.save(KEYS.QUESTS, [...stamped, ...others]);
   }
 
   /** 生成クエスト＋静的クエスト（CHALLENGES）の全件。生成を先頭に。 */
@@ -1503,3 +1516,6 @@ export const db = new MockDatabase();
 
 /** GPS 生成スポットの TTL（ミリ秒）。30 日。 */
 export const SPOT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** 生成クエストの TTL（ミリ秒）。1 時間。参加されないまま期限切れになると削除される。 */
+export const QUEST_TTL_MS = 60 * 60 * 1000;
