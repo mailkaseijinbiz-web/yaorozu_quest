@@ -64,7 +64,7 @@ function coerceQuest(raw: unknown, n: number, spot: SpotInput, ts: number): Ques
   const r = (raw ?? {}) as Record<string, unknown>;
   const rawTasks = Array.isArray(r.tasks) ? r.tasks : [];
   if (rawTasks.length === 0) return null;
-  const tasks = rawTasks.slice(0, 4).map((t, i) => coerceTask(t, i, spot)); // クエストはタスク1〜4
+  const tasks = rawTasks.slice(0, 3).map((t, i) => coerceTask(t, i, spot)); // クエストはタスク1〜2メイン（上限3）
   const difficulty = ([1, 2, 3].includes(Number(r.difficulty)) ? Number(r.difficulty) : 1) as 1 | 2 | 3;
   return {
     id: `uq-${spot.id || 'spot'}-${ts}-${n}`,
@@ -98,13 +98,16 @@ function buildFallbackQuest(spot: SpotInput, count: number, ts: number): Quest[]
   for (let n = 0; n < count; n++) {
     const enjoyment = enjoy.length ? enjoy[n % enjoy.length] : '';
     const issue = issues.length ? issues[n % issues.length] : '';
+    // 1〜2タスクの軽量構成：来訪＋（写真 / 課題 / 口コミ をローテーション）
+    const second: Task =
+      n % 3 === 0
+        ? mk('photo', 1, { title: enjoyment ? `「${enjoyment}」を一枚に` : '佳き一枚を奉納', action: `${enjoyment || 'この場の魅力'}を写真に収めよう。`, ...at() })
+        : n % 3 === 1 && issue
+          ? mk('resolveIssue', 1, { title: `課題を動かす：${issue}`.slice(0, 40), action: `${spot.name}の課題「${issue}」を、あなたの手で少し動かそう。`, issueRef: { issueIndex: n % issues.length, issueText: issue } })
+          : mk('review', 1, { action: `${spot.name}で感じた価値を、後の巡礼者へ言伝てよう。` });
     const tasks: Task[] = [
       mk('visit', 0, { title: `${spot.name}に立つ`, action: `${spot.name}へ足を運び、この地の気を感じよう。`, ...at() }),
-      mk('photo', 1, { title: enjoyment ? `「${enjoyment}」を一枚に` : '佳き一枚を奉納', action: `${enjoyment || 'この場の魅力'}を写真に収めよう。`, ...at() }),
-      mk('review', 2, { action: `${spot.name}で感じた価値を、後の巡礼者へ言伝てよう。` }),
-      issue
-        ? mk('resolveIssue', 3, { title: `課題を動かす：${issue}`.slice(0, 40), action: `${spot.name}の課題「${issue}」を、あなたの手で少し動かそう。`, issueRef: { issueIndex: n % issues.length, issueText: issue } })
-        : mk('sns', 3, { action: `${spot.name}の名を、外の世界にも広めよう。` }),
+      second,
     ];
     quests.push({
       id: `uq-${spot.id || 'spot'}-${ts}-${n}`,
@@ -141,7 +144,7 @@ function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '
 - 理解判断(understand): review(口コミ), eat(実食の声), evaluate(写真を評価), judge(投稿をジャッジ), recommend(一番を選ぶ), verify(情報を確かめる)
 - 操作(act)＝世界の値を直接調整: resolveIssue(課題を解決し活気+2), cleanup(掃除をして場を整える), buy(買物報告), sns(価値を外へ拡散), donate(寄進), guide(道案内), bonnou_resolve(人間の煩悩を一つ手放し覚り+1), walk(散歩で心を整え覚り+1), meditate(瞑想で煩悩を手放し覚り+1)
 
-各クエストは1〜4タスクで構成してください（1タスクの軽量クエストも可）。複数タスクのときは、なるべく「情報収集」と「操作」を組み合わせて、コンテキスト収集→世界の値の調整、の流れになるようにします。
+各クエストは「1〜2タスク」の軽量構成をメインにしてください（大半は1〜2タスク。特に意味がある場合のみ最大3タスクまで可）。2タスクのときは、なるべく「情報収集」と「操作」を組み合わせて、コンテキスト収集→世界の値の調整、の流れになるようにします。
 生成の制約条件:
 - resolveIssue は「課題」が存在する場合のみ使用し、issueIndex で何番目の課題かを必ず示す（課題が無ければ使わない）。
 - value_ask / issue_ask は、価値・課題がまだ薄い場で特に有効（人間から集めて充実させる）。
