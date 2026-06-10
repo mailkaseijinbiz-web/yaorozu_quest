@@ -9,7 +9,7 @@ import { hasGoShuin } from '../lib/goshuin';
 import { distanceKm, bearingDeg } from '../lib/geo';
 import { getHeartVoices } from '../data/god-tasks';
 import { composeWalkGuide, nextGuideStage } from '../lib/walk-guide';
-import { Challenge, ChallengeStep, difficultyLabel, terrainLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
+import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
 
 const LeafletMap = dynamic(() => import('./LeafletMap'), {
   ssr: false,
@@ -337,6 +337,10 @@ export default function MapTab({
   const dragRef = useRef<{ startX: number; dragging: boolean; dx: number }>({ startX: 0, dragging: false, dx: 0 });
 
   // ビューポート幅からカード幅を計測（右の覗き分を差し引く）。
+  // カード領域はクエスト中・達成ビート中は描画されないため、「表示されているか」を
+  // 依存に含める（cardSpot だけだと、クエスト終了で再表示されたとき el=null のまま
+  // 計測されず slideW=0 → カードが全幅＋ズレた位置で描画され左右が見切れる）。
+  const cardCarouselVisible = !activeChallenge && !celebrate && !!cardSpot;
   useEffect(() => {
     const el = cardViewportRef.current;
     if (!el) return;
@@ -345,7 +349,7 @@ export default function MapTab({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [!!cardSpot]);
+  }, [cardCarouselVisible]);
   // 現在カードの位置を ref に同期（タッチハンドラのクロージャから最新を読む）。
   useEffect(() => { cardIdxRef.current = cardIdx < 0 ? 0 : cardIdx; }, [cardIdx]);
 
@@ -780,7 +784,8 @@ export default function MapTab({
             className="flex items-stretch will-change-transform"
             style={{
               gap: `${CARD_GAP}px`,
-              transform: `translateX(${cardBaseFor(cardIdx < 0 ? 0 : cardIdx)}px)`,
+              // 計測前（slideW=0）はオフセットを掛けない＝見切れたカードを出さない
+              transform: `translateX(${slideW ? cardBaseFor(cardIdx < 0 ? 0 : cardIdx) : 0}px)`,
               transition: slideW ? 'transform .3s cubic-bezier(.22,.61,.36,1)' : 'none',
             }}
           >
@@ -793,7 +798,6 @@ export default function MapTab({
               const ugc = ugcCounts[s.id] ?? 0;
               // 探索コンパス：その場の方角を指す（端末の向きがあれば実方向、無ければ北基準）
               const compassRot = bearingDeg(userLocation.lat, userLocation.lng, s.latitude, s.longitude) - (deviceHeading ?? 0);
-              const ter = terrainLabel(s.terrain); // 地形(Terrain)バッジ用
               return (
                 <div
                   key={s.id}
@@ -829,7 +833,6 @@ export default function MapTab({
                         <span className="text-[13px] font-black flex items-center gap-0.5 text-[#2563eb]">
                           <MapPin className="w-3 h-3" /><span className="tabular-nums">{distVal}</span><span className="text-[11px]">{distUnit}</span>
                         </span>
-                        <span className={`text-[12px] font-black px-1.5 py-0.5 rounded-full ${ter.tone}`}>🥾 {ter.label}</span>
                         {held && <span className="text-[13px] font-black text-shrine-red flex items-center gap-0.5">🔴 御朱印</span>}
                         {ugc > 0 && <span className="text-[13px] flex items-center gap-0.5 text-gray-400"><Camera className="w-3 h-3" />{ugc}</span>}
                       </div>
