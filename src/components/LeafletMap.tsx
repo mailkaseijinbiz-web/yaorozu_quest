@@ -313,6 +313,11 @@ export default function LeafletMap({
       zIndexOffset: 1400,
     }).addTo(map);
     map.flyTo([searchPin.lat, searchPin.lng], Math.max(map.getZoom(), 15), { duration: 0.8 });
+    // 検索した場所（例: 善光寺）には、まだ場（神・クエスト）が生成されていないことが多い。
+    // 地図移動の moveend は 60 秒スロットルされ、直前に動かしていると検索しても生成が走らず、
+    // 場のマーカーがいつまでも出ない。検索時は moveend のスロットルに頼らず、検索地点で
+    // 場の生成を直接促す（下流の generateSpotNearby が 5分/500m で重複生成を抑止する）。
+    onMapMoveRef.current?.({ lat: searchPin.lat, lng: searchPin.lng });
     // token が変わった時だけ再フォーカス（同じ場所の再検索でも飛べるように）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchPin?.token]);
