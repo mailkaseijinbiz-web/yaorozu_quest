@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark } from 'lucide-react';
-import { Spot, Agent, User, db, isVerifiedSpot, type UgcVisibility } from '../lib/db';
+import { Spot, Agent, User, db, isVerifiedSpot, isQuotaError, type UgcVisibility } from '../lib/db';
 import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
 import { uploadImage } from '../lib/upload';
@@ -207,8 +207,9 @@ function SpotDetailBody({
       markDone({ id: 'photo' });
       flashToast('📸 写真を奉納！ +30徳');
       onChanged?.();
-    } catch {
-      flashToast('写真の投稿に失敗しました');
+    } catch (e) {
+      // 端末ストレージ満杯（quota）は原因をユーザーに伝える（古い写真の整理で回復できる）
+      flashToast(isQuotaError(e) ? '端末の保存領域がいっぱいで写真を保存できませんでした' : '写真の投稿に失敗しました');
     } finally {
       setUploading(false);
     }
