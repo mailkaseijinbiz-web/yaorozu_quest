@@ -9,7 +9,7 @@
 // 起動しない）。「あとで」を必ず併設し、拒否しても東京を仮の現在地に遊べる。
 // -----------------------------------------------------------------------------
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { MapPin, ChevronRight, Flag } from 'lucide-react';
 import { isAuthConfigured, signInWithProvider } from '../lib/supabase-browser';
 import { grantGoShuin } from '../lib/goshuin';
@@ -28,21 +28,23 @@ interface OnboardingFlowProps {
   onComplete: (name: string, opts: { requestedLocation: boolean }) => void;
 }
 
-const STORY_LINES = [
-  '⛩️ あなたの街の神社仏閣には、八百万の神々が宿っておる。',
-  '🎯 神に会いに行き、依頼をこなして「徳」を積むのじゃ。',
-  '🔴 御朱印やバッジを集めれば、いつもの街歩きが小さな巡礼の旅になる。',
+// step 0: 狐との一問一答。受け身の朗読ではなく、タップで応えながら旅に入る。
+// 最初のビートだけ2択（agency を生む）。返答はいずれも次へ進む。
+// タイプライターはコードポイント単位（絵文字のサロゲートペアを分断しない）。
+const INTRO_BEATS: { fox: string; replies: string[] }[] = [
+  { fox: '⛩️ そなた、いつもの街歩きを“小さな巡礼”に変えてみぬか？', replies: ['巡礼…？', 'やってみたい'] },
+  { fox: '🙏 この街の社や寺には、八百万の神々が宿っておる。会いに行き、依頼をこなせば「徳」が積もるのじゃ。', replies: ['面白そう'] },
+  { fox: '🔴 御朱印やバッジが集まれば、いつもの道が小さな巡礼の物語になる。さあ、名を授けよう。', replies: ['はじめる'] },
 ];
-// コードポイント単位で1文字ずつ表示する（String.slice だと絵文字のサロゲートペアが分断され「�」が出る）
-const STORY_CHARS = STORY_LINES.map((l) => Array.from(l));
-const TOTAL_CHARS = STORY_CHARS.reduce((a, l) => a + l.length, 0);
 
 export default function OnboardingFlow({ initialName, geoStatus, onRequestLocation, onComplete }: OnboardingFlowProps) {
   const [step, setStep] = useState(0);
   const [name, setName] = useState(initialName);
-  // step 0: タイプライターの進行（全行の合計文字数で管理。タップで全文表示）
-  const [progress, setProgress] = useState(0);
-  const storyDone = progress >= TOTAL_CHARS;
+  // step 0: 一問一答の進行（現在のビート＋そのビートのタイプライター文字数）
+  const [beat, setBeat] = useState(0);
+  const [typed, setTyped] = useState(0);
+  const beatChars = useMemo(() => Array.from(INTRO_BEATS[beat].fox), [beat]);
+  const beatDone = typed >= beatChars.length;
   // step 2: 許可ボタンを押したか（押してから geoStatus の確定を待つ）
   const [asked, setAsked] = useState(false);
   // 名付けの直後・位置情報を尋ねる前に「旅立ちの御朱印」をゼロ距離で授ける授与式
@@ -56,15 +58,23 @@ export default function OnboardingFlow({ initialName, geoStatus, onRequestLocati
     setShowOrigin(true);
   };
 
+  // 現在のビートの台詞をタイプライター表示する（typed のリセットは遷移時にハンドラ側で行う）
   useEffect(() => {
     const t = setInterval(() => {
-      setProgress((p) => {
-        if (p >= TOTAL_CHARS) { clearInterval(t); return p; }
+      setTyped((p) => {
+        if (p >= beatChars.length) { clearInterval(t); return p; }
         return p + 1;
       });
     }, 30);
     return () => clearInterval(t);
-  }, []);
+  }, [beat, beatChars.length]);
+
+  // 返答タップ：未表示なら全文表示、表示済みなら次のビート / 最後なら名付け（step 1）へ
+  const advanceBeat = () => {
+    if (!beatDone) { setTyped(beatChars.length); return; }
+    if (beat < INTRO_BEATS.length - 1) { setTyped(0); setBeat(beat + 1); } // 同一更新でビート切替＆先頭から
+    else setStep(1);
+  };
 
   // 位置情報の結果（許可/拒否/失敗）が出たら登録を確定して本編へ
   useEffect(() => {
@@ -81,15 +91,6 @@ export default function OnboardingFlow({ initialName, geoStatus, onRequestLocati
     onComplete(name, { requestedLocation: false });
   };
 
-  // タイプライター表示：行ごとに progress を消費して部分文字列を返す
-  const visibleLines: string[] = [];
-  let remaining = progress;
-  for (const chars of STORY_CHARS) {
-    if (remaining <= 0) break;
-    visibleLines.push(chars.slice(0, remaining).join(''));
-    remaining -= chars.length;
-  }
-
   const avatarUrl = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name.trim() || 'あなた')}`;
 
   return (
@@ -105,33 +106,61 @@ export default function OnboardingFlow({ initialName, geoStatus, onRequestLocati
           ))}
         </div>
 
-        {/* ── step 0: 世界観 ── */}
+        {/* ── step 0: 狐との一問一答（世界観を“対話”で体験する） ── */}
         {step === 0 && (
           <>
-            <div className="text-left space-y-2.5 min-h-[180px] cursor-pointer" onClick={() => setProgress(TOTAL_CHARS)}>
-              {visibleLines.map((line, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <span className="text-xl flex-shrink-0">🦊</span>
-                  <p className="flex-1 bg-amber-50 border border-amber-200/60 rounded-2xl rounded-tl-none px-3 py-2 text-[13px] leading-relaxed text-gray-800 font-bold">
-                    {line}
-                    {i === visibleLines.length - 1 && !storyDone && <span className="animate-pulse">▍</span>}
-                  </p>
-                </div>
-              ))}
-            </div>
-            <button
-              onClick={() => (storyDone ? setStep(1) : setProgress(TOTAL_CHARS))}
-              className="w-full mt-5 bg-shrine-red text-white font-black py-3 rounded-xl hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer flex items-center justify-center gap-1"
+            <div
+              className="text-left min-h-[180px] cursor-pointer"
+              onClick={() => { if (!beatDone) setTyped(beatChars.length); }}
             >
-              {storyDone ? 'つぎへ' : '全部読む'}<ChevronRight className="w-4 h-4" />
-            </button>
+              <div className="flex items-start gap-2">
+                <span className="text-xl flex-shrink-0">🦊</span>
+                <p className="flex-1 bg-amber-50 border border-amber-200/60 rounded-2xl rounded-tl-none px-3 py-2 text-[13px] leading-relaxed text-gray-800 font-bold">
+                  {beatChars.slice(0, typed).join('')}
+                  {!beatDone && <span className="animate-pulse">▍</span>}
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex flex-col gap-2">
+              {beatDone ? (
+                INTRO_BEATS[beat].replies.map((r, i) => {
+                  // 各ビートの最後の返答を主アクション（朱）に、それ以外は副（白）にする
+                  const primary = i === INTRO_BEATS[beat].replies.length - 1;
+                  return (
+                    <button
+                      key={i}
+                      onClick={advanceBeat}
+                      className={`w-full font-black py-3 rounded-xl active:scale-[0.99] transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                        primary
+                          ? 'bg-shrine-red text-white hover:opacity-90'
+                          : 'bg-white border border-gray-200 text-gray-600 hover:border-shrine-red/40'
+                      }`}
+                    >
+                      {r}{primary && <ChevronRight className="w-4 h-4" />}
+                    </button>
+                  );
+                })
+              ) : (
+                <button
+                  onClick={() => setTyped(beatChars.length)}
+                  className="w-full bg-white border border-gray-200 text-gray-500 font-black py-3 rounded-xl hover:border-shrine-red/40 cursor-pointer"
+                >
+                  全部読む
+                </button>
+              )}
+            </div>
           </>
         )}
 
         {/* ── step 1: 巡礼者登録（名前 / OAuth） ── */}
         {step === 1 && (
           <>
-            <p className="text-[13px] text-gray-500 mb-5">巡礼者として、名前を授かりましょう。</p>
+            <div className="flex items-start gap-2 text-left mb-5">
+              <span className="text-xl flex-shrink-0">🦊</span>
+              <p className="flex-1 bg-amber-50 border border-amber-200/60 rounded-2xl rounded-tl-none px-3 py-2 text-[13px] leading-relaxed text-gray-800 font-bold">
+                よい返事じゃ。では旅の名を授けよう——そなたを何と呼べばよい？
+              </p>
+            </div>
 
             {isAuthConfigured() && (
               <div className="mb-5">
