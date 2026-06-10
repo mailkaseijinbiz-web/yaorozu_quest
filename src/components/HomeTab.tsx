@@ -283,8 +283,15 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
         const isActive = progress.activeId === confirmCh.id;
         const ok = userLevel >= confirmCh.minLevel;
         return (
-          <div className="fixed inset-0 z-[4000] bg-black/40 flex items-center justify-center p-6" onClick={() => setConfirmCh(null)}>
-            <div className="w-full max-w-[320px] max-h-[85vh] overflow-y-auto bg-white rounded-3xl p-5 text-center animate-in" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="fixed inset-0 z-[4000] bg-black/40 flex items-center justify-center px-6"
+            style={{
+              paddingTop: 'calc(env(safe-area-inset-top, 0px) + 1.5rem)',
+              paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 6.5rem)',
+            }}
+            onClick={() => setConfirmCh(null)}
+          >
+            <div className="w-full max-w-[320px] max-h-full overflow-y-auto bg-white rounded-3xl p-5 text-center animate-in" onClick={(e) => e.stopPropagation()}>
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-100 to-amber-100 flex items-center justify-center text-4xl mx-auto mb-3">{confirmCh.badgeIcon}</div>
               <h3 className="text-lg font-black text-gray-900">{confirmCh.title}</h3>
               {(() => {

@@ -12,6 +12,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, ChevronRight, Flag } from 'lucide-react';
 import { isAuthConfigured, signInWithProvider } from '../lib/supabase-browser';
+import { grantGoShuin } from '../lib/goshuin';
+import GoshuinCelebrate from './GoshuinCelebrate';
+
+// 公式神「狐の精霊ヤオロズ」＝最初に出会う神。歩く前にこの神が「旅立ちの御朱印」を授ける。
+// 固定の特別スポットとして扱う（実在スポットではないので unofficial 表記は出さない）。
+const ORIGIN_GOSHUIN = { id: 'yaorozu-origin', name: '旅立ちの社', category: '特別', godEmoji: '🦊', godName: 'ヤオロズ' };
 
 interface OnboardingFlowProps {
   initialName: string;
@@ -39,7 +45,16 @@ export default function OnboardingFlow({ initialName, geoStatus, onRequestLocati
   const storyDone = progress >= TOTAL_CHARS;
   // step 2: 許可ボタンを押したか（押してから geoStatus の確定を待つ）
   const [asked, setAsked] = useState(false);
+  // 名付けの直後・位置情報を尋ねる前に「旅立ちの御朱印」をゼロ距離で授ける授与式
+  const [showOrigin, setShowOrigin] = useState(false);
   const completedRef = useRef(false);
+
+  // 名前を確定 → 旅立ちの御朱印を授与（grantGoShuin は重複時 null を返すので再入安全）
+  const grantOriginAndCelebrate = () => {
+    if (!name.trim()) return;
+    grantGoShuin('user-self', ORIGIN_GOSHUIN, ORIGIN_GOSHUIN.godName);
+    setShowOrigin(true);
+  };
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -156,7 +171,7 @@ export default function OnboardingFlow({ initialName, geoStatus, onRequestLocati
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) setStep(2); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) grantOriginAndCelebrate(); }}
               maxLength={12}
               autoFocus
               placeholder="巡礼者の名前"
@@ -164,7 +179,7 @@ export default function OnboardingFlow({ initialName, geoStatus, onRequestLocati
             />
             <p className="text-[11px] text-gray-400 mb-4">アバターは名前から自動生成されます（後でクエストの「アバターを撮る」で写真にできます）。</p>
             <button
-              onClick={() => setStep(2)}
+              onClick={grantOriginAndCelebrate}
               disabled={!name.trim()}
               className="w-full bg-shrine-red text-white font-black py-3 rounded-xl hover:opacity-90 disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1"
             >
@@ -211,6 +226,20 @@ export default function OnboardingFlow({ initialName, geoStatus, onRequestLocati
           </>
         )}
       </div>
+
+      {showOrigin && (
+        <GoshuinCelebrate
+          seed={ORIGIN_GOSHUIN.godName}
+          godEmoji={ORIGIN_GOSHUIN.godEmoji}
+          stampLabel={ORIGIN_GOSHUIN.godName}
+          spotName={ORIGIN_GOSHUIN.name}
+          variant="origin"
+          unofficial={false}
+          position="fixed"
+          closeLabel="旅に出る"
+          onClose={() => { setShowOrigin(false); setStep(2); }}
+        />
+      )}
     </div>
   );
 }

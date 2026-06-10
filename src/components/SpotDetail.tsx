@@ -9,6 +9,7 @@ import { uploadImage } from '../lib/upload';
 import { shareToSns } from '../lib/share';
 import { grantGoShuin, hasGoShuin } from '../lib/goshuin';
 import YaorozuSpirit from './YaorozuSpirit';
+import GoshuinCelebrate from './GoshuinCelebrate';
 
 interface Message {
   id: string;
@@ -829,47 +830,15 @@ function SpotDetailBody({
       {/* トースト */}
       {/* ── 御朱印の授与式（初回のみ。神の固有の姿＋朱印スタンプ） ── */}
       {goshuinCelebrate && (
-        <div className="absolute inset-0 z-[3300] flex items-center justify-center p-6" onClick={() => setGoshuinCelebrate(null)}>
-          <div className="absolute inset-0 bg-black/60" />
-          <div className="relative celebrate-pop w-full max-w-[300px] bg-white rounded-3xl shadow-2xl px-6 py-6 text-center" onClick={(e) => e.stopPropagation()}>
-            <p className="text-[11px] font-black tracking-[0.25em] text-rose-500">GOSHUIN GET!</p>
-            {/* 神の姿（名前から決定論的に生成される、この神だけの姿） */}
-            <div className="mt-2 flex justify-center">
-              <YaorozuSpirit seed={spot.godName || spot.name} size={92} />
-            </div>
-            {/* 朱印スタンプが押される */}
-            <div className="relative mx-auto mt-2 w-24 h-24 stamp-in">
-              <div className="absolute inset-0 rounded-full border-4 border-rose-600/80" />
-              <div className="absolute inset-1.5 rounded-full border-2 border-rose-600/40" />
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5">
-                <span className="text-2xl leading-none">{godEmoji}</span>
-                <span className="text-[8px] font-black text-rose-700 text-center leading-tight px-1.5" style={{ maxWidth: 80 }}>{agent.name}</span>
-              </div>
-            </div>
-            <h3 className="text-base font-black text-gray-900 mt-3 leading-snug">{spot.name}の御朱印を授かった</h3>
-            <p className={`inline-block text-[12px] font-black mt-1.5 px-2.5 py-0.5 rounded-full ${goshuinCelebrate.isNear ? 'bg-emerald-50 text-emerald-700' : 'bg-sky-50 text-sky-700'}`}>
-              {goshuinCelebrate.isNear ? '⛩️ 参拝の証' : '🌫️ 遥拝の証'}
-            </p>
-            <p className="text-[12px] text-gray-500 mt-2 leading-relaxed">御朱印帳にこの出会いが刻まれた。集めるほど旅の物語が増えていく。</p>
-            <p className="text-[10px] text-gray-400 mt-1.5">※この御朱印は公式のものではありません</p>
-            <div className="flex gap-2 mt-4">
-              <button
-                onClick={() => setGoshuinCelebrate(null)}
-                className="flex-1 bg-gray-100 text-gray-600 text-[14px] font-black py-3 rounded-full hover:bg-gray-200 cursor-pointer"
-              >
-                閉じる
-              </button>
-              {onOpenGoshuinBook && (
-                <button
-                  onClick={() => { setGoshuinCelebrate(null); onOpenGoshuinBook(); }}
-                  className="flex-1 bg-shrine-red text-white text-[14px] font-black py-3 rounded-full hover:opacity-90 cursor-pointer"
-                >
-                  御朱印帳を見る
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
+        <GoshuinCelebrate
+          seed={spot.godName || spot.name}
+          godEmoji={godEmoji}
+          stampLabel={agent.name}
+          spotName={spot.name}
+          variant={goshuinCelebrate.isNear ? 'near' : 'far'}
+          onClose={() => setGoshuinCelebrate(null)}
+          onOpenBook={onOpenGoshuinBook ? () => { setGoshuinCelebrate(null); onOpenGoshuinBook(); } : undefined}
+        />
       )}
 
       {toast && (

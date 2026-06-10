@@ -1,5 +1,6 @@
 // Yaorozu God OS - Mock Database & State Management
 import { generateTrivia } from '../data/trivia-seed';
+import { generateTokyoSpots } from '../data/tokyo-spots';
 import { schedulePush } from './cloud-sync';
 import type { Quest } from '../data/tasks';
 import { CHALLENGES } from '../data/challenges';
@@ -153,9 +154,10 @@ const INITIAL_USERS: User[] = [
   }
 ];
 
-const INITIAL_SPOTS: Spot[] = [
-  // リセット済み — 管理画面から追加してください
-];
+// 地図の初期シード = 東京の実在する寺社（OSM 由来）全件。
+// 「場は実在の神社・寺院であるべき」方針に従い、起動直後から実在スポットで地図を満たす。
+// GPS 周辺の実在スポット発見（/api/generate-spot）は近接シードを再利用して重複しない。
+const INITIAL_SPOTS: Spot[] = generateTokyoSpots();
 
 
 const INITIAL_AGENTS: Agent[] = [
@@ -343,7 +345,7 @@ const INITIAL_TRIVIA: TriviaEntry[] = [
 // Local Storage Keys
 const KEYS = {
   USERS: 'yaorozu_users',
-  SPOTS: 'yaorozu_spots_v4', // v4: 実在(OSM)スポットへ移行。旧 AI 発明スポットを purge。
+  SPOTS: 'yaorozu_spots_v5', // v5: 実在寺社(OSM)全件を初期シード。旧 v4(空/手続き生成)を purge。
   AGENTS: 'yaorozu_agents_v2', // v2: リセット（空からスタート）
   UGC: 'yaorozu_ugc',
   AFFILIATE: 'yaorozu_affiliate',
@@ -351,7 +353,7 @@ const KEYS = {
   CHALLENGE: 'yaorozu_challenge_progress',
   CHALLENGE_PHOTOS: 'yaorozu_challenge_photos',
   CHALLENGE_COMMENTS: 'yaorozu_challenge_comments', // 証拠写真に添えるコメント
-  QUESTS: 'yaorozu_quests_v2', // v2: リセット（空からスタート）
+  QUESTS: 'yaorozu_quests_v3', // v3: 実在寺社シード(spots v5)へ移行に伴いリセット。旧フォールバック(「GPS地点」)クエストを purge。
   QUEST_RULES: 'yaorozu_quest_rules', // クエスト生成のルール（方針）
   SPOT_RULES: 'yaorozu_spot_rules', // 場の生成のルール（方針）
   SYSTEM_ROLE: 'yaorozu_system_role', // Godの役割（システムの目的）
