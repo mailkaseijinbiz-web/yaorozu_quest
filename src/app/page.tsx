@@ -595,6 +595,14 @@ export default function HomePage() {
     );
   }
 
+  // 初回ガイド（Unit 4/5）: 旅立ちの御朱印は持つが、まだ実地の御朱印が無い新規ユーザーは
+  // ホームを「最寄り1件」に絞って最初の一手を明確にする。初の実地御朱印を得た時点で
+  // hasReal=true となりガイドが外れ、街じゅうの神々（全クエスト）が解放される。
+  // 既存ユーザーは origin 御朱印を持たないためガイドにならない（巻き込み回避）。
+  const firstPilgrimageGuided =
+    goShuinList.some((g) => g.spotId === 'yaorozu-origin') &&
+    !goShuinList.some((g) => g.spotId !== 'yaorozu-origin');
+
   // 初回起動：3ステップ・オンボーディング（世界観 → 名前 → 位置情報プライミング）
   if (needsOnboard) {
     return (
@@ -659,6 +667,7 @@ export default function HomePage() {
                 currentUser={currentUser || FALLBACK_CURRENT_USER}
                 userLocation={userLocation}
                 isGeneratingQuests={isGeneratingQuests}
+                guided={firstPilgrimageGuided}
                 onStartChallenge={(cid) => {
                   // クエスト参加を機に通知購読（以降サーバ自動プッシュが届く）。
                   // 拒否されても旅は続けられることを明示し、「無視された/壊れた」という不安を残さない。

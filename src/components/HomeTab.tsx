@@ -29,9 +29,11 @@ interface HomeTabProps {
   onEndChallenge?: () => void;
   onChanged?: () => void;
   onNeedSpots?: () => void;
+  /** 初回ガイド: フィルタを畳み、最寄り1件だけをコーチマーク付きで提示する */
+  guided?: boolean;
 }
 
-export default function HomeTab({ currentUser, userLocation, isGeneratingQuests, onStartChallenge, onEndChallenge, onNeedSpots }: HomeTabProps) {
+export default function HomeTab({ currentUser, userLocation, isGeneratingQuests, onStartChallenge, onEndChallenge, onNeedSpots, guided }: HomeTabProps) {
   // localStorage 依存のため、マウント後にのみ動的レンダリング（ハイドレーション不一致回避）
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -91,6 +93,8 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
     .slice(0, 20)
     .map((x) => x.ch);
   const visibleChallenges = nearChallenges.slice(0, visibleCount);
+  // 初回ガイド中は最寄りの1件だけに集中させる（最初の一手を明確にする）
+  const shown = guided ? nearChallenges.slice(0, 1) : visibleChallenges;
 
   // クエストが表示されていないとき（'done'フィルタ除く）、場の生成をリクエスト
   useEffect(() => {
@@ -137,22 +141,31 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
           </h2>
         </div>
 
-        {/* フィルタ */}
-        <div className="flex gap-1.5 mb-3 overflow-x-auto scrollbar-none">
-          {FILTERS.map((f) => (
-            <button
-              key={f.key}
-              onClick={() => setFilter(f.key)}
-              className={`flex-shrink-0 text-[13px] font-black px-3 py-1.5 rounded-full border transition-all cursor-pointer ${
-                filter === f.key
-                  ? 'bg-shrine-red text-white border-shrine-red'
-                  : 'bg-white text-gray-500 border-gray-200 hover:border-shrine-red/40'
-              }`}
-            >
-              {f.label}{mounted && f.n != null && <span className={filter === f.key ? 'text-white/80' : 'text-gray-400'}> {f.n}</span>}
-            </button>
-          ))}
-        </div>
+        {/* フィルタ（初回ガイド中は畳み、狐のコーチマークで最初の一手を示す） */}
+        {guided ? (
+          <div className="mb-3 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-2xl px-3 py-2.5">
+            <span className="text-lg flex-shrink-0">🦊</span>
+            <p className="text-[12px] font-bold text-amber-800 leading-snug">
+              まずは一番近くの神に会いに行くのじゃ。御朱印をいただけば、街じゅうの神々が見えてくる。
+            </p>
+          </div>
+        ) : (
+          <div className="flex gap-1.5 mb-3 overflow-x-auto scrollbar-none">
+            {FILTERS.map((f) => (
+              <button
+                key={f.key}
+                onClick={() => setFilter(f.key)}
+                className={`flex-shrink-0 text-[13px] font-black px-3 py-1.5 rounded-full border transition-all cursor-pointer ${
+                  filter === f.key
+                    ? 'bg-shrine-red text-white border-shrine-red'
+                    : 'bg-white text-gray-500 border-gray-200 hover:border-shrine-red/40'
+                }`}
+              >
+                {f.label}{mounted && f.n != null && <span className={filter === f.key ? 'text-white/80' : 'text-gray-400'}> {f.n}</span>}
+              </button>
+            ))}
+          </div>
+        )}
 
         {!mounted ? (
           <div className="text-center py-10 text-xs text-gray-400">読み込み中…</div>
@@ -172,7 +185,7 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
           </div>
         ) : (
         <div className="flex flex-col gap-3">
-          {visibleChallenges.map((ch) => {
+          {shown.map((ch) => {
             const diff = difficultyLabel(ch.difficulty);
             const completed = progress.completed.includes(ch.id);
             const active = progress.activeId === ch.id; // 現在挑戦中
@@ -266,7 +279,7 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
               </button>
             );
           })}
-          {visibleCount < nearChallenges.length && (
+          {!guided && visibleCount < nearChallenges.length && (
             <button
               onClick={() => setVisibleCount((c) => c + 5)}
               className="mx-auto mt-1 py-2 text-shrine-red text-sm font-black underline underline-offset-4 decoration-shrine-red/40 hover:decoration-shrine-red cursor-pointer"
