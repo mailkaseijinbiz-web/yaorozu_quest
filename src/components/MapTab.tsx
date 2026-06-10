@@ -499,6 +499,7 @@ export default function MapTab({
           spots={displaySpots}
           activeSpot={activeSpot}
           onSelectSpot={onSelectSpot}
+          onOpenDetail={onOpenDetail}
           userLocation={userLocation}
           setUserLocation={setUserLocation}
           ugcCounts={ugcCounts}

@@ -33,6 +33,7 @@ interface LeafletMapProps {
   spots: Spot[];
   activeSpot: Spot | null;
   onSelectSpot: (spot: Spot) => void;
+  onOpenDetail?: (spot: Spot) => void; // 選択中の場をさらにタップすると詳細を開く
   userLocation: { lat: number; lng: number };
   setUserLocation: (loc: { lat: number; lng: number }) => void;
   ugcCounts: { [spotId: string]: number };
@@ -51,6 +52,7 @@ export default function LeafletMap({
   spots,
   activeSpot,
   onSelectSpot,
+  onOpenDetail,
   userLocation,
   setUserLocation,
   ugcCounts,
@@ -77,6 +79,9 @@ export default function LeafletMap({
   // onMapMove を ref 化してクロージャ内から最新コールバックを呼べるようにする
   const onMapMoveRef = useRef(onMapMove);
   onMapMoveRef.current = onMapMove;
+  // 選択中の場を再タップしたときの詳細表示コールバック（マーカー生成クロージャから最新を呼ぶ）
+  const onOpenDetailRef = useRef(onOpenDetail);
+  onOpenDetailRef.current = onOpenDetail;
   // 自動センタリング判定用：前回パンした現在地（初回取得・ワープ判定に使う）
   const lastPanLocRef = useRef<{ lat: number; lng: number } | null>(null);
 
@@ -450,7 +455,10 @@ export default function LeafletMap({
       })
         .addTo(map)
         .on('click', () => {
-          onSelectSpot(spot);
+          // 未選択の場 → 選択。すでに選択中の場を再タップ → 詳細を開く。
+          // （activeSpot 変更時にマーカーは作り直されるため isActive は最新状態を反映する）
+          if (isActive) onOpenDetailRef.current?.(spot);
+          else onSelectSpot(spot);
         });
 
       markersRef.current[spot.id] = marker;
