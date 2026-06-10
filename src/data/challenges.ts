@@ -19,6 +19,15 @@ export function difficultyLabel(d: number): { label: string; stars: string; tone
   return { label: 'むずかしい', stars: '★★★', tone: 'text-rose-600 bg-rose-50 border-rose-200', text: 'text-rose-600' };
 }
 
+// 地形(Terrain)＝その場まで「どれだけ歩くか・起伏」。Geocaching の T 相当。
+// 「今日は散歩 / しっかり歩く」を選ぶ目安として、場の terrain(1-5) をラベル化する。
+export function terrainLabel(t: number): { label: string; level: number; tone: string } {
+  const lv = Math.max(1, Math.min(5, Math.round(t || 1)));
+  if (lv <= 2) return { label: lv === 1 ? '平坦' : 'ゆるやか', level: lv, tone: 'text-emerald-700 bg-emerald-50' };
+  if (lv <= 4) return { label: lv === 3 ? '坂道あり' : '起伏あり', level: lv, tone: 'text-amber-700 bg-amber-50' };
+  return { label: '険しい', level: lv, tone: 'text-rose-700 bg-rose-50' };
+}
+
 export const TRIVIA_TONE: Record<TriviaCategory, string> = {
   地形: 'text-teal-700 bg-teal-50 border-teal-200',
   歴史: 'text-amber-700 bg-amber-50 border-amber-200',

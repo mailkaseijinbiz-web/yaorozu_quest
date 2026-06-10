@@ -8,7 +8,7 @@ import { uploadImage } from '../lib/upload';
 import { hasGoShuin } from '../lib/goshuin';
 import { distanceKm, bearingDeg } from '../lib/geo';
 import { getHeartVoices } from '../data/god-tasks';
-import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
+import { Challenge, ChallengeStep, difficultyLabel, terrainLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
 
 const LeafletMap = dynamic(() => import('./LeafletMap'), {
   ssr: false,
@@ -543,6 +543,9 @@ export default function MapTab({
         const godEmoji = spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏');
         const held = hasGoShuin(currentUser.id, spot.id); // この場の御朱印を授かり済みか
         const ugc = ugcCounts[spot.id] ?? 0;
+        // 探索コンパス：その場の方角を指す（端末の向きがあれば実方向、無ければ北基準）
+        const compassRot = bearingDeg(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude) - (deviceHeading ?? 0);
+        const ter = terrainLabel(spot.terrain); // 地形(Terrain)バッジ用
         return (
           <div
             ref={(el) => { overlayElRef.current = el; }}
@@ -554,8 +557,12 @@ export default function MapTab({
             className="absolute bottom-3 left-3 right-3 z-[1000] text-left bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-black/5 overflow-hidden cursor-pointer active:scale-[0.99] transition-all touch-pan-y"
           >
             <div className="flex items-stretch gap-3">
-              <div className="w-20 self-stretch rounded-l-2xl flex items-center justify-center text-4xl flex-shrink-0 bg-gradient-to-br from-blue-100 to-amber-100">
+              <div className="w-20 self-stretch rounded-l-2xl flex items-center justify-center text-4xl flex-shrink-0 bg-gradient-to-br from-blue-100 to-amber-100 relative">
                 {godEmoji}
+                {/* 探索コンパス：枠の上辺を、その場の方向へ回る矢印が指す（宝探し誘導） */}
+                <div className="absolute inset-1.5 pointer-events-none transition-transform duration-300" style={{ transform: `rotate(${compassRot}deg)` }}>
+                  <Navigation2 className="w-3.5 h-3.5 text-[#2563eb] fill-[#2563eb] absolute top-0 left-1/2 -translate-x-1/2" />
+                </div>
               </div>
               <div className="flex-1 min-w-0 py-3">
                 <div className="flex items-center justify-between gap-2">
@@ -575,6 +582,7 @@ export default function MapTab({
                   <span className="text-[13px] font-black flex items-center gap-0.5 text-[#2563eb]">
                     <MapPin className="w-3 h-3" /><span className="tabular-nums">{distVal}</span><span className="text-[11px]">{distUnit}</span>
                   </span>
+                  <span className={`text-[12px] font-black px-1.5 py-0.5 rounded-full ${ter.tone}`}>🥾 {ter.label}</span>
                   {held && <span className="text-[13px] font-black text-shrine-red flex items-center gap-0.5">🔴 御朱印</span>}
                   {ugc > 0 && <span className="text-[13px] flex items-center gap-0.5 text-gray-400"><Camera className="w-3 h-3" />{ugc}</span>}
                 </div>
