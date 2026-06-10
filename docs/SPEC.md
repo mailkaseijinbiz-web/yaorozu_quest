@@ -415,7 +415,7 @@ GPS生成スポットは `SPOT_TTL_MS = 30 * 24 * 60 * 60 * 1000`（30日）の 
 
 - タイル: CartoDB Voyager（`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png`, maxZoom=19）。attributionControl は無効。
 - **ユーザー位置マーカー**: シアンドット＋コンパス。zIndexOffset=1000。iOS は `webkitCompassHeading`、Android は `deviceorientation` の alpha から導出。取得不可なら activeSpot への bearing にフォールバック。iOS 13+ は権限タップ必須。
-- **スポットマーカー**: divIcon バブル。最寄り or 選択時に 🦊 神絵文字 + 30字に切り詰めた神の声を白バブルで表示（4.5秒間隔で回転、フェード）。それ以外は青ドット。
+- **スポットマーカー**: divIcon バブル。フキダシは選択中の場に対して表示（青丸マーカーの上に開く）。無選択時のみ最寄りの場に表示。🦊 神絵文字 + 30字に切り詰めた神の声を白バブルで表示（4.5秒間隔で回転、フェード）。それ以外は青ドット。
 - **マーカー間引き**: ズームに応じて表示数を制限。z≤12→12, z≤13→20, z≤14→30, z≤15→45, z>15→60。境界パディング 0.15（15%）。activeSpot は画面外でも常に含める。
 - **ゴールマーカー**: activeChallenge があり未完ステップが残るとき青📸バブル。zIndexOffset=1500。クエスト開始時にゴールへ0.9秒で飛び、1.7秒停止後ユーザー位置へ0.9秒で戻る演出。
 - **チャレンジ導入（プロローグ）**: 初回入場時（introSeenId≠challenge.id かつ done.size===0）。Phase0（0.8秒遅延後）に説明を1字/38msでタイプ表示、Phase1（完了1.5秒後）に PROLOGUE カード（難易度/推定時間/タスク数）を表示し3秒で自動進行。導入中はヘッダー・フッター・地図ボタンを隠す。`localStorage['yaorozu_intro_seen']` に保存。

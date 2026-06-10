@@ -337,13 +337,14 @@ export default function LeafletMap({
     // クエストモード（目的地あり）では青のフキダシを出さず、赤い目的地に集中させる
     const questMode = goalLat != null && goalLng != null;
 
-    // フキダシ表示候補（優先度順：選択中 > 最寄り）。
-    // 画面上でフキダシ同士が被る場合は、優先度の高いひとつだけ表示する。
+    // フキダシは「選択中の場」に対して出す。選択中の場があるときはその場だけに表示し、
+    // 選択していない場にフキダシが出る不具合を防ぐ。無選択のときのみ最寄りの場に出す。
     const bubbleIds = new Set<string>();
     if (!questMode) {
       const candidateIds: string[] = [];
-      if (activeSpot && visibleSpots.some((s) => s.id === activeSpot.id)) candidateIds.push(activeSpot.id);
-      if (nearestId && nearestId !== activeSpot?.id) candidateIds.push(nearestId);
+      const activeVisible = !!activeSpot && visibleSpots.some((s) => s.id === activeSpot.id);
+      if (activeVisible) candidateIds.push(activeSpot!.id);
+      else if (nearestId) candidateIds.push(nearestId);
 
       const acceptedPts: { x: number; y: number }[] = [];
       candidateIds.forEach((id) => {
@@ -384,11 +385,25 @@ export default function LeafletMap({
       }
       const borderCls = isActive ? 'border-[#2563eb]' : 'border-[#2563eb]/40';
 
-      const spotHtml = isActive
+      const activeCircleHtml = `
+          <div style="width:40px;height:40px;border-radius:9999px;background:#2563eb;border:3px solid #fff;box-shadow:0 2px 10px rgba(37,99,235,.55);display:flex;align-items:center;justify-content:center;font-size:21px;line-height:1;">${iconEmoji}</div>
+          <span class="map-spot-name map-spot-name-active" style="margin-top:3px;">${spot.name}</span>`;
+
+      const spotHtml = isActive && showBubble
         ? `
         <div class="relative flex flex-col items-center">
-          <div style="width:40px;height:40px;border-radius:9999px;background:#2563eb;border:3px solid #fff;box-shadow:0 2px 10px rgba(37,99,235,.55);display:flex;align-items:center;justify-content:center;font-size:21px;line-height:1;">${iconEmoji}</div>
-          <span class="map-spot-name map-spot-name-active" style="margin-top:3px;">${spot.name}</span>
+          <div class="relative flex items-start gap-1.5 rounded-2xl px-2.5 py-1.5 shadow-lg border-2 border-[#2563eb]" style="max-width:190px;background:#ffffff;">
+            <span style="font-size:15px;line-height:1.15;flex-shrink:0;">${iconEmoji}</span>
+            <span class="spot-voice text-[11px] font-bold leading-snug text-gray-800" data-spotid="${spot.id}" data-vi="${voiceIdx}" style="word-break:break-word;transition:opacity 0.3s ease;">${voice}</span>
+          </div>
+          <div class="border-r-2 border-b-2 border-[#2563eb] -mt-1.5 rotate-45" style="width:10px;height:10px;background:#ffffff;margin-bottom:6px;"></div>
+          ${activeCircleHtml}
+        </div>
+      `
+        : isActive
+        ? `
+        <div class="relative flex flex-col items-center">
+          ${activeCircleHtml}
         </div>
       `
         : showBubble
@@ -411,9 +426,9 @@ export default function LeafletMap({
       const spotIcon = L.divIcon({
         html: spotHtml,
         className: 'custom-spot-icon',
-        iconSize: isActive ? [150, 64] : showBubble ? [210, 108] : [120, 30],
+        iconSize: isActive && showBubble ? [210, 128] : isActive ? [150, 64] : showBubble ? [210, 108] : [120, 30],
         // アンカー（＝この場の地理座標）。選択中は青丸の中心、フキダシは上へ持ち上げてドットとの重なりを防ぐ
-        iconAnchor: isActive ? [75, 20] : showBubble ? [105, 60] : [60, 8],
+        iconAnchor: isActive && showBubble ? [105, 78] : isActive ? [75, 20] : showBubble ? [105, 60] : [60, 8],
       });
 
       const marker = L.marker([spot.latitude, spot.longitude], {
