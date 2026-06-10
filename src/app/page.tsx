@@ -599,6 +599,8 @@ export default function HomePage() {
           setCurrentUser(updated);
           setEditName(updated.displayName);
           try { localStorage.setItem('yaorozu_registered', '1'); } catch {}
+          // オンボ中に授けた「旅立ちの御朱印」を state へ反映（御朱印帳が初回から空にならない）
+          setGoShuinList(getGoShuinList('user-self'));
           db.logActivity({ type: 'home_view', userId: 'user-self', source: 'human', detail: '登録' });
           if (!requestedLocation) {
             // 「あとで」：本編に入った直後に OS ダイアログを出し直さない。
