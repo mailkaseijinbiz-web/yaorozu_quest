@@ -407,7 +407,7 @@ export default function SpotDetail({
         // 神の挨拶が画面に落ち着いてから授与式を始める。300m 以内なら参拝、遠隔なら遥拝
         //（授与のゲートはしない＝GPS拒否でもコレクションできる。ラベルだけ分ける）。
         const isNear = userLocation
-          ? distanceKm(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude) <= 0.3
+          ? distanceKm(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude) <= 0.1
           : true;
         setTimeout(() => setGoshuinCelebrate({ isNear }), 900);
       }
@@ -851,6 +851,7 @@ export default function SpotDetail({
               {goshuinCelebrate.isNear ? '⛩️ 参拝の証' : '🌫️ 遥拝の証'}
             </p>
             <p className="text-[12px] text-gray-500 mt-2 leading-relaxed">御朱印帳にこの出会いが刻まれた。集めるほど旅の物語が増えていく。</p>
+            <p className="text-[10px] text-gray-400 mt-1.5">※この御朱印は公式のものではありません</p>
             <div className="flex gap-2 mt-4">
               <button
                 onClick={() => setGoshuinCelebrate(null)}

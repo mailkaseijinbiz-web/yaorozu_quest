@@ -946,7 +946,10 @@ export default function HomePage() {
                     }
                     return (
                       <div>
-                        <p className="text-[11px] text-gray-400 mb-3 text-right">{goShuinList.length} 社寺</p>
+                        <div className="flex justify-between items-center mb-3">
+                          <span className="text-[10px] text-gray-400">※御朱印は公式のものではありません</span>
+                          <span className="text-[11px] text-gray-400 font-bold">{goShuinList.length} 社寺</span>
+                        </div>
                         <div className="grid grid-cols-2 gap-3">
                           {[...goShuinList].reverse().map((g) => {
                             const d = new Date(g.receivedAt);
