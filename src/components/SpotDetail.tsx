@@ -69,7 +69,7 @@ function resolveAgent(spot: Spot): Agent {
   };
 }
 
-export default function SpotDetail({
+function SpotDetailBody({
   spot,
   currentUser,
   allSpots,
@@ -473,7 +473,7 @@ export default function SpotDetail({
   };
 
   return (
-    <div className="fixed sm:absolute inset-0 z-[3000] bg-[#f5f7fa] flex flex-col">
+    <div className="absolute inset-0 bg-[#f5f7fa] flex flex-col">
       {/* ── ヒーロー写真（無ければ NO IMAGE） ── */}
       <div className="relative h-52 flex-shrink-0 bg-gray-200">
         {heroPhoto ? (
@@ -875,6 +875,102 @@ export default function SpotDetail({
       {toast && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[3100] bg-gray-900 text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-lg animate-in">
           {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 詳細ページのスライド・ラッパー。
+ *
+ * これまでは detailSpot がセットされた瞬間に重い本体（多数の localStorage 読み出し：
+ * UGC・全クエストの距離ソート・全スポット走査の評価写真・タスクごとの達成判定…）が
+ * 同期マウントされ、最初の描画をブロックして「画面が固まる」原因になっていた。
+ *
+ * 対策：
+ *  1) 右からのスライドイン（transform のみ＝コンポジタ処理で滑らか）。
+ *  2) スライド中は DB 読み出しゼロの軽量シェルだけを描画し、本体のマウントは
+ *     スライド完了後（transitionend）まで遅延。重い同期処理が走るのは画面が
+ *     静止した後なので、遷移アニメ自体は固まらない。
+ *  3) 閉じる時も右へスライドアウトしてから実際に閉じる。
+ */
+export default function SpotDetail(props: SpotDetailProps) {
+  const { spot } = props;
+  const [entered, setEntered] = useState(false);   // スライドイン開始フラグ
+  const [leaving, setLeaving] = useState(false);   // スライドアウト中
+  const [bodyReady, setBodyReady] = useState(false); // 重い本体をマウントしてよいか
+
+  // マウント後に2フレーム待ってからスライド開始（初期 translateX(100%) を確実に描画させる）。
+  // transitionend が来ない環境向けに、保険として一定時間後に本体をマウントする。
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => requestAnimationFrame(() => setEntered(true)));
+    const fallback = setTimeout(() => setBodyReady(true), 420);
+    return () => { cancelAnimationFrame(raf); clearTimeout(fallback); };
+  }, []);
+
+  // 右へスライドアウトしてから実際に閉じる（onClose は履歴 back 連動）
+  const handleClose = () => {
+    if (leaving) return;
+    setLeaving(true);
+    setTimeout(props.onClose, 260);
+  };
+
+  const heroPhoto = spot.imageUrl || ''; // シェルは DB を読まず spot のみで描く
+
+  return (
+    <div
+      className="fixed sm:absolute inset-0 z-[3000] bg-[#f5f7fa] will-change-transform"
+      style={{
+        transform: entered && !leaving ? 'translateX(0)' : 'translateX(100%)',
+        transition: 'transform 300ms cubic-bezier(0.22, 1, 0.36, 1)',
+      }}
+      onTransitionEnd={(e) => {
+        if (e.propertyName === 'transform' && entered && !leaving) setBodyReady(true);
+      }}
+    >
+      {bodyReady ? (
+        <SpotDetailBody {...props} onClose={handleClose} />
+      ) : (
+        /* ── スライド中の軽量シェル（本体と同じ骨格。DB 読み出しなし）── */
+        <div className="absolute inset-0 flex flex-col bg-[#f5f7fa]">
+          <div className="relative h-52 flex-shrink-0 bg-gray-200">
+            {heroPhoto ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={heroPhoto} alt={spot.name} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full bg-gray-100" />
+            )}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-black/30 pointer-events-none" />
+            <button
+              onClick={handleClose}
+              aria-label="閉じる"
+              style={{ top: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
+              className="absolute left-4 z-[20] w-10 h-10 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white active:scale-95 transition-all cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <div className="absolute bottom-3 left-4 right-4 text-white">
+              <span className="text-[13px] font-bold bg-white/20 backdrop-blur-md px-2 py-0.5 rounded-full">{spot.category}</span>
+              <h1 className="text-2xl font-black mt-1.5 leading-tight drop-shadow-lg">{spot.name}</h1>
+            </div>
+          </div>
+          {/* タブ骨格 */}
+          <div className="flex border-b border-black/5 bg-white flex-shrink-0">
+            {['会話', 'クエスト', '写真', '石碑'].map((label) => (
+              <div key={label} className="flex-1 py-3 flex items-center justify-center text-[12px] font-black text-gray-300">
+                {label}
+              </div>
+            ))}
+          </div>
+          {/* 本文ローディング（神霊が現れるまでの間） */}
+          <div className="flex-1 flex items-center justify-center">
+            <div className="flex gap-1.5">
+              <span className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+          </div>
         </div>
       )}
     </div>
