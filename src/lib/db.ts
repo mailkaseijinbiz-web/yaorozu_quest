@@ -607,6 +607,14 @@ const ITEM_POOL: { name: string; icon: string }[] = [
   { name: '破魔矢', icon: '🏹' },
 ];
 
+/** localStorage の容量超過エラーか（Safari/WKWebView は code 22、Firefox は NS_ERROR_DOM_QUOTA_REACHED）。 */
+function isQuotaError(e: unknown): boolean {
+  return (
+    e instanceof DOMException &&
+    (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22)
+  );
+}
+
 // Database class wrapping client side state
 class MockDatabase {
   private isBrowser = typeof window !== 'undefined';
@@ -656,12 +664,14 @@ class MockDatabase {
     //   ① TTL 期限切れ。
     //   ② 寺社以外の場 — 場は実在の神社・寺院のみとする方針のため、旧仕様で生成された
     //      公園・商店街・史跡などの場を退役させる。
+    //   ③ 旧フォールバックの「GPS地点 (lat, lng)」プレースホルダー — 実在の場のみとする方針のため退役。
     let mutated = false;
     const withTtl = stored.map(s => {
       if (s.deletedAt) return s;
       const ttlExpired = s.expiresAt != null && new Date(s.expiresAt).getTime() <= now;
       const notShrineOrTemple = s.category !== '神社' && s.category !== '寺院';
-      if (ttlExpired || notShrineOrTemple) {
+      const gpsPlaceholder = s.name.startsWith('GPS地点');
+      if (ttlExpired || notShrineOrTemple || gpsPlaceholder) {
         mutated = true;
         return { ...s, deletedAt: new Date().toISOString() };
       }
@@ -1492,10 +1502,21 @@ class MockDatabase {
     return all[challengeId] || {};
   }
 
-  saveChallengePhoto(challengeId: string, stepId: string, dataUrl: string): void {
+  /**
+   * 保存できたら true。端末ストレージ満杯（Supabase 未設定時は base64 写真が
+   * localStorage に蓄積し quota を超えうる）なら false を返す。
+   * 呼び出し側は false でも達成処理を止めず、ユーザーに保存失敗を知らせること。
+   */
+  saveChallengePhoto(challengeId: string, stepId: string, dataUrl: string): boolean {
     const all = this.load<{ [cid: string]: { [sid: string]: string } }>(KEYS.CHALLENGE_PHOTOS, {});
     all[challengeId] = { ...(all[challengeId] || {}), [stepId]: dataUrl };
-    this.save(KEYS.CHALLENGE_PHOTOS, all);
+    try {
+      this.save(KEYS.CHALLENGE_PHOTOS, all);
+      return true;
+    } catch (e) {
+      if (isQuotaError(e)) return false;
+      throw e;
+    }
   }
 
   /** 証拠写真に添えるコメント。challengeId→stepId→text */

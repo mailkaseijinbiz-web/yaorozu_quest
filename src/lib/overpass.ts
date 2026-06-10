@@ -65,12 +65,23 @@ function mapCategory(tags: Record<string, string>): Category | null {
 /** 指定座標・半径の周辺の寺社（神社・寺院）を引く Overpass QL を組み立てる。 */
 function buildQuery(lat: number, lng: number, radiusM: number): string {
   const c = `${Math.round(radiusM)},${lat.toFixed(6)},${lng.toFixed(6)}`;
-  return `[out:json][timeout:10];
+  return `[out:json][timeout:8];
 (
   nwr(around:${c})["amenity"="place_of_worship"]["name"];
   nwr(around:${c})["building"~"^(shrine|temple)$"]["name"];
 );
 out center 100;`;
+}
+
+/**
+ * 混雑時リトライ用の軽量クエリ。union を amenity 1句に絞り、半径・件数・timeout を抑える。
+ * （amenity 無しで building=shrine/temple のみの寺社は拾えないが、全滅よりは良い）
+ */
+function buildLightQuery(lat: number, lng: number, radiusM: number): string {
+  const c = `${Math.round(Math.min(radiusM, 1000))},${lat.toFixed(6)},${lng.toFixed(6)}`;
+  return `[out:json][timeout:6];
+nwr(around:${c})["amenity"="place_of_worship"]["name"];
+out center 50;`;
 }
 
 interface OverpassElement {
@@ -93,11 +104,15 @@ export async function lookupRealPlaces(
   radiusM = 1000,
   limit = 8,
 ): Promise<RealPlace[]> {
-  const query = buildQuery(lat, lng, radiusM);
-
   // 1 エンドポイントに JSON を要求。!ok や busy 時の XHTML(200) は throw 扱いにし、
   // Promise.any で「最初に成功したエンドポイント」を採用する＝総待ち時間を 1 タイムアウトに収める。
-  const fetchJson = async (endpoint: string): Promise<{ elements?: OverpassElement[] }> => {
+  // ※ 混雑時はサーバー側で「Query timed out」になり elements 空 + remark 付きの 200 が返る。
+  //   これを成功扱いすると「近くに寺社なし」と誤判定するため、remark のエラーも throw する。
+  const fetchJson = async (
+    endpoint: string,
+    query: string,
+    timeoutMs: number,
+  ): Promise<{ elements?: OverpassElement[] }> => {
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -106,19 +121,38 @@ export async function lookupRealPlaces(
         'User-Agent': 'YaorozuQuest/1.0 (real-place discovery)',
       },
       body: query,
-      signal: AbortSignal.timeout(6_000), // 1 エンドポイントあたり最大 6s
+      // クエリ自体の [timeout] よりフェッチを長く待つ（短いと 6〜8s かかる正常応答を自分で捨てる）
+      signal: AbortSignal.timeout(timeoutMs),
       cache: 'no-store',
     });
     if (!res.ok) throw new Error(`overpass ${res.status}`);
-    return (await res.json()) as { elements?: OverpassElement[] }; // busy=XHTML は parse 失敗→敗退
+    const json = (await res.json()) as { elements?: OverpassElement[]; remark?: string }; // busy=XHTML は parse 失敗→敗退
+    if (json.remark && /error/i.test(json.remark)) throw new Error(`overpass remark: ${json.remark}`);
+    return json;
   };
+
+  // 並列レース：3 エンドポイントへ各 1 リクエスト。最速の成功を採用。
+  const race = (query: string, timeoutMs: number) =>
+    Promise.any(ENDPOINTS.map(e => fetchJson(e, query, timeoutMs)));
+
+  // AggregateError(Promise.any) の中身を運用ログに残す（全エンドポイント失敗の原因調査用）
+  const describe = (err: unknown) =>
+    err instanceof AggregateError
+      ? err.errors.map(e => (e instanceof Error ? `${e.message}${e.cause ? ` (${e.cause})` : ''}` : String(e))).join(' / ')
+      : String(err);
 
   let data: { elements?: OverpassElement[] } | null = null;
   try {
-    // 並列レース：3 エンドポイントへ各 1 リクエスト。最速の成功を採用（最悪でも ~6s）。
-    data = await Promise.any(ENDPOINTS.map(fetchJson));
-  } catch {
-    return []; // 全エンドポイント失敗（busy/ダウン）→ 呼び出し側は AI フォールバックへ
+    data = await race(buildQuery(lat, lng, radiusM), 10_000);
+  } catch (err) {
+    // 全エンドポイント失敗（busy/ダウン/サーバー側タイムアウト）→ 軽量クエリで一度だけ再試行
+    console.error('[overpass] all endpoints failed (heavy query):', describe(err));
+    try {
+      data = await race(buildLightQuery(lat, lng, radiusM), 8_000);
+    } catch (err2) {
+      console.error('[overpass] all endpoints failed (light query):', describe(err2));
+      return []; // それでも全滅 → 呼び出し側は「実在の場なし」扱い
+    }
   }
   if (!data?.elements) return [];
 
