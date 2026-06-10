@@ -110,6 +110,14 @@
 .celebrate-confetti { animation: celebrate-confetti 1.2s ease-in-out infinite; }
 @keyframes celebrate-confetti { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
 
+/* 御朱印の授与式：朱印がドンと押されるスタンプアニメ */
+.stamp-in { animation: stamp-in 0.55s cubic-bezier(0.2, 1.6, 0.4, 1) 0.35s both; }
+@keyframes stamp-in {
+  0%   { transform: scale(2.1) rotate(-14deg); opacity: 0; }
+  60%  { transform: scale(0.94) rotate(3deg);  opacity: 1; }
+  100% { transform: scale(1)    rotate(0deg);  opacity: 1; }
+}
+
 /* バッジ獲得演出 ──────────────────────────────────────── */
 /* 紙吹雪パーティクル */
 @keyframes confetti-fall {

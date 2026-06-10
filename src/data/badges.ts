@@ -6,7 +6,7 @@
 //   - フォロワーバッジ：フォロワー数に応じて
 // -----------------------------------------------------------------------------
 
-import { User, UserContribution } from '../lib/db';
+import { User, UserContribution, db } from '../lib/db';
 
 export interface BadgeDef {
   id: string;
@@ -18,7 +18,7 @@ export interface BadgeDef {
   /** 達成に必要な値 */
   target: number;
   /** カテゴリ（表示グルーピング用） */
-  group: '訪問' | '写真' | '点検' | 'フォロワー' | '徳';
+  group: '訪問' | '写真' | '点検' | 'フォロワー' | '徳' | '日参';
 }
 
 export const BADGES: BadgeDef[] = [
@@ -42,6 +42,10 @@ export const BADGES: BadgeDef[] = [
 
   // ── 徳 ──
   { id: 'toku-500', icon: '🔆', name: '大徳者', desc: '累積徳が500に到達', group: '徳', target: 500, current: (_s, u) => u.totalToku },
+
+  // ── 日参（参拝ストリーク。最長記録で判定するので、途切れても獲得済みバッジは戻らない） ──
+  { id: 'streak-7', icon: '🔥', name: '七日詣', desc: '7日連続で徳を積んだ', group: '日参', target: 7, current: () => db.getStreakInfo().longest },
+  { id: 'streak-30', icon: '⛩️', name: '月参り', desc: '30日連続で徳を積んだ', group: '日参', target: 30, current: () => db.getStreakInfo().longest },
 ];
 
 export interface BadgeState extends BadgeDef {

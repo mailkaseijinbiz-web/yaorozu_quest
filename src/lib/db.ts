@@ -364,6 +364,8 @@ const KEYS = {
   REVOKED: 'yaorozu_revoked_users',   // 削除済みユーザーID（再ログイン強制用）
   BONNOU: 'yaorozu_bonnou',           // 人間が打ち明けた煩悩（覚りの調整素材）
   APP_SETTINGS: 'yaorozu_app_settings', // アプリ全体の設定（System タブ）
+  DAILY: 'yaorozu_daily_v1',          // 日次活動（参拝ストリーク・カムバック判定）
+  GOD_TASK_DONE: 'yaorozu_god_tasks_v1', // 神の依頼（場の御用）の本日達成（日付キー）
 };
 
 /** クエスト生成ルール（生成方針）の既定値。クエストタブで編集できる。 */
@@ -510,6 +512,27 @@ export interface ChallengeProgress {
   completed: string[]; // 制覇したチャレンジ（バッジ獲得）
 }
 
+// 日次活動（参拝ストリーク・カムバック判定）。
+// 日付キーのプレーンオブジェクトは snapshot-merge がキー単位で和集合マージするため、
+// 端末間同期でカウンタが後勝ちで巻き戻らない。ストリーク長は保存せず days から導出する。
+export interface DailyDay {
+  acts: number; // その日に徳を得た行動の回数
+  comeback?: boolean; // その日にカムバックボーナスを授与済みか
+}
+export interface DailyLog {
+  days: { [date: string]: DailyDay }; // 'YYYY-MM-DD'（端末ローカル日付）
+  // 最長ストリークの記録。ローカルでは単調更新（touchDaily が Math.max で更新）。
+  // 端末間マージではスカラーは後勝ちのため厳密な単調性は保証されないが、
+  // days の保持期間（180日）内なら getStreakInfo の導出で自然回復する。
+  longestEver?: number;
+}
+export interface StreakInfo {
+  current: number; // 連続日数（今日未活動でも前日まで連続なら維持表示）
+  longest: number;
+  todayDone: boolean; // 今日すでに徳を積んだか
+  lastDate: string | null; // 最後に活動した日
+}
+
 // アクティビティ（クエスト参加・場所訪問・依頼達成などの行動記録）
 export type ActivityType = 'quest_join' | 'quest_step' | 'quest_complete' | 'visit' | 'task' | 'photo' | 'ugc' | 'home_view' | 'map_move' | 'spot_generate' | 'god_generate' | 'spot_delete';
 export type ActivitySource = 'human' | 'system';
@@ -557,6 +580,18 @@ export interface UserContribution {
 
 function defaultContribution(): UserContribution {
   return { visitedSpotIds: [], taskCounts: {}, spotContrib: {}, items: [], followers: 0, following: 0 };
+}
+
+/** 端末ローカルの日付キー（YYYY-MM-DD）。UTC（toISOString）だと日本では深夜の活動が前日扱いになるため使わない。 */
+function localDate(d = new Date()): string {
+  return d.toLocaleDateString('sv-SE');
+}
+
+/** 日付キーの前日（'2026-06-10' → '2026-06-09'）。正午起点で夏時間の影響を避ける。 */
+function prevDate(dateStr: string): string {
+  const d = new Date(`${dateStr}T12:00:00`);
+  d.setDate(d.getDate() - 1);
+  return localDate(d);
 }
 
 // アイテムの種類（神社仏閣にちなんだ品）
@@ -1158,6 +1193,23 @@ class MockDatabase {
     return spot;
   }
 
+  /** 課題を1件解決して場から取り除く（resolveIssue 達成時）。文言一致のみ削除・不一致は何もしない。
+   *  活気 = enjoyments − issues は計算式なので、removeIssue + addEnjoyment で「活気+2」が成立する。 */
+  removeIssue(spotId: string, issueText: string): Spot | undefined {
+    const spots = this.getSpotsRaw();
+    const idx = spots.findIndex(s => s.id === spotId && !s.deletedAt);
+    if (idx === -1) return undefined;
+    const spot = spots[idx];
+    const issues = spot.issues ?? [];
+    const at = issues.indexOf(issueText);
+    if (at !== -1) {
+      spot.issues = [...issues.slice(0, at), ...issues.slice(at + 1)];
+      spots[idx] = spot;
+      this.save(KEYS.SPOTS, spots);
+    }
+    return spot;
+  }
+
   /** 汎用：神の依頼タスク達成で徳を付与 */
   completeGodTask(userId: string, spotId: string, reward: number): void {
     this.rewardToku(userId, reward);
@@ -1266,6 +1318,108 @@ class MockDatabase {
     stats.following = Math.max(0, stats.following + dFollowing);
     this.saveUserStats(userId, stats);
     return stats;
+  }
+
+  // ────────────────────────────────────────────────
+  // 日次活動（参拝ストリーク・カムバック・本日の御用）
+  // ────────────────────────────────────────────────
+
+  private getDailyLog(): DailyLog {
+    const log = this.load<DailyLog>(KEYS.DAILY, { days: {} });
+    if (!log.days || typeof log.days !== 'object') log.days = {};
+    return log;
+  }
+
+  /** date から過去へ連続している日数（date 自身に活動が無ければ 0）。 */
+  private streakEndingAt(days: { [date: string]: DailyDay }, date: string): number {
+    let n = 0;
+    let d = date;
+    while (days[d]) { n += 1; d = prevDate(d); }
+    return n;
+  }
+
+  /** 今日の活動を打刻（徳を得る行動から rewardToku 経由で呼ばれる）。180日より古い日は削除。 */
+  private touchDaily(): void {
+    if (!this.isBrowser) return;
+    const log = this.getDailyLog();
+    const today = localDate();
+    const day = log.days[today] ?? { acts: 0 };
+    day.acts += 1;
+    log.days[today] = day;
+    const cutoff = localDate(new Date(Date.now() - 180 * 86400_000));
+    for (const k of Object.keys(log.days)) { if (k < cutoff) delete log.days[k]; }
+    log.longestEver = Math.max(log.longestEver ?? 0, this.streakEndingAt(log.days, today));
+    this.save(KEYS.DAILY, log);
+  }
+
+  /** 参拝ストリーク。今日未活動でも前日まで連続していれば current は維持表示する。 */
+  getStreakInfo(): StreakInfo {
+    const log = this.getDailyLog();
+    const today = localDate();
+    const todayDone = !!log.days[today];
+    const current = this.streakEndingAt(log.days, todayDone ? today : prevDate(today));
+    // 最長：保持中の days の連続区間と、保存済みの単調最大値の大きい方
+    let longest = Math.max(log.longestEver ?? 0, current);
+    const dates = Object.keys(log.days).sort();
+    let run = 0;
+    let prev: string | null = null;
+    for (const d of dates) {
+      run = prev !== null && prevDate(d) === prev ? run + 1 : 1;
+      if (run > longest) longest = run;
+      prev = d;
+    }
+    return { current, longest, todayDone, lastDate: dates.length ? dates[dates.length - 1] : null };
+  }
+
+  /** 最後に活動した日（今日を含む）。daily が空なら activities から推定（旧データ救済）。 */
+  getLastActiveDate(): string | null {
+    const dates = Object.keys(this.getDailyLog().days).sort();
+    if (dates.length) return dates[dates.length - 1];
+    // activities はクラウドマージ後に「先頭=最新」が崩れることがあるため createdAt の最大値で見る
+    const ts = this.getActivities()
+      .filter((a) => (a.source ?? 'human') === 'human')
+      .reduce((m, a) => Math.max(m, new Date(a.createdAt).getTime() || 0), 0);
+    return ts ? localDate(new Date(ts)) : null;
+  }
+
+  /** 3日以上ぶりの帰還なら +30徳 を1日1回だけ授与し、経過日数を返す（該当しなければ null）。 */
+  grantComebackBonus(userId = 'user-self'): number | null {
+    if (!this.isBrowser) return null;
+    const today = localDate();
+    if (this.getDailyLog().days[today]?.comeback) return null; // 今日すでに授与済み
+    const last = this.getLastActiveDate();
+    if (!last || last >= today) return null; // 履歴なし（新規）or 今日すでに活動済み
+    const gapDays = Math.round(
+      (new Date(`${today}T12:00:00`).getTime() - new Date(`${last}T12:00:00`).getTime()) / 86400_000
+    );
+    if (gapDays < 3) return null;
+    this.rewardToku(userId, 30); // touchDaily が今日を打刻する
+    const log = this.getDailyLog();
+    log.days[today] = { ...(log.days[today] ?? { acts: 0 }), comeback: true };
+    this.save(KEYS.DAILY, log);
+    this.logActivity({ type: 'task', userId, detail: 'comeback', reward: 30 });
+    return gapDays;
+  }
+
+  // 神の依頼（場の御用）の本日達成。{ 'YYYY-MM-DD': { 'spotId:taskId': true } }
+  private getGodTaskDone(): { [date: string]: { [key: string]: true } } {
+    return this.load(KEYS.GOD_TASK_DONE, {} as { [date: string]: { [key: string]: true } });
+  }
+
+  /** この場の依頼を今日すでに果たしたか（御用は1日1回の日課）。 */
+  isTaskDoneToday(spotId: string, taskId: string): boolean {
+    return !!this.getGodTaskDone()[localDate()]?.[`${spotId}:${taskId}`];
+  }
+
+  /** 場の依頼の本日達成を打刻。7日より古い日は削除。 */
+  markTaskDoneToday(spotId: string, taskId: string): void {
+    if (!this.isBrowser) return;
+    const all = this.getGodTaskDone();
+    const today = localDate();
+    all[today] = { ...(all[today] ?? {}), [`${spotId}:${taskId}`]: true };
+    const cutoff = localDate(new Date(Date.now() - 7 * 86400_000));
+    for (const k of Object.keys(all)) { if (k < cutoff) delete all[k]; }
+    this.save(KEYS.GOD_TASK_DONE, all);
   }
 
   // ────────────────────────────────────────────────
@@ -1421,6 +1575,9 @@ class MockDatabase {
 
   // Reward Toku points to user and update their title
   private rewardToku(userId: string, amount: number): void {
+    // 徳を得る全行動はここに集約されるため、参拝ストリークの打刻も1点フックで行う
+    // （amount<0 の減点＝写真却下などは「今日の参拝」に数えない）
+    if (amount > 0) this.touchDaily();
     const users = this.getUsers();
     const index = users.findIndex(u => u.id === userId);
     if (index === -1) return;
@@ -1515,5 +1672,6 @@ export const db = new MockDatabase();
 /** GPS 生成スポットの TTL（ミリ秒）。30 日。 */
 export const SPOT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** 生成クエストの TTL（ミリ秒）。1 時間。参加されないまま期限切れになると削除される。 */
-export const QUEST_TTL_MS = 60 * 60 * 1000;
+/** 生成クエストの TTL（ミリ秒）。24 時間。参加されないまま期限切れになると削除される。
+ *  （旧: 1時間。数日ぶりに開くと棚が空＝「戻ったのに何もない」になるため延長。参加済みは恒久保持。） */
+export const QUEST_TTL_MS = 24 * 60 * 60 * 1000;

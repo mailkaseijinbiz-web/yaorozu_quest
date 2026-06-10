@@ -8,6 +8,7 @@ import { distanceKm } from '../lib/geo';
 import { uploadImage } from '../lib/upload';
 import { shareToSns } from '../lib/share';
 import { grantGoShuin, hasGoShuin } from '../lib/goshuin';
+import YaorozuSpirit from './YaorozuSpirit';
 
 interface Message {
   id: string;
@@ -29,6 +30,8 @@ interface SpotDetailProps {
   onGoShuinGranted?: () => void; // 御朱印を授かったとき親へ通知
   activeChallenge?: import('../data/tasks').Quest | null; // 挑戦中クエスト（御朱印ステップの自動達成用）
   onAdvanceChallenge?: (stepId: string, photo?: string | null) => void; // ステップ達成を親へ通知
+  userLocation?: { lat: number; lng: number }; // 授与式の「参拝の証/遥拝の証」ラベル分岐用
+  onOpenGoshuinBook?: () => void; // 授与式からマイページの御朱印帳へ
 }
 
 // タスク達成時に「楽しみ方」へ追加されるテキスト（神がUGCで成長する）
@@ -41,6 +44,12 @@ function enjoymentForTask(task: GodTask, place: string): string | null {
     case 'buy': return `買物メモ：${place}で良い品が見つかった。`;
     default: return null;
   }
+}
+
+/** 日課（本日の御用）の永続キー。課題タスクの id は issues 配列の添字由来（issue-0…）で、
+ *  removeIssue により添字が繰り上がるとズレるため、課題タスクだけテキストに紐づける。 */
+function dailyTaskKey(t: Pick<GodTask, 'id' | 'issueRef'>): string {
+  return t.issueRef ? `issue:${t.issueRef.issueText}` : t.id;
 }
 
 function resolveAgent(spot: Spot): Agent {
@@ -72,6 +81,8 @@ export default function SpotDetail({
   onGoShuinGranted,
   activeChallenge,
   onAdvanceChallenge,
+  userLocation,
+  onOpenGoshuinBook,
 }: SpotDetailProps) {
   const [tab, setTab] = useState<'chat' | 'requests' | 'photos' | 'leaderboard'>('chat');
   const [agent] = useState<Agent>(() => resolveAgent(spot));
@@ -79,8 +90,20 @@ export default function SpotDetail({
   // UGCで変化する状態（写真・楽しみ方）は db から都度読む
   const [photos, setPhotos] = useState<string[]>(() => db.getSpotPhotos(spot.id));
   const [enjoyments, setEnjoyments] = useState<string[]>(spot.enjoyments ?? []);
-  const [doneTasks, setDoneTasks] = useState<Record<string, boolean>>({});
+  // 本日すでに果たした御用を復元して初期化（SpotDetail は親から key={spot.id} 付きで
+  // マウントされるため、スポットが変われば初期化し直される）。
+  // 以前は React state のみで、再オープンするたび同じ依頼で徳を稼げた。
+  // 日付つきで永続化し「御用は1日1回の日課（翌日に復活）」へ変える。
+  const [doneTasks, setDoneTasks] = useState<Record<string, boolean>>(() => {
+    const restored: Record<string, boolean> = {};
+    for (const t of buildSpotTasks(spot)) {
+      if (db.isTaskDoneToday(spot.id, dailyTaskKey(t))) restored[t.id] = true;
+    }
+    return restored;
+  });
   const [toast, setToast] = useState<string | null>(null);
+  // 御朱印の授与式（このスポットで初めて神と語らった山場の演出）
+  const [goshuinCelebrate, setGoshuinCelebrate] = useState<{ isNear: boolean } | null>(null);
   const [ugcTick, setUgcTick] = useState(0); // 口コミいいね後の再読込
   const [postingTask, setPostingTask] = useState<GodTask | null>(null); // 投稿モーダル
   const [postText, setPostText] = useState('');
@@ -139,6 +162,12 @@ export default function SpotDetail({
     setTimeout(() => setToast(null), 1800);
   };
 
+  /** タスク達成を確定（state＋日付つき永続化） */
+  const markDone = (task: Pick<GodTask, 'id' | 'issueRef'>) => {
+    db.markTaskDoneToday(spot.id, dailyTaskKey(task));
+    setDoneTasks((prev) => ({ ...prev, [task.id]: true }));
+  };
+
   // ── 写真：投稿 / 却下 ──
   // ファイル選択ダイアログ（端末カメラ/ライブラリ）を開く
   const handlePostPhoto = () => {
@@ -157,7 +186,7 @@ export default function SpotDetail({
       db.addSpotPhoto(currentUser.id, spot.id, url);
       db.recordTaskDone(currentUser.id, 'photo', spot.id, 30);
       setPhotos(db.getSpotPhotos(spot.id));
-      setDoneTasks((prev) => ({ ...prev, photo: true }));
+      markDone({ id: 'photo' });
       flashToast('📸 写真を奉納！ +30徳');
       onChanged?.();
     } catch {
@@ -178,7 +207,7 @@ export default function SpotDetail({
       db.setUserAvatar(currentUser.id, url);
       db.completeGodTask(currentUser.id, spot.id, TASK_CATALOG.avatar_photo.reward);
       db.recordTaskDone(currentUser.id, 'avatar_photo', spot.id, TASK_CATALOG.avatar_photo.reward);
-      setDoneTasks((prev) => ({ ...prev, avatar_photo: true }));
+      markDone({ id: 'avatar_photo' });
       flashToast('🤳 アバターを設定！ +徳');
       onChanged?.();
     } catch {
@@ -237,7 +266,7 @@ export default function SpotDetail({
       if (hasGoShuin(currentUser.id, spot.id)) {
         db.completeGodTask(currentUser.id, spot.id, task.reward);
         db.recordTaskDone(currentUser.id, task.type, spot.id, task.reward);
-        setDoneTasks((prev) => ({ ...prev, [task.id]: true }));
+        markDone(task);
         flashToast(`🔴 御朱印を授かっている！ +${task.reward}徳`);
         onChanged?.();
       } else {
@@ -263,7 +292,7 @@ export default function SpotDetail({
       // 共有 or コピー成功 → 達成として記録（徳付与は他タスクと同じく completeGodTask に一本化）
       db.completeGodTask(currentUser.id, spot.id, task.reward);
       db.recordTaskDone(currentUser.id, task.type, spot.id, task.reward);
-      setDoneTasks((prev) => ({ ...prev, [task.id]: true }));
+      markDone(task);
       flashToast(result === 'copied' ? `🔗 リンクをコピー！ +${task.reward}徳` : `📣 シェアしました！ +${task.reward}徳`);
       onChanged?.();
       return;
@@ -272,7 +301,7 @@ export default function SpotDetail({
       const released = db.resolveBonnou(currentUser.id);
       db.completeGodTask(currentUser.id, spot.id, task.reward);
       db.recordTaskDone(currentUser.id, task.type, spot.id, task.reward);
-      setDoneTasks((prev) => ({ ...prev, [task.id]: true }));
+      markDone(task);
       flashToast(released ? `${task.icon} 煩悩を一つ手放した！ +${task.reward}徳` : `${task.icon} 心を整えた！ +${task.reward}徳`);
       onChanged?.();
       return;
@@ -288,7 +317,7 @@ export default function SpotDetail({
       flashToast(`${task.icon} クエストを達成！ +${task.reward}徳`);
       onChanged?.();
     }
-    setDoneTasks((prev) => ({ ...prev, [task.id]: true }));
+    markDone(task);
   };
 
   // 投稿モーダルの送信（テキストまたは写真で投稿。タスク種別ごとに世界の値を調整する）
@@ -313,14 +342,20 @@ export default function SpotDetail({
       // 世界の値を直接調整：価値→enjoyments / 課題→issues に加算
       if ((t === 'value_ask' || t === 'discover') && text) db.addEnjoyment(spot.id, text);
       if (t === 'issue_ask' && text) db.addIssue(spot.id, text);
+      // 課題解決の報告：その課題を場から実際に取り除き、解決のしるしを価値に加える。
+      // 活気 = 価値 − 課題 なので、これで「課題−1・価値+1 = 活気+2」のループが閉じる。
+      if (t === 'resolveIssue' && postingTask.issueRef) {
+        db.removeIssue(spot.id, postingTask.issueRef.issueText);
+        db.addEnjoyment(spot.id, `みんなの手で「${postingTask.issueRef.issueText}」が解決された`);
+      }
       const grow = enjoymentForTask(postingTask, spot.name);
       if (grow) db.addEnjoyment(spot.id, grow);
       setEnjoyments(db.getSpot(spot.id)?.enjoyments ?? []);
     }
     db.recordTaskDone(currentUser.id, t, spot.id, postingTask.reward);
-    setDoneTasks((prev) => ({ ...prev, [postingTask.id]: true }));
+    markDone(postingTask);
     setUgcTick((t2) => t2 + 1);
-    flashToast(`${postingTask.icon} 達成しました！`);
+    flashToast(t === 'resolveIssue' ? '✨ 課題が動いた！場の活気+2' : `${postingTask.icon} 達成しました！`);
     onChanged?.();
     closePostModal();
   };
@@ -331,7 +366,7 @@ export default function SpotDetail({
       const reward = TASK_CATALOG.evaluate.reward;
       db.completeGodTask(currentUser.id, spot.id, reward);
       db.recordTaskDone(currentUser.id, 'evaluate', spot.id, reward);
-      setDoneTasks((prev) => ({ ...prev, evaluate: true }));
+      markDone({ id: 'evaluate' });
       flashToast(`⭐ 評価ありがとう！ +${reward}徳`);
       onChanged?.();
       setEvaluating(false);
@@ -368,8 +403,13 @@ export default function SpotDetail({
         agent.name
       );
       if (stamp) {
-        flashToast(`🔴 ${spot.name} の御朱印を授かった！`);
         onGoShuinGranted?.();
+        // 神の挨拶が画面に落ち着いてから授与式を始める。300m 以内なら参拝、遠隔なら遥拝
+        //（授与のゲートはしない＝GPS拒否でもコレクションできる。ラベルだけ分ける）。
+        const isNear = userLocation
+          ? distanceKm(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude) <= 0.3
+          : true;
+        setTimeout(() => setGoshuinCelebrate({ isNear }), 900);
       }
       // 御朱印のみクエストが進行中なら、御朱印取得済み（今授与 or 既取得）で自動的にステップ達成
       const pending = activeChallenge?.tasks.find((t) => t.type === 'goshuin' && t.spotId === spot.id);
@@ -580,7 +620,7 @@ export default function SpotDetail({
               <span className="text-2xl">{godEmoji}</span>
               {agent.name} からのクエスト
             </h3>
-            <p className="text-[13px] text-gray-400 mb-3">達成すると徳を授かり、この地の神が育っていく。</p>
+            <p className="text-[13px] text-gray-400 mb-3">御用は一日一度。達成すると徳を授かり、この地の神が育っていく。</p>
             <div className="space-y-4">
               {GOD_FUNCTIONS.map((fn) => {
                 const groupTasks = tasks.filter((t) => t.kind === fn.key);
@@ -606,14 +646,16 @@ export default function SpotDetail({
                               <h4 className={`text-[15px] font-black ${done ? 'text-gray-500' : 'text-gray-800'}`}>{task.title}</h4>
                               <span className={`text-xs font-black ${tone.text}`}>+{task.reward}徳</span>
                             </div>
-                            <p className="text-[13px] text-gray-500 leading-relaxed mt-0.5">{task.call?.(spot.name)}</p>
+                            <p className="text-[13px] text-gray-500 leading-relaxed mt-0.5">
+                              {done ? '今日の御用は果たした。また明日参られよ。' : task.call?.(spot.name)}
+                            </p>
                           </div>
                           <button
                             onClick={() => handleTask(task)}
                             disabled={done}
                             className={`self-center mr-2.5 flex-shrink-0 text-[13px] font-black px-3 py-1.5 rounded-full transition-all cursor-pointer ${done ? 'bg-gray-200 text-gray-400' : 'bg-shrine-red text-white hover:opacity-90 active:scale-95'}`}
                           >
-                            {done ? '達成済' : task.label}
+                            {done ? 'また明日' : task.label}
                           </button>
                         </div>
                       );
@@ -632,8 +674,8 @@ export default function SpotDetail({
               const isAgent = msg.sender === 'agent';
               return (
                 <div key={msg.id} className={`flex items-start gap-2 ${isAgent ? '' : 'flex-row-reverse'}`}>
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-base flex-shrink-0 border ${isAgent ? 'bg-amber-50 border-gold/30' : 'bg-sky-50 border-sky-200'}`}>
-                    {isAgent ? godEmoji : '🧑‍🚀'}
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-base flex-shrink-0 border overflow-hidden ${isAgent ? 'bg-amber-50 border-gold/30' : 'bg-sky-50 border-sky-200'}`}>
+                    {isAgent ? <YaorozuSpirit seed={spot.godName || spot.name} size={24} still /> : '🧑‍🚀'}
                   </div>
                   <div className="flex flex-col max-w-[78%]">
                     <span className={`text-[11px] text-gray-400 mb-0.5 flex items-center gap-1 ${isAgent ? 'text-left' : 'text-right flex-row-reverse'}`}>
@@ -651,7 +693,7 @@ export default function SpotDetail({
             })}
             {isLoading && (
               <div className="flex items-start gap-2">
-                <div className="w-7 h-7 rounded-full flex items-center justify-center text-base bg-amber-50 border border-gold/30 animate-pulse">{godEmoji}</div>
+                <div className="w-7 h-7 rounded-full flex items-center justify-center text-base bg-amber-50 border border-gold/30 animate-pulse overflow-hidden"><YaorozuSpirit seed={spot.godName || spot.name} size={24} still /></div>
                 <div className="bg-amber-50 border border-amber-200/50 px-3 py-2 rounded-2xl rounded-tl-none flex items-center gap-1 h-7">
                   <span className="w-1 h-1 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                   <span className="w-1 h-1 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -785,6 +827,50 @@ export default function SpotDetail({
       )}
 
       {/* トースト */}
+      {/* ── 御朱印の授与式（初回のみ。神の固有の姿＋朱印スタンプ） ── */}
+      {goshuinCelebrate && (
+        <div className="absolute inset-0 z-[3300] flex items-center justify-center p-6" onClick={() => setGoshuinCelebrate(null)}>
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative celebrate-pop w-full max-w-[300px] bg-white rounded-3xl shadow-2xl px-6 py-6 text-center" onClick={(e) => e.stopPropagation()}>
+            <p className="text-[11px] font-black tracking-[0.25em] text-rose-500">GOSHUIN GET!</p>
+            {/* 神の姿（名前から決定論的に生成される、この神だけの姿） */}
+            <div className="mt-2 flex justify-center">
+              <YaorozuSpirit seed={spot.godName || spot.name} size={92} />
+            </div>
+            {/* 朱印スタンプが押される */}
+            <div className="relative mx-auto mt-2 w-24 h-24 stamp-in">
+              <div className="absolute inset-0 rounded-full border-4 border-rose-600/80" />
+              <div className="absolute inset-1.5 rounded-full border-2 border-rose-600/40" />
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5">
+                <span className="text-2xl leading-none">{godEmoji}</span>
+                <span className="text-[8px] font-black text-rose-700 text-center leading-tight px-1.5" style={{ maxWidth: 80 }}>{agent.name}</span>
+              </div>
+            </div>
+            <h3 className="text-base font-black text-gray-900 mt-3 leading-snug">{spot.name}の御朱印を授かった</h3>
+            <p className={`inline-block text-[12px] font-black mt-1.5 px-2.5 py-0.5 rounded-full ${goshuinCelebrate.isNear ? 'bg-emerald-50 text-emerald-700' : 'bg-sky-50 text-sky-700'}`}>
+              {goshuinCelebrate.isNear ? '⛩️ 参拝の証' : '🌫️ 遥拝の証'}
+            </p>
+            <p className="text-[12px] text-gray-500 mt-2 leading-relaxed">御朱印帳にこの出会いが刻まれた。集めるほど旅の物語が増えていく。</p>
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={() => setGoshuinCelebrate(null)}
+                className="flex-1 bg-gray-100 text-gray-600 text-[14px] font-black py-3 rounded-full hover:bg-gray-200 cursor-pointer"
+              >
+                閉じる
+              </button>
+              {onOpenGoshuinBook && (
+                <button
+                  onClick={() => { setGoshuinCelebrate(null); onOpenGoshuinBook(); }}
+                  className="flex-1 bg-shrine-red text-white text-[14px] font-black py-3 rounded-full hover:opacity-90 cursor-pointer"
+                >
+                  御朱印帳を見る
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {toast && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[3100] bg-gray-900 text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-lg animate-in">
           {toast}

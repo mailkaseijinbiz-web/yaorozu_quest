@@ -1,11 +1,25 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { MapPin, Trophy, Flag, Clock, X, Check } from 'lucide-react';
-import { User, db } from '../lib/db';
+import { MapPin, Trophy, Flag, Clock, X, Check, Hourglass } from 'lucide-react';
+import { User, db, QUEST_TTL_MS, StreakInfo } from '../lib/db';
 import { difficultyLabel, Challenge } from '../data/challenges';
 import { getLevelInfo } from '../data/levels';
 import { distanceKm } from '../lib/geo';
+
+/** 未参加クエストの残り寿命ラベル（期限切れ・createdAt 無しの旧データは null） */
+function ttlLabel(createdAt: string | undefined, now: number): { text: string; urgent: boolean } | null {
+  if (!createdAt) return null;
+  const remaining = new Date(createdAt).getTime() + QUEST_TTL_MS - now;
+  if (remaining <= 0) return null;
+  const hours = Math.floor(remaining / 3_600_000);
+  // 期限切れ直前でも「残り0分」にしない（最小表示は残り1分）
+  const minutes = Math.max(1, Math.ceil((remaining % 3_600_000) / 60_000));
+  return {
+    text: hours >= 1 ? `残り${hours}時間` : `残り${minutes}分`,
+    urgent: remaining < 2 * 3_600_000,
+  };
+}
 
 interface HomeTabProps {
   currentUser: User;
@@ -28,6 +42,23 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
   // 最初は5個。「もっと見る」で +5
   const [visibleCount, setVisibleCount] = useState(5);
   useEffect(() => { setVisibleCount(5); }, [filter]);
+
+  // 刻限チップ用の現在時刻（カードごとではなくタブで1本だけ更新）
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // 参拝ストリーク（日参）。徳を得る行動のたびに 'yaorozu:activity' が飛ぶので購読して即時更新
+  const [streak, setStreak] = useState<StreakInfo | null>(null);
+  useEffect(() => {
+    if (!mounted) return;
+    const update = () => setStreak(db.getStreakInfo());
+    update();
+    window.addEventListener('yaorozu:activity', update);
+    return () => window.removeEventListener('yaorozu:activity', update);
+  }, [mounted]);
 
   const progress = db.getChallengeProgress();
   const userLevel = getLevelInfo(currentUser.totalToku).current.level;
@@ -81,6 +112,20 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
           <span className="text-shrine-red">YAOROZU</span>
           <span className="text-gray-900"> QUEST</span>
         </h1>
+
+        {/* 参拝ストリーク（日参）。今日まだ徳を積んでいない日は灰色で誘う */}
+        {mounted && streak && streak.current > 0 && (
+          <div
+            className={`mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-[12px] font-black ${
+              streak.todayDone
+                ? 'bg-orange-50 border-orange-200 text-orange-600'
+                : 'bg-gray-100 border-gray-200 text-gray-400'
+            }`}
+          >
+            <span className={streak.todayDone ? '' : 'grayscale opacity-60'}>🔥</span>
+            {streak.todayDone ? `日参 ${streak.current}日目` : `日参 ${streak.current}日 — 今日の参拝はまだ`}
+          </div>
+        )}
       </div>
 
       {/* ── 近くのヤオロズクエスト（チャレンジ） ── */}
@@ -138,6 +183,8 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
 
             const total = ch.tasks.length;
             const doneN = (progress.done[ch.id] || []).length;
+            // 縁の刻限：未参加の生成クエストだけに残り寿命を出す（参加すれば恒久保持）
+            const ttl = !active && !completed && doneN === 0 ? ttlLabel(ch.createdAt, nowTick) : null;
             // カードをタップするとモーダル（参加/終了ボタンはモーダル内）。
             return (
               <button
@@ -188,6 +235,16 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
                         <span className="tabular-nums">{distValue}</span>
                         <span className="text-[11px]">{distUnit}</span>
                       </span>
+                      {ttl && (
+                        <span
+                          className={`text-[11px] font-black flex items-center gap-0.5 px-1.5 py-0.5 rounded-full ${
+                            ttl.urgent ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-400'
+                          }`}
+                        >
+                          <Hourglass className="w-3 h-3" />
+                          {ttl.urgent ? `まもなく縁が切れる・${ttl.text}` : ttl.text}
+                        </span>
+                      )}
                     </div>
                     {/* 進捗インジケータ（ステップごとのドット） */}
                     <div className="flex items-center gap-1 mt-2">
@@ -267,12 +324,18 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
                     <X className="w-4 h-4" />チャレンジを終了する
                   </button>
                 ) : ok ? (
-                  <button
-                    onClick={() => { const id = confirmCh.id; setConfirmCh(null); onStartChallenge(id); }}
-                    className="w-full bg-shrine-red text-white text-base font-black py-3 rounded-xl hover:opacity-90 cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <Flag className="w-4 h-4" />このチャレンジに参加
-                  </button>
+                  <>
+                    {confirmCh.createdAt && (
+                      <p className="text-[11px] text-gray-400 mb-1.5">⏳ 参加すればこの縁は刻限から守られ、永く結ばれる</p>
+                    )}
+                    <p className="text-[11px] text-gray-400 mb-2">📯 参加すると、神からの新しいクエストの知らせを届けるため通知の許可を聞かれます</p>
+                    <button
+                      onClick={() => { const id = confirmCh.id; setConfirmCh(null); onStartChallenge(id); }}
+                      className="w-full bg-shrine-red text-white text-base font-black py-3 rounded-xl hover:opacity-90 cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <Flag className="w-4 h-4" />このチャレンジに参加
+                    </button>
+                  </>
                 ) : (
                   <div className="w-full bg-gray-100 text-gray-400 text-[13px] font-black py-3 rounded-xl flex items-center justify-center">🔒 Lv.{confirmCh.minLevel} 以上で参加可能</div>
                 )}
