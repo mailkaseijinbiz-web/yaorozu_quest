@@ -153,6 +153,7 @@ export default function MapTab({
   const [proofPhoto, setProofPhoto] = useState<string | null>(null);
   const [proofComment, setProofComment] = useState(''); // 証拠写真に添えるコメント
   const [uploadingProof, setUploadingProof] = useState(false);
+  const [proofError, setProofError] = useState<string | null>(null); // 写真の取り込み失敗メッセージ
   // 達成ビート（豆知識つき・手動で次へ）
   const [celebrate, setCelebrate] = useState<
     { title: string; icon: string; complete: boolean; trivia?: string; triviaCategory?: TriviaCategory } | null
@@ -191,11 +192,13 @@ export default function MapTab({
     e.target.value = '';
     if (!f) return;
     setUploadingProof(true);
+    setProofError(null);
     try {
       const url = await uploadImage(f, `challenge-${activeChallenge?.id ?? 'x'}`);
       setProofPhoto(url);
     } catch {
       setProofPhoto(null);
+      setProofError('写真の読み込みに失敗しました。もう一度撮影・選択してください。');
     } finally {
       setUploadingProof(false);
     }
@@ -648,7 +651,7 @@ export default function MapTab({
                   <button
                     onClick={() => {
                       if (tooFar) { setFarNotice(true); return; }
-                      setProofStep(nextStep); setProofPhoto(null);
+                      setProofStep(nextStep); setProofPhoto(null); setProofError(null);
                     }}
                     className={`w-full text-[15px] font-black py-3 rounded-full transition-all cursor-pointer flex items-center justify-center gap-2 ${
                       tooFar ? 'bg-gray-200 text-gray-400' : 'bg-[#2563eb] text-white hover:opacity-90 active:scale-[0.99]'
@@ -734,7 +737,7 @@ export default function MapTab({
 
       {/* 証拠写真モーダル（この目的地を達成するには写真が必要） */}
       {proofStep && (
-        <div className="absolute inset-0 z-[2000] bg-black/50 flex items-end" onClick={() => { setProofStep(null); setProofPhoto(null); setProofComment(''); }}>
+        <div className="absolute inset-0 z-[2000] bg-black/50 flex items-end" onClick={() => { setProofStep(null); setProofPhoto(null); setProofComment(''); setProofError(null); }}>
           <div className="w-full bg-white rounded-t-3xl p-4 pb-6 animate-in" onClick={(e) => e.stopPropagation()}>
             <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-3" />
             <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5"><Camera className="w-4 h-4 text-[#2563eb]" />証拠写真を撮影</h3>
@@ -751,6 +754,10 @@ export default function MapTab({
               )}
             </div>
 
+            {proofError && !uploadingProof && (
+              <p className="mt-2 text-center text-[12px] font-black text-rose-500">{proofError}</p>
+            )}
+
             <label className={`mt-3 w-full flex items-center justify-center gap-1.5 bg-gray-100 text-gray-700 text-sm font-black py-2.5 rounded-xl transition-all ${uploadingProof ? 'opacity-50 pointer-events-none' : 'cursor-pointer hover:bg-gray-200'}`}>
               <Camera className="w-4 h-4" />{proofPhoto ? '撮り直す' : '写真を撮影 / 選択'}
               <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickProof} disabled={uploadingProof} />
@@ -766,7 +773,7 @@ export default function MapTab({
             />
 
             <div className="flex gap-2 mt-2">
-              <button onClick={() => { setProofStep(null); setProofPhoto(null); setProofComment(''); }} className="flex-1 bg-gray-100 text-gray-500 text-sm font-black py-2.5 rounded-xl cursor-pointer">やめる</button>
+              <button onClick={() => { setProofStep(null); setProofPhoto(null); setProofComment(''); setProofError(null); }} className="flex-1 bg-gray-100 text-gray-500 text-sm font-black py-2.5 rounded-xl cursor-pointer">やめる</button>
               <button onClick={confirmProof} disabled={!proofPhoto} className="flex-1 bg-[#2563eb] text-white text-sm font-black py-2.5 rounded-xl disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5">
                 <Check className="w-4 h-4" />この写真で達成
               </button>

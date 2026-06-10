@@ -746,7 +746,9 @@ export default function HomePage() {
                     if (!activeChallengeId || !currentUser) return;
                     const ch = db.getQuest(activeChallengeId);
                     if (!ch) return;
-                    if (photo) db.saveChallengePhoto(activeChallengeId, stepId, photo);
+                    if (photo && !db.saveChallengePhoto(activeChallengeId, stepId, photo)) {
+                      alert('端末の保存容量が一杯のため、証拠写真を保存できませんでした。達成は記録されます。');
+                    }
                     // 参加モーダルで約束した「+◯徳」をそのまま払う（未指定タスクは既定の20徳）
                     const task = ch.tasks.find((t) => t.id === stepId);
                     db.completeChallengeStep(currentUser.id, activeChallengeId, stepId, ch.tasks.length, task?.reward);
@@ -1180,7 +1182,9 @@ export default function HomePage() {
               if (!activeChallengeId || !currentUser) return;
               const ch = db.getQuest(activeChallengeId);
               if (!ch) return;
-              if (photo) db.saveChallengePhoto(activeChallengeId, stepId, photo);
+              if (photo && !db.saveChallengePhoto(activeChallengeId, stepId, photo)) {
+                alert('端末の保存容量が一杯のため、証拠写真を保存できませんでした。達成は記録されます。');
+              }
               // 参加モーダルで約束した「+◯徳」をそのまま払う（未指定タスクは既定の20徳）
               const task = ch.tasks.find((t) => t.id === stepId);
               db.completeChallengeStep(currentUser.id, activeChallengeId, stepId, ch.tasks.length, task?.reward);
