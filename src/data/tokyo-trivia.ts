@@ -9,6 +9,9 @@
 // 多軸での検索・絞り込みができる。
 // -----------------------------------------------------------------------------
 
+import { distanceKm } from '../lib/geo';
+import type { TriviaCategory } from './tasks';
+
 /** エリア軸: 東京の街・地域単位のタグ */
 export type TriviaArea =
   | '浅草'
@@ -20,7 +23,8 @@ export type TriviaArea =
   | '上野'
   | '麻布・六本木'
   | '銀座'
-  | '築地・月島';
+  | '築地・月島'
+  | '神田・お茶の水';
 
 /** テーマ軸: 情報源で語られる視点・切り口のタグ */
 export type TriviaTheme =
@@ -261,6 +265,156 @@ export const TOKYO_TRIVIA: Trivia[] = [
     sources: [TRIVIA_SOURCES.さんたつ, TRIVIA_SOURCES.note街歩きタグ],
   },
   {
+    id: 'trivia-yanaka-teramachi',
+    title: '谷中が寺町になったのは、明暦の大火後の幕府の都市計画',
+    body: '谷中が日本有数の寺町になったのは江戸幕府の政策ゆえ。明暦の大火（1657年）の後、防災と寛永寺の防衛を兼ねて多くの寺院がこの台地へ移転させられ、今も約70の寺が密集している。',
+    area: '谷根千',
+    themes: ['歴史', '路地裏', '建築・遺構'],
+    landmark: '谷中の寺町通り',
+    latitude: 35.7252,
+    longitude: 139.7672,
+    walkTips: [
+      '寺の門前の由緒書きから「移転」「明暦」の文字を探す',
+      '塀越しに連なる本堂の屋根を数えて、寺町の密度を体感する',
+    ],
+    sources: [TRIVIA_SOURCES['地形・歴史系サイト'], TRIVIA_SOURCES.さんたつ],
+  },
+  {
+    id: 'trivia-kagurazaka-name',
+    title: '「神楽坂」の名は、坂に響いた祭礼の神楽の音から',
+    body: '神楽坂の名は、坂の途中にあった八幡宮の御旅所で祭礼のたびに神楽を奏で、その音が坂じゅうに響いたことに由来すると伝わる。坂の名がそのまま街の名になった珍しい例。',
+    area: '神楽坂',
+    themes: ['地名の由来', '坂道', '歴史'],
+    landmark: '神楽坂下交差点',
+    latitude: 35.7019,
+    longitude: 139.7404,
+    walkTips: [
+      '坂下の標柱で「神楽坂」の由来書きを読む',
+      '坂を登りながら、神楽の音がどこまで届いたか想像してみる',
+    ],
+    sources: [TRIVIA_SOURCES.さんたつ, TRIVIA_SOURCES.自治体ウォーキングマップ],
+  },
+  {
+    id: 'trivia-kagurazaka-crank',
+    title: '神楽坂のクランク路地は、花街の心遣いが残した形',
+    body: '神楽坂の路地には、わざと直角に折れ曲がる「クランク」が多い。城下町の防衛の意図に加え、花街で客同士が正面から鉢合わせしないようにという配慮の名残とも言われる。',
+    area: '神楽坂',
+    themes: ['路地裏', '歴史', '建築・遺構'],
+    landmark: '兵庫横丁・かくれんぼ横丁',
+    latitude: 35.7022,
+    longitude: 139.7396,
+    walkTips: [
+      '兵庫横丁で直角に折れる石畳の角を探す',
+      '黒塀の路地で、先が見通せない曲がりの効き目を体感する',
+    ],
+    sources: [TRIVIA_SOURCES.note街歩きタグ, TRIVIA_SOURCES.さんたつ],
+  },
+  {
+    id: 'trivia-ochanomizu-sendaibori',
+    title: 'お茶の水の深い谷は人工の運河、別名「仙台堀」',
+    body: 'お茶の水駅前を流れる神田川の深い谷は自然の谷ではない。江戸初期に本郷台地を人工的に掘り割って通した運河で、伊達政宗率いる仙台藩が工事を担ったため「仙台堀」とも呼ばれる。',
+    area: '神田・お茶の水',
+    themes: ['地形・スリバチ', '歴史', '建築・遺構'],
+    landmark: '聖橋',
+    latitude: 35.6997,
+    longitude: 139.7656,
+    walkTips: [
+      '聖橋の上から谷を見下ろし、人力で掘った深さを実感する',
+      '両岸の崖の高さを見比べて、台地が切り分けられた跡を読む',
+    ],
+    sources: [TRIVIA_SOURCES['地形・歴史系サイト'], TRIVIA_SOURCES.さんたつ],
+  },
+  {
+    id: 'trivia-ochanomizu-name',
+    title: '「御茶ノ水」は、将軍に献上したお茶の水が湧いた地',
+    body: '徳川家康が江戸に入った頃、神田明神近くの高林寺の境内から湧く水で点てた茶をたいそう気に入り、毎日献上させたことから「お茶の水」と呼ばれるようになったと伝わる。',
+    area: '神田・お茶の水',
+    themes: ['地名の由来', '歴史'],
+    landmark: '御茶ノ水駅',
+    latitude: 35.6993,
+    longitude: 139.7651,
+    walkTips: [
+      '駅周辺で「お茶の水」由来の碑や説明板を探す',
+      '台地の縁の段差を観察し、湧水が出そうな地形を読む',
+    ],
+    sources: [TRIVIA_SOURCES.さんたつ, TRIVIA_SOURCES.自治体ウォーキングマップ],
+  },
+  {
+    id: 'trivia-kanda-myojin',
+    title: '神田明神は江戸総鎮守、平将門を裏鬼門に祀る',
+    body: '江戸総鎮守の神田明神は、徳川家康が関ヶ原の戦いの前に戦勝祈願し勝利したことから徳川家に篤く崇敬された。祭神の平将門は、江戸を守る神として城の裏鬼門の方角に祀られている。',
+    area: '神田・お茶の水',
+    themes: ['歴史', '建築・遺構', '地名の由来'],
+    landmark: '神田明神',
+    latitude: 35.7019,
+    longitude: 139.7679,
+    walkTips: [
+      '随神門の極彩色の彫刻を見上げて意匠を観察する',
+      '境内の高さから、湯島の台地の縁に建つ立地を体感する',
+    ],
+    sources: [TRIVIA_SOURCES['地形・歴史系サイト'], TRIVIA_SOURCES.さんたつ],
+  },
+  {
+    id: 'trivia-roppongi-name',
+    title: '「六本木」の由来は6本の大木か、「木」の付く6大名か',
+    body: '六本木の名には、かつて6本の大木（松など）があったという説と、青木・一柳・上杉・片桐・朽木・脇坂という「木」の字を名に持つ6家の大名屋敷が集まっていたという説がある。',
+    area: '麻布・六本木',
+    themes: ['地名の由来', '歴史'],
+    landmark: '六本木交差点',
+    latitude: 35.6627,
+    longitude: 139.7315,
+    walkTips: [
+      '街の中で「木」にちなむ地名・坂名・店名を探してみる',
+      '大名屋敷の名残である広い区画や長い塀の跡を観察する',
+    ],
+    sources: [TRIVIA_SOURCES.note街歩きタグ, TRIVIA_SOURCES['地形・歴史系サイト']],
+  },
+  {
+    id: 'trivia-azabudai-gazenbo',
+    title: '麻布台ヒルズの足元には「我善坊谷」という谷底の街があった',
+    body: '麻布台ヒルズが建つ一帯は、かつて「我善坊谷（がぜんぼうだに）」と呼ばれた深い谷底の街。すり鉢の底のような地形に木造住宅と袋小路がひしめく、江戸から続く谷の暮らしがあった。',
+    area: '麻布・六本木',
+    themes: ['地形・スリバチ', '歴史', '地名の由来'],
+    landmark: '麻布台ヒルズ',
+    latitude: 35.6601,
+    longitude: 139.7448,
+    walkTips: [
+      '麻布台ヒルズの足元で、周囲の台地との高低差を見上げる',
+      '谷へ下る坂の急さから、すり鉢地形の深さを体感する',
+    ],
+    sources: [TRIVIA_SOURCES['地形・歴史系サイト'], TRIVIA_SOURCES.note街歩きタグ],
+  },
+  {
+    id: 'trivia-tsukiji-name',
+    title: '築地とは文字どおり「地を築いた」埋立の地',
+    body: '築地は明暦の大火（1657年）で焼失した浅草御坊（現・築地本願寺）を再建するため、幕府が隅田川の河口を埋め立てて造った土地。「地を築く」という地名がその成り立ちを今に伝える。',
+    area: '築地・月島',
+    themes: ['地名の由来', '歴史', '建築・遺構'],
+    landmark: '築地本願寺',
+    latitude: 35.6655,
+    longitude: 139.7707,
+    walkTips: [
+      '築地本願寺の古代インド様式の石造伽藍を正面から見上げる',
+      '平坦でまっすぐな道筋に、埋立地ならではの計画性を読む',
+    ],
+    sources: [TRIVIA_SOURCES.さんたつ, TRIVIA_SOURCES.自治体ウォーキングマップ],
+  },
+  {
+    id: 'trivia-tsukuda-sumiyoshi',
+    title: '佃島は大阪の漁師が築いた島、佃煮と住吉神社が残る',
+    body: '佃島は、徳川家康が摂津国佃村（現・大阪市）の漁師たちを江戸へ呼び寄せ、漁業特権を与えて埋め立てさせた人工島。彼らの保存食が「佃煮」の始まりで、故郷から分霊した住吉神社が島を見守る。',
+    area: '築地・月島',
+    themes: ['歴史', '地名の由来', '路地裏'],
+    landmark: '住吉神社（佃）',
+    latitude: 35.6677,
+    longitude: 139.7852,
+    walkTips: [
+      '住吉神社の鳥居に掲げられた陶製の扁額を見上げる',
+      '路地の奥に残る船溜まりと赤い佃小橋を探す',
+    ],
+    sources: [TRIVIA_SOURCES.さんたつ, TRIVIA_SOURCES.note街歩きタグ],
+  },
+  {
     id: 'trivia-akasaka-hikawa',
     title: '赤坂氷川神社の周辺は、台地と谷が入り組む大名屋敷の跡',
     body: '赤坂・六本木一帯はかつて大名屋敷が並ぶ高台で、その縁を縫うように谷と坂が走る。赤坂氷川神社の周囲には、転坂（ころびざか）・三分坂（さんぷんざか）など由来を持つ坂が点在し、勝海舟邸跡など幕末史の舞台も近い。',
@@ -281,6 +435,18 @@ export const TOKYO_TRIVIA: Trivia[] = [
 // 検索・絞り込みヘルパー
 // -----------------------------------------------------------------------------
 
+/** テーマ軸を Task.triviaCategory（地形/歴史/建築/道路）へ寄せる */
+export const THEME_TO_CATEGORY: Record<TriviaTheme, TriviaCategory> = {
+  '地形・スリバチ': '地形',
+  '暗渠・川跡': '地形',
+  坂道: '道路',
+  歴史: '歴史',
+  路地裏: '道路',
+  '地名の由来': '歴史',
+  '建築・遺構': '建築',
+  ウォーキングコース: '道路',
+};
+
 /** エリアで絞り込む */
 export function getTriviaByArea(area: TriviaArea): Trivia[] {
   return TOKYO_TRIVIA.filter((t) => t.area === area);
@@ -299,6 +465,20 @@ export function getTriviaByAreaAndTheme(area: TriviaArea, theme: TriviaTheme): T
 /** 情報源の種別で絞り込む */
 export function getTriviaBySourceType(type: TriviaSourceType): Trivia[] {
   return TOKYO_TRIVIA.filter((t) => t.sources.some((s) => s.type === type));
+}
+
+/**
+ * 座標近傍の豆知識を距離昇順で返す。
+ * クエスト生成（実在素材のプロンプト注入）・蘊蓄バックフィル・道中案内の共通素材取得。
+ */
+export function getTriviaNear(lat: number, lng: number, radiusKm = 5, limit = 3): Trivia[] {
+  return TOKYO_TRIVIA
+    .filter((t) => t.latitude != null && t.longitude != null)
+    .map((t) => ({ t, d: distanceKm(lat, lng, t.latitude!, t.longitude!) }))
+    .filter((x) => x.d <= radiusKm)
+    .sort((a, b) => a.d - b.d)
+    .slice(0, limit)
+    .map((x) => x.t);
 }
 
 /** タイトル・本文・ランドマークを横断するキーワード検索 */
