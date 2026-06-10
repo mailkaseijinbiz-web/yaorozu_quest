@@ -18,19 +18,22 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
 
-// 1画面の表示数をズームに応じて制御（広域では少なく、拡大で増やす）
+// 1画面の表示数をズームに応じて制御。
+// 街区スケール（z≥15）では画面内の寺社をすべて表示する（神社・寺はすべて地図に出す方針）。
+// 広域では描画負荷を抑えるため上限を設ける（ズームすればすべて見られる）。
 function maxMarkersForZoom(zoom: number): number {
-  if (zoom <= 12) return 12;
-  if (zoom <= 13) return 20;
-  if (zoom <= 14) return 30;
-  if (zoom <= 15) return 45;
-  return 60;
+  if (zoom <= 11) return 80;
+  if (zoom <= 12) return 150;
+  if (zoom <= 13) return 350;
+  if (zoom <= 14) return 700;
+  return Infinity;
 }
 
 interface LeafletMapProps {
   spots: Spot[];
   activeSpot: Spot | null;
   onSelectSpot: (spot: Spot) => void;
+  onOpenDetail?: (spot: Spot) => void; // 選択中の場をさらにタップすると詳細を開く
   userLocation: { lat: number; lng: number };
   setUserLocation: (loc: { lat: number; lng: number }) => void;
   ugcCounts: { [spotId: string]: number };
@@ -49,6 +52,7 @@ export default function LeafletMap({
   spots,
   activeSpot,
   onSelectSpot,
+  onOpenDetail,
   userLocation,
   setUserLocation,
   ugcCounts,
@@ -75,6 +79,9 @@ export default function LeafletMap({
   // onMapMove を ref 化してクロージャ内から最新コールバックを呼べるようにする
   const onMapMoveRef = useRef(onMapMove);
   onMapMoveRef.current = onMapMove;
+  // 選択中の場を再タップしたときの詳細表示コールバック（マーカー生成クロージャから最新を呼ぶ）
+  const onOpenDetailRef = useRef(onOpenDetail);
+  onOpenDetailRef.current = onOpenDetail;
   // 自動センタリング判定用：前回パンした現在地（初回取得・ワープ判定に使う）
   const lastPanLocRef = useRef<{ lat: number; lng: number } | null>(null);
 
@@ -98,8 +105,11 @@ export default function LeafletMap({
     // 拡大縮小ボタンは非表示（zoomControl:false のまま）
 
     mapRef.current = map;
+    // 表示スポットの再計算は移動・ズームの「完了時」に行う。
+    // 多数の寺社マーカーを毎フレーム作り直すとドラッグがカクつくため、moveend に集約する
+    // （ドラッグ中は Leaflet が既存マーカーを座標追従で滑らかに動かす）。
     const bump = () => setMapVersion((v) => v + 1);
-    map.on('move', bump);
+    map.on('moveend', bump);
     map.on('zoomend', bump);
     setMapVersion((v) => v + 1);
 
@@ -313,6 +323,11 @@ export default function LeafletMap({
       zIndexOffset: 1400,
     }).addTo(map);
     map.flyTo([searchPin.lat, searchPin.lng], Math.max(map.getZoom(), 15), { duration: 0.8 });
+    // 検索した場所（例: 善光寺）には、まだ場（神・クエスト）が生成されていないことが多い。
+    // 地図移動の moveend は 60 秒スロットルされ、直前に動かしていると検索しても生成が走らず、
+    // 場のマーカーがいつまでも出ない。検索時は moveend のスロットルに頼らず、検索地点で
+    // 場の生成を直接促す（下流の generateSpotNearby が 5分/500m で重複生成を抑止する）。
+    onMapMoveRef.current?.({ lat: searchPin.lat, lng: searchPin.lng });
     // token が変わった時だけ再フォーカス（同じ場所の再検索でも飛べるように）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchPin?.token]);
@@ -337,13 +352,14 @@ export default function LeafletMap({
     // クエストモード（目的地あり）では青のフキダシを出さず、赤い目的地に集中させる
     const questMode = goalLat != null && goalLng != null;
 
-    // フキダシ表示候補（優先度順：選択中 > 最寄り）。
-    // 画面上でフキダシ同士が被る場合は、優先度の高いひとつだけ表示する。
+    // フキダシは「選択中の場」に対して出す。選択中の場があるときはその場だけに表示し、
+    // 選択していない場にフキダシが出る不具合を防ぐ。無選択のときのみ最寄りの場に出す。
     const bubbleIds = new Set<string>();
     if (!questMode) {
       const candidateIds: string[] = [];
-      if (activeSpot && visibleSpots.some((s) => s.id === activeSpot.id)) candidateIds.push(activeSpot.id);
-      if (nearestId && nearestId !== activeSpot?.id) candidateIds.push(nearestId);
+      const activeVisible = !!activeSpot && visibleSpots.some((s) => s.id === activeSpot.id);
+      if (activeVisible) candidateIds.push(activeSpot!.id);
+      else if (nearestId) candidateIds.push(nearestId);
 
       const acceptedPts: { x: number; y: number }[] = [];
       candidateIds.forEach((id) => {
@@ -363,7 +379,9 @@ export default function LeafletMap({
 
     visibleSpots.forEach((spot) => {
       const isActive = activeSpot?.id === spot.id;
-      const iconEmoji = spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏');
+      // 種別アイコン：神社は ⛩️ / 寺院は 🙏 で必ず分ける（地図上で一目で見分けられるように）。
+      const catEmoji = spot.category === '神社' ? '⛩️' : '🙏';
+      const iconEmoji = spot.godEmoji || catEmoji;
       // 現在地マーカーとフキダシ本体が画面上で重なるスポットは、フキダシを出さずドット表示にする
       // （フキダシが現在地に被るのを防ぐ）。フキダシ本体は地点の上方に開くため、現在地が
       // 地点の真上〜同位置（横≲116px・縦 spotPt.y-82〜+2）にあるときを「被り」とみなす。
@@ -384,11 +402,25 @@ export default function LeafletMap({
       }
       const borderCls = isActive ? 'border-[#2563eb]' : 'border-[#2563eb]/40';
 
-      const spotHtml = isActive
+      const activeCircleHtml = `
+          <div style="width:40px;height:40px;border-radius:9999px;background:#2563eb;border:3px solid #fff;box-shadow:0 2px 10px rgba(37,99,235,.55);display:flex;align-items:center;justify-content:center;font-size:21px;line-height:1;">${iconEmoji}</div>
+          <span class="map-spot-name map-spot-name-active" style="margin-top:3px;">${spot.name}</span>`;
+
+      const spotHtml = isActive && showBubble
         ? `
         <div class="relative flex flex-col items-center">
-          <div style="width:40px;height:40px;border-radius:9999px;background:#2563eb;border:3px solid #fff;box-shadow:0 2px 10px rgba(37,99,235,.55);display:flex;align-items:center;justify-content:center;font-size:21px;line-height:1;">${iconEmoji}</div>
-          <span class="map-spot-name map-spot-name-active" style="margin-top:3px;">${spot.name}</span>
+          <div class="relative flex items-start gap-1.5 rounded-2xl px-2.5 py-1.5 shadow-lg border-2 border-[#2563eb]" style="max-width:190px;background:#ffffff;">
+            <span style="font-size:15px;line-height:1.15;flex-shrink:0;">${iconEmoji}</span>
+            <span class="spot-voice text-[11px] font-bold leading-snug text-gray-800" data-spotid="${spot.id}" data-vi="${voiceIdx}" style="word-break:break-word;transition:opacity 0.3s ease;">${voice}</span>
+          </div>
+          <div class="border-r-2 border-b-2 border-[#2563eb] -mt-1.5 rotate-45" style="width:10px;height:10px;background:#ffffff;margin-bottom:6px;"></div>
+          ${activeCircleHtml}
+        </div>
+      `
+        : isActive
+        ? `
+        <div class="relative flex flex-col items-center">
+          ${activeCircleHtml}
         </div>
       `
         : showBubble
@@ -404,16 +436,18 @@ export default function LeafletMap({
       `
         : `
         <div class="relative flex flex-col items-center">
-          <div class="w-4 h-4 rounded-full bg-[#2563eb]/70 border-2 border-white shadow-sm"></div>
+          <div style="font-size:19px;line-height:1;filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.5));">${catEmoji}</div>
+          <span class="map-spot-name">${spot.name}</span>
         </div>
       `;
 
       const spotIcon = L.divIcon({
         html: spotHtml,
         className: 'custom-spot-icon',
-        iconSize: isActive ? [150, 64] : showBubble ? [210, 108] : [120, 30],
-        // アンカー（＝この場の地理座標）。選択中は青丸の中心、フキダシは上へ持ち上げてドットとの重なりを防ぐ
-        iconAnchor: isActive ? [75, 20] : showBubble ? [105, 60] : [60, 8],
+        iconSize: isActive && showBubble ? [210, 128] : isActive ? [150, 64] : showBubble ? [210, 108] : [140, 40],
+        // アンカー（＝この場の地理座標）。選択中は青丸の中心、フキダシは上へ持ち上げてドットとの重なりを防ぐ。
+        // 種別アイコン（⛩️/🙏）はその中心を地点に合わせ、名前キャプションは絵文字の下に出す。
+        iconAnchor: isActive && showBubble ? [105, 78] : isActive ? [75, 20] : showBubble ? [105, 60] : [70, 10],
       });
 
       const marker = L.marker([spot.latitude, spot.longitude], {
@@ -421,7 +455,10 @@ export default function LeafletMap({
       })
         .addTo(map)
         .on('click', () => {
-          onSelectSpot(spot);
+          // 未選択の場 → 選択。すでに選択中の場を再タップ → 詳細を開く。
+          // （activeSpot 変更時にマーカーは作り直されるため isActive は最新状態を反映する）
+          if (isActive) onOpenDetailRef.current?.(spot);
+          else onSelectSpot(spot);
         });
 
       markersRef.current[spot.id] = marker;

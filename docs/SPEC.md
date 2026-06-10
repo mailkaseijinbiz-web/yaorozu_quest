@@ -415,13 +415,15 @@ GPS生成スポットは `SPOT_TTL_MS = 30 * 24 * 60 * 60 * 1000`（30日）の 
 
 - タイル: CartoDB Voyager（`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png`, maxZoom=19）。attributionControl は無効。
 - **ユーザー位置マーカー**: シアンドット＋コンパス。zIndexOffset=1000。iOS は `webkitCompassHeading`、Android は `deviceorientation` の alpha から導出。取得不可なら activeSpot への bearing にフォールバック。iOS 13+ は権限タップ必須。
-- **スポットマーカー**: divIcon バブル。最寄り or 選択時に 🦊 神絵文字 + 30字に切り詰めた神の声を白バブルで表示（4.5秒間隔で回転、フェード）。それ以外は青ドット。
-- **マーカー間引き**: ズームに応じて表示数を制限。z≤12→12, z≤13→20, z≤14→30, z≤15→45, z>15→60。境界パディング 0.15（15%）。activeSpot は画面外でも常に含める。
+- **スポットマーカー**: divIcon バブル。フキダシは選択中の場に対して表示（青丸マーカーの上に開く）。無選択時のみ最寄りの場に表示。🦊 神絵文字 + 30字に切り詰めた神の声を白バブルで表示（4.5秒間隔で回転、フェード）。それ以外は**種別アイコン**（神社=⛩️ / 寺院=🙏）で表示し、地図上で寺社の種別を一目で見分けられる。種別アイコン・選択中の青丸の下には名前キャプション（`.map-spot-name`、白フチの Google Map ラベル風）を表示する。マーカーのタップは「未選択→選択（`onSelectSpot`）」、「選択中の場を再タップ→詳細を開く（`onOpenDetail`）」。
+- **マーカー間引き**: ズームに応じて表示数を制限。z≤11→80, z≤12→150, z≤13→350, z≤14→700, **z≥15→無制限（画面内の神社・寺をすべて表示）**。境界パディング 0.15（15%）。activeSpot は画面外でも常に含める。表示スポットの再計算は moveend/zoomend（ドラッグ完了時）に集約し、多数マーカーでもドラッグがカクつかないようにする。
+- **場所検索**: 検索バーは登録スポット（名前/神名/カテゴリ部分一致・近い順）と Nominatim ジオコーダ（450msデバウンス）を併用。任意の場所を選ぶと赤ピン（`searchPin`）を立てて `flyTo`。検索した場所にはまだ場が無いことが多いため、`onMapMove` を直接呼んで検索地点で場の生成を促す（moveend の60秒スロットルに依存しない／下流の `generateSpotNearby` が 5分・500m で重複生成を抑止）。
 - **ゴールマーカー**: activeChallenge があり未完ステップが残るとき青📸バブル。zIndexOffset=1500。クエスト開始時にゴールへ0.9秒で飛び、1.7秒停止後ユーザー位置へ0.9秒で戻る演出。
 - **チャレンジ導入（プロローグ）**: 初回入場時（introSeenId≠challenge.id かつ done.size===0）。Phase0（0.8秒遅延後）に説明を1字/38msでタイプ表示、Phase1（完了1.5秒後）に PROLOGUE カード（難易度/推定時間/タスク数）を表示し3秒で自動進行。導入中はヘッダー・フッター・地図ボタンを隠す。`localStorage['yaorozu_intro_seen']` に保存。
 - **チャレンジ進行**: 上部に青バナー「Challenge In Progress」。マルチステップなら精霊フォックス＋予報バブル（1字/30ms）。下部に次ウェイポイントカード（500m閾値）。500m以遠ならボタングレーアウト、タップで「📍 近づいてください」警告（2.8秒で自動消去）。距離表示の色: ≤50m=emerald, ≤300m=amber, それ以外=青。
 - **チャレンジ完了**: 「証拠写真」ボタン → file input（capture='environment'）→ プレビュー → `onAdvanceChallenge(stepId, photoUrl)`。全ステップ完了で celebrate モーダル（紙吹雪18片、バッジ、精霊バブル＋トリビア）。
 - **インタラクティブカード**: activeChallenge が無いとき、画面下部にユーザーレベルで参加可能な最寄り未制覇クエストを表示（completed除外、activeId除外、`userLevel >= minLevel`）。距離優先・レベル可否で並べ替え。クリックで `onStartChallenge`。創世主神社を `godSpot.godName` で表示。
+- **近くの場カード（スワイプ・カルーセル）**: クエスト未参加時に画面下部へ最寄り10件をカード表示。**指に追従する横スワイプ**で隣の場へ切替（`translateX` を touchmove で直接更新、touchend で閾値判定して隣カードへスナップ）。**右に次カードを約24px チラ見せ**して横にめくれることを示す（ビューポート幅 − PEEK=34px をカード幅に、カード間 GAP=10px）。タップで詳細（`onOpenDetail`）。スワイプ直後のタップは `swipedRef` で誤爆防止。
 - **精霊ガイドチャット（マップモード）**: 予報バブル右上のフォックスアイコンで開く。`buildGuideLog`（説明＋各ステップガイド再構成）+ 追加交換を表示。`POST /api/chat`、精霊名「道案内の精霊」、systemPrompt は200字以内推奨。
 - **TTSトグル**: 音量アイコンで切替。`localStorage['yaorozu_tts']`（'0'|'1'）。ON時は `/api/tts`（ElevenLabs）→ 失敗/鍵なしで Web Speech へフォールバック。
 - **地図再描画**: リサイズ/orientationchange/PWA復帰（pageshow）で `invalidateSize()`。`onMapMove` は60000ms（60秒）スロットルでアクティビティログ記録。
