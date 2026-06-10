@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { MapPin, Trophy, Flag, Clock, X, Check, Hourglass } from 'lucide-react';
 import { User, db, QUEST_TTL_MS, StreakInfo } from '../lib/db';
-import { difficultyLabel, Challenge } from '../data/challenges';
+import { difficultyLabel, terrainLabel, Challenge } from '../data/challenges';
 import { getLevelInfo } from '../data/levels';
 import { distanceKm } from '../lib/geo';
 
@@ -187,6 +187,8 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
         <div className="flex flex-col gap-3">
           {shown.map((ch) => {
             const diff = difficultyLabel(ch.difficulty);
+            const qSpot = ch.spotId ? db.getSpot(ch.spotId) : null; // 神名＋地形バッジ用
+            const ter = qSpot ? terrainLabel(qSpot.terrain) : null;
             const completed = progress.completed.includes(ch.id);
             const active = progress.activeId === ch.id; // 現在挑戦中
             const distToGoal = distanceKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng);
@@ -227,12 +229,9 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
                       )}
                       <h3 className={`text-base font-black truncate ${active ? 'text-white' : 'text-gray-900'}`}>{ch.title}</h3>
                     </div>
-                    {(() => {
-                      const godSpot = ch.spotId ? db.getSpot(ch.spotId) : null;
-                      return godSpot?.godName ? (
-                        <p className={`text-[11px] font-bold truncate mb-0.5 ${active ? 'text-white/70' : 'text-gray-400'}`}>{godSpot.godEmoji ? `${godSpot.godEmoji} ` : ''}by {godSpot.godName}</p>
-                      ) : null;
-                    })()}
+                    {qSpot?.godName ? (
+                      <p className={`text-[11px] font-bold truncate mb-0.5 ${active ? 'text-white/70' : 'text-gray-400'}`}>{qSpot.godEmoji ? `${qSpot.godEmoji} ` : ''}by {qSpot.godName}</p>
+                    ) : null}
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                       <span className={`text-[13px] font-black ${active ? 'text-white' : diff.text}`}>
                         {diff.stars} {diff.label}
@@ -248,6 +247,9 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
                         <span className="tabular-nums">{distValue}</span>
                         <span className="text-[11px]">{distUnit}</span>
                       </span>
+                      {ter && (
+                        <span className={`text-[12px] font-black px-1.5 py-0.5 rounded-full ${active ? 'bg-white/20 text-white' : ter.tone}`}>🥾 {ter.label}</span>
+                      )}
                       {ttl && (
                         <span
                           className={`text-[11px] font-black flex items-center gap-0.5 px-1.5 py-0.5 rounded-full ${
