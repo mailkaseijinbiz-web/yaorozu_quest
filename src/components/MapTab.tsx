@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Compass, ChevronRight, Flag, X, Camera, Check, MapPin, Clock, Navigation2, MessageCircle, Send, Search } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { Spot, User, db } from '../lib/db';
-import { uploadImage } from '../lib/upload';
+import { uploadImage, compressImage } from '../lib/upload';
 import { hasGoShuin } from '../lib/goshuin';
 import { distanceKm, bearingDeg } from '../lib/geo';
 import { getHeartVoices } from '../data/god-tasks';
@@ -149,12 +149,15 @@ export default function MapTab({
   // チャレンジ：証拠写真モーダル & 達成演出
   const [proofStep, setProofStep] = useState<ChallengeStep | null>(null);
   const [proofPhoto, setProofPhoto] = useState<string | null>(null);
+  // AIフィードバック用の軽量 dataURL。proofPhoto が Supabase の公開URLになっても
+  // vision モデルへ渡せるよう、端末で圧縮した小さいコピーを別に保持する。
+  const [proofVision, setProofVision] = useState<string | null>(null);
   const [proofComment, setProofComment] = useState(''); // 証拠写真に添えるコメント
   const [uploadingProof, setUploadingProof] = useState(false);
   const [proofError, setProofError] = useState<string | null>(null); // 写真の取り込み失敗メッセージ
-  // 達成ビート（豆知識つき・手動で次へ）
+  // 達成ビート（豆知識つき・手動で次へ）。feedback は写真へのAIのひとこと（非同期で追記）
   const [celebrate, setCelebrate] = useState<
-    { title: string; icon: string; complete: boolean; trivia?: string; triviaCategory?: TriviaCategory } | null
+    { title: string; icon: string; complete: boolean; trivia?: string; triviaCategory?: TriviaCategory; stepId?: string; feedback?: string } | null
   >(null);
   // 導入（プロローグ）を見せたチャレンジID。タブ切替でアンマウントされても消えないよう localStorage に永続化。
   const [introSeenId, setIntroSeenId] = useState<string | null>(() => {
@@ -191,9 +194,12 @@ export default function MapTab({
     if (!f) return;
     setUploadingProof(true);
     setProofError(null);
+    setProofVision(null);
     try {
       const url = await uploadImage(f, `challenge-${activeChallenge?.id ?? 'x'}`);
       setProofPhoto(url);
+      // vision 用の軽量コピー（失敗しても達成フローには影響させない）
+      compressImage(f, { maxDim: 640, quality: 0.7 }).then(setProofVision).catch(() => setProofVision(null));
     } catch {
       setProofPhoto(null);
       setProofError('写真の読み込みに失敗しました。もう一度撮影・選択してください。');
@@ -218,9 +224,33 @@ export default function MapTab({
       complete: willComplete,
       trivia: cleared.trivia,
       triviaCategory: cleared.triviaCategory,
+      stepId: cleared.id,
     });
+    // 写真の内容へのAIフィードバック（fire-and-forget）。届いたら達成ビートに追記する。
+    // 失敗・遅延は無言＝既存の演出のまま（graceful degradation）。
+    const vision = proofVision;
+    if (vision) {
+      const stepSpot = (cleared.spotId ? db.getSpot(cleared.spotId) : undefined)
+        ?? (activeChallenge.spotId ? db.getSpot(activeChallenge.spotId) : undefined);
+      fetch('/api/photo-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          photoDataUrl: vision,
+          context: { spotName: stepSpot?.name, taskTitle: cleared.title, taskAction: cleared.action, godName: stepSpot?.godName },
+        }),
+        signal: AbortSignal.timeout(12_000),
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          // ユーザーが先に「次へ」を押していたら破棄（stepId ガードで古い応答の混入も防ぐ）
+          if (d?.feedback) setCelebrate((prev) => (prev && prev.stepId === cleared.id ? { ...prev, feedback: d.feedback } : prev));
+        })
+        .catch(() => {});
+    }
     setProofStep(null);
     setProofPhoto(null);
+    setProofVision(null);
     setProofComment('');
     // 自動で閉じない（豆知識を読んでから手動で次へ）
   };
@@ -447,6 +477,8 @@ export default function MapTab({
           affiliates: [],
           userName: currentUser.displayName || '旅人',
           spot: { name: activeChallenge.title, category: 'クエスト', description: activeChallenge.description, enjoyments: [] },
+          // 現在地。サーバ側で「土地の実在豆知識」を引き、精霊が道中の土地の話をできるようにする
+          location: { lat: userLocation.lat, lng: userLocation.lng },
         }),
       });
       const data = await res.json();
@@ -873,6 +905,15 @@ export default function MapTab({
                   </div>
                 ) : (
                   <p className="text-[13px] text-gray-600 mt-0.5">{celebrate.complete ? 'みごと制覇じゃ。よく歩いたのう！' : 'よくやった。次へ進もうぞ。'}</p>
+                )}
+                {celebrate.feedback && (
+                  /* 奉納した写真の内容へのAIのひとこと（非同期で届いたら表示） */
+                  <div className="mt-2 text-left rounded-xl px-3 py-2 bg-amber-50 border border-amber-200 text-amber-800 celebrate-pop">
+                    <span className="inline-flex items-center gap-1.5 text-[13px] font-black">
+                      <span className="text-lg leading-none">📸</span>写真へのひとこと
+                    </span>
+                    <p className="mt-1 text-[13px] leading-relaxed">{celebrate.feedback}</p>
+                  </div>
                 )}
               </div>
             </div>

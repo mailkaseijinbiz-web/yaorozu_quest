@@ -97,7 +97,7 @@ async function enrichWithGemini(real: RealPlace, geminiKey: string): Promise<Gem
     godName: String(g.godName || `${real.name}の${persona.god}`).slice(0, 30),
     godEmoji: String(g.godEmoji || persona.emoji).slice(0, 2),
     godPersona: String(g.godPersona || `${real.name}に宿る${persona.god}。`).slice(0, 100),
-    godSystemPrompt: String(g.godSystemPrompt || `あなたは実在する「${real.name}」(${real.category})に宿る神霊です。この場所の魅力を伝えてください。返答は150字以内。`).slice(0, 300),
+    godSystemPrompt: String(g.godSystemPrompt || `あなたは実在する「${real.name}」(${real.category})に宿る神霊です。この場所の魅力を伝えてください。返答は200字程度。`).slice(0, 300),
     voiceTone: (VOICE_TONES as readonly string[]).includes(g.voiceTone) ? g.voiceTone : persona.tone,
     godRequests: Array.isArray(g.godRequests) && g.godRequests.length
       ? g.godRequests.slice(0, 5).map(String)
@@ -176,7 +176,7 @@ function templateFlavorFull(real: RealPlace): GeminiFlavor {
     godName,
     godEmoji: persona.emoji,
     godPersona: `${real.name}に宿る${persona.god}。実在するこの地を見守っている。`,
-    godSystemPrompt: `あなたは実在する「${real.name}」(${real.category})に宿る神霊「${godName}」です。${persona.tone}な口調で、この場所の魅力や歴史を訪れた人に伝えてください。返答は150字以内。`,
+    godSystemPrompt: `あなたは実在する「${real.name}」(${real.category})に宿る神霊「${godName}」です。${persona.tone}な口調で、この場所の魅力や歴史を訪れた人に伝えてください。返答は200字程度。`,
     voiceTone: persona.tone,
     godRequests: [`${persona.emoji} ${real.name}の今の様子を写真に撮ってほしいのじゃ`, 'この場の良いところを一つ教えてくれぬか'],
     haloColor: HALO_COLORS[real.osmId % HALO_COLORS.length],
