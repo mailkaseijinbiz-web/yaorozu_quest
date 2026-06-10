@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Camera, RefreshCw, Download, Share2, Sparkles, AlertTriangle, Check, Info } from 'lucide-react';
 import { Spot, Agent, User } from '../lib/db';
+import { shareToSns } from '../lib/share';
 import SpiritCanvas from './Spirit3D';
 
 interface ArTabProps {
@@ -30,6 +31,7 @@ export default function ArTab({
   const [showFlash, setShowFlash] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [shareSuccess, setShareSuccess] = useState(false);
+  const [shareNote, setShareNote] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -224,30 +226,33 @@ export default function ArTab({
   const handleShare = async () => {
     if (!capturedImage) return;
     setIsSharing(true);
-    
+    setShareNote(null);
+
     try {
-      // Simulated native share or Web Share API
-      if (navigator.share) {
-        // Fetch image blob to share
-        const res = await fetch(capturedImage);
-        const blob = await res.blob();
-        const file = new File([blob], 'yaorozu_god_ar.png', { type: 'image/png' });
-        
-        await navigator.share({
-          files: [file],
-          title: `八百万神霊AR: ${agent?.name}`,
-          text: `${activeSpot?.name}で神様をAR召喚しました！ #八百万クエスト #YaorozuQuest`,
-        });
+      // 共有は共通ヘルパー shareToSns に一本化（Web Share シート→未対応環境はリンクをコピー）。
+      // 画像（dataURL）を添付し、対応端末では神霊ARの一枚をそのまま共有できる。
+      const shareUrl = activeSpot
+        ? `${window.location.origin}/?spot=${activeSpot.id}`
+        : window.location.origin;
+      const result = await shareToSns({
+        title: `八百万神霊AR: ${agent?.name ?? ''}`,
+        text: `${activeSpot?.name}で神様をAR召喚しました！ #八百万クエスト #YaorozuQuest`,
+        url: shareUrl,
+        imageUrl: capturedImage,
+      });
+
+      if (result === 'shared' || result === 'copied') {
         setShareSuccess(true);
-      } else {
-        // Fallback for desktop browsers
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        setShareSuccess(true);
+        // デスクトップ等の未対応環境ではリンクをコピーした旨を伝える
+        setShareNote(result === 'copied' ? 'リンクをコピーしました。SNSアプリに貼り付けて投稿できます。' : null);
+        setTimeout(() => {
+          setShareSuccess(false);
+          setShareNote(null);
+        }, 3000);
+      } else if (result === 'unavailable') {
+        setShareNote('この環境では共有できませんでした。');
       }
-      
-      setTimeout(() => setShareSuccess(false), 3000);
-    } catch (err) {
-      console.error('Share error:', err);
+      // 'cancelled' は何も表示しない（ユーザーが共有シートを閉じただけ）
     } finally {
       setIsSharing(false);
     }
@@ -525,6 +530,10 @@ export default function ArTab({
                 )}
               </button>
             </div>
+
+            {shareNote && (
+              <p className="text-[10px] text-gray-500 text-center -mt-1">{shareNote}</p>
+            )}
           </>
         )}
       </div>

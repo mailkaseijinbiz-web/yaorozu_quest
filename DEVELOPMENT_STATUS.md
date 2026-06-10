@@ -27,7 +27,8 @@
 
 ### 2. AR機能（`src/components/ArTab.tsx`）
 - 背景は**描画によるシミュレーション**（"Simulated mystical shrine background"）。
-- 実カメラ合成・3Dモデル表示は未実装。共有も "Simulated native share"。
+- 実カメラ合成・3Dモデル表示は未実装。
+- 共有は Web Share API（`shareToSns`）で本実装済み。未対応環境ではリンクをクリップボードへコピー。
 
 ### 3. スポットへの写真投稿（`src/components/SpotDetail.tsx`）
 - 「デモ用の投稿写真候補」＝ **Unsplash 固定5枚から選ぶだけ**。
