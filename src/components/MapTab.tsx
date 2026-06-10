@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Compass, ChevronRight, Flag, X, Camera, Check, MapPin, Clock, Navigation2, MessageCircle, Send } from 'lucide-react';
+import { Compass, ChevronRight, Flag, X, Camera, Check, MapPin, Clock, Navigation2, MessageCircle, Send, Search } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { Spot, User, db } from '../lib/db';
 import { uploadImage } from '../lib/upload';
@@ -87,6 +87,62 @@ export default function MapTab({
     ugcCounts[spot.id] = allUgc.filter((u) => u.spotId === spot.id).length;
   });
 
+
+  // ── 場所検索：登録スポットの即時検索＋任意の場所のジオコーディング（Nominatim） ──
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQ, setSearchQ] = useState('');
+  const [geoResults, setGeoResults] = useState<{ name: string; detail: string; lat: number; lng: number }[]>([]);
+  const [geoLoading, setGeoLoading] = useState(false);
+  // 検索結果の任意地点に立てる赤ピン（token で同じ場所への再フォーカスも可能に）
+  const [searchPin, setSearchPin] = useState<{ lat: number; lng: number; name: string; token: number } | null>(null);
+
+  // 登録スポットの検索（名前・神様名・カテゴリの部分一致、近い順に最大5件）
+  const q = searchQ.trim().toLowerCase();
+  const spotMatches = q
+    ? spots
+        .filter((s) => [s.name, s.godName, s.category].some((t) => t && t.toLowerCase().includes(q)))
+        .map((s) => ({ s, d: distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude) }))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, 5)
+    : [];
+
+  // 任意の場所をジオコーディング（450msデバウンス・入力途中の応答は中断）
+  useEffect(() => {
+    const text = searchQ.trim();
+    if (text.length < 2) { setGeoResults([]); setGeoLoading(false); return; }
+    setGeoLoading(true);
+    const ctrl = new AbortController();
+    const id = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=jsonv2&accept-language=ja&countrycodes=jp&limit=5&q=${encodeURIComponent(text)}`,
+          { signal: ctrl.signal },
+        );
+        const data = await res.json();
+        setGeoResults(
+          (Array.isArray(data) ? data : []).map((r: { name?: string; display_name: string; lat: string; lon: string }) => ({
+            name: r.name || r.display_name.split(',')[0],
+            detail: r.display_name,
+            lat: parseFloat(r.lat),
+            lng: parseFloat(r.lon),
+          })),
+        );
+        setGeoLoading(false);
+      } catch {
+        if (!ctrl.signal.aborted) { setGeoResults([]); setGeoLoading(false); }
+      }
+    }, 450);
+    return () => { clearTimeout(id); ctrl.abort(); };
+  }, [searchQ]);
+
+  const closeSearch = () => { setSearchOpen(false); setSearchQ(''); setGeoResults([]); };
+  // 登録スポットを選択 → そのスポットを選択状態に（地図は activeSpot 追従でパンする）
+  const gotoSpot = (s: Spot) => { setSearchPin(null); onSelectSpot(s); closeSearch(); };
+  // 任意の場所を選択 → 赤ピンを立てて地図を寄せる
+  const gotoPlace = (lat: number, lng: number, name: string) => {
+    setSearchPin((prev) => ({ lat, lng, name, token: (prev?.token ?? 0) + 1 }));
+    closeSearch();
+  };
 
   // ── 心の声（神のつぶやき）を下部オーバーレイで：一文字ずつ・タスク交互 ──
   const [typed, setTyped] = useState('');
@@ -402,9 +458,83 @@ export default function MapTab({
           focusGoalToken={focusGoalToken}
           hideControls={introShowing}
           onMapMove={onMapMove}
+          searchPin={searchPin}
           deviceHeading={deviceHeading}
         />
       </div>
+
+      {/* 場所検索（クエスト中・演出中は隠す）：右上のボタン ⇄ 検索バー＋候補リスト */}
+      {!activeChallenge && !celebrate && (
+        <div className="absolute top-3 left-3 right-3 z-[1300] flex flex-col items-end">
+          {searchOpen ? (
+            <div className="w-full bg-white rounded-2xl shadow-xl border border-black/5 overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2.5">
+                <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                <input
+                  value={searchQ}
+                  onChange={(e) => setSearchQ(e.target.value)}
+                  placeholder="場所・神社・お寺を検索"
+                  autoFocus
+                  className="flex-1 min-w-0 text-[14px] text-gray-900 placeholder:text-gray-400 outline-none bg-transparent"
+                />
+                <button onClick={closeSearch} aria-label="検索を閉じる" className="w-7 h-7 rounded-full hover:bg-gray-100 flex items-center justify-center cursor-pointer flex-shrink-0">
+                  <X className="w-4 h-4 text-gray-500" />
+                </button>
+              </div>
+              {q && (
+                <div className="max-h-64 overflow-y-auto border-t border-black/5">
+                  {/* 登録スポット（八百万の場）の候補 */}
+                  {spotMatches.map(({ s, d }) => (
+                    <button
+                      key={s.id}
+                      onClick={() => gotoSpot(s)}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-blue-50/60 active:bg-blue-50 cursor-pointer"
+                    >
+                      <span className="text-xl flex-shrink-0">{s.godEmoji || (s.category === '神社' ? '⛩️' : '🙏')}</span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-[13px] font-black text-gray-900 truncate">{s.name}</span>
+                        <span className="block text-[11px] text-gray-400 truncate">{s.category}{s.godName ? `・${s.godName}` : ''}</span>
+                      </span>
+                      <span className="text-[11px] font-bold text-[#2563eb] tabular-nums flex-shrink-0">
+                        {d < 1 ? `${Math.round(d * 1000)}m` : `${d.toFixed(1)}km`}
+                      </span>
+                    </button>
+                  ))}
+                  {/* 地図上の場所（ジオコーディング）の候補 */}
+                  {geoResults.map((r, i) => (
+                    <button
+                      key={`geo-${i}`}
+                      onClick={() => gotoPlace(r.lat, r.lng, r.name)}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-gray-50 active:bg-gray-100 cursor-pointer"
+                    >
+                      <MapPin className="w-4 h-4 text-rose-500 flex-shrink-0" />
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-[13px] font-bold text-gray-800 truncate">{r.name}</span>
+                        <span className="block text-[11px] text-gray-400 truncate">{r.detail}</span>
+                      </span>
+                    </button>
+                  ))}
+                  {geoLoading && (
+                    <p className="px-4 py-2.5 text-[12px] text-gray-400 animate-pulse">地図から検索中…</p>
+                  )}
+                  {!geoLoading && spotMatches.length === 0 && geoResults.length === 0 && (
+                    <p className="px-4 py-2.5 text-[12px] text-gray-400">見つかりませんでした</p>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={() => setSearchOpen(true)}
+              title="場所を検索"
+              aria-label="場所を検索"
+              className="w-11 h-11 rounded-full bg-white shadow-lg border border-[#2563eb]/20 flex items-center justify-center text-[#2563eb] hover:bg-[#2563eb] hover:text-white cursor-pointer transition-colors"
+            >
+              <Search className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* 今挑戦中のチャレンジ（上部バナー・左右端まで・開始時に上からふわっと） */}
       {activeChallenge && !introShowing && (

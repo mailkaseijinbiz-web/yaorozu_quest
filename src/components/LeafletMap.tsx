@@ -13,6 +13,11 @@ function truncVoice(s: string): string {
   return s.length > 30 ? s.slice(0, 29) + '…' : s;
 }
 
+// 検索結果ピンのラベルは外部データ（ジオコーダ）由来のためエスケープする
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
 // 1画面の表示数をズームに応じて制御（広域では少なく、拡大で増やす）
 function maxMarkersForZoom(zoom: number): number {
   if (zoom <= 12) return 12;
@@ -36,6 +41,7 @@ interface LeafletMapProps {
   onMapMove?: (center: { lat: number; lng: number }) => void; // ユーザーが地図を移動させたとき（スロットル済み）
   cardFocus?: { lat: number; lng: number } | null; // インタラクティブカードが指す場所
   cardFocusToken?: number; // 値が変わるとカードの場所へ地図を寄せる（スワイプ連動）
+  searchPin?: { lat: number; lng: number; name: string; token: number } | null; // 場所検索の結果（token が変わると再フォーカス）
   deviceHeading?: number | null; // 端末の向き（方位磁針, 北=0時計回り）。親で取得して配る
 }
 
@@ -53,6 +59,7 @@ export default function LeafletMap({
   onMapMove,
   cardFocus,
   cardFocusToken,
+  searchPin = null,
   deviceHeading = null,
 }: LeafletMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -229,9 +236,14 @@ export default function LeafletMap({
   const goalLng = goal && typeof goal.lng === 'number' && !isNaN(goal.lng) ? goal.lng : null;
   const goalName = goal?.name ?? '';
   const goalEmoji = goal?.godEmoji || '⛩️';
+  // 道案内演出（ゴールへ飛んで戻る）を初回マウントでは行わないためのフラグ。
+  // タブ再表示などで地図が作り直された直後は、まず現在地を中央に保つ。
+  const goalRevealInitRef = useRef(true);
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    const isFirstRun = goalRevealInitRef.current;
+    goalRevealInitRef.current = false;
     if (goalMarkerRef.current) { goalMarkerRef.current.remove(); goalMarkerRef.current = null; }
     if (goalLat == null || goalLng == null) return;
     // 青のフキダシ（目的地での写真撮影を促す）＋その下に「挑戦中の神」のアイコンを青い丸で表示。
@@ -246,6 +258,10 @@ export default function LeafletMap({
       icon: L.divIcon({ html: goalHtml, className: 'custom-goal-icon', iconSize: [180, 80], iconAnchor: [90, 52] }),
       zIndexOffset: 1500,
     }).addTo(map);
+
+    // 初回マウント時（タブ遷移直後など）は演出せず、現在地表示を優先する。
+    // 目的地が新しく決まった時（チャレンジ開始後の進行・次の目的地へ）だけ演出する。
+    if (isFirstRun) return;
 
     // 道案内演出：まず目的地を見せ、少し待ってから現在地へ戻る
     const targetZoom = Math.max(map.getZoom(), 15);
@@ -278,6 +294,28 @@ export default function LeafletMap({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cardFocusToken]);
+
+  // 2.7 場所検索の結果ピン：赤いピン＋名前ラベルを置き、地図をその場所へ寄せる
+  const searchMarkerRef = useRef<L.Marker | null>(null);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (searchMarkerRef.current) { searchMarkerRef.current.remove(); searchMarkerRef.current = null; }
+    if (!searchPin) return;
+    const pinHtml = `
+      <div style="position:relative;display:flex;flex-direction:column;align-items:center;">
+        <div style="background:#dc2626;color:#fff;font-weight:900;font-size:11px;white-space:nowrap;max-width:170px;overflow:hidden;text-overflow:ellipsis;padding:3px 11px;border-radius:9999px;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);">📍 ${escapeHtml(searchPin.name)}</div>
+        <div style="width:9px;height:9px;background:#dc2626;transform:rotate(45deg);margin-top:-5px;border-right:2px solid #fff;border-bottom:2px solid #fff;"></div>
+        <div style="margin-top:2px;width:14px;height:14px;border-radius:9999px;background:#dc2626;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4);"></div>
+      </div>`;
+    searchMarkerRef.current = L.marker([searchPin.lat, searchPin.lng], {
+      icon: L.divIcon({ html: pinHtml, className: 'custom-search-icon', iconSize: [190, 56], iconAnchor: [95, 49] }),
+      zIndexOffset: 1400,
+    }).addTo(map);
+    map.flyTo([searchPin.lat, searchPin.lng], Math.max(map.getZoom(), 15), { duration: 0.8 });
+    // token が変わった時だけ再フォーカス（同じ場所の再検索でも飛べるように）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchPin?.token]);
 
   // 3. Manage Spot Markers (Sauna-ikitai style tag bubble pins)
   useEffect(() => {
@@ -411,10 +449,13 @@ export default function LeafletMap({
     return () => clearInterval(id);
   }, []);
 
-  // 4. 選択スポットを地図の中央へ（ズームは維持）
+  // 4. 選択スポットを地図の中央へ（ズームは維持）。
+  //    初回マウント時はパンせず、現在地を中央に保つ（マップを開いたらまず現在地を示す）。
+  const activeSpotPanInitRef = useRef(true);
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    if (activeSpotPanInitRef.current) { activeSpotPanInitRef.current = false; return; }
     if (activeSpot) {
       map.panTo([activeSpot.latitude, activeSpot.longitude], { animate: true });
     }
