@@ -17,8 +17,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 
 ## あなた側の設定（これが無いとボタンを押してもプロバイダ画面でエラー）
 1. **Supabase → Authentication → URL Configuration**
-   - Site URL: `https://yaorozuquestremote.vercel.app`
-   - Redirect URLs に追加: `https://yaorozuquestremote.vercel.app`、`http://localhost:3000`
+   - Site URL: `https://yaorozu-quest.vercel.app`
+   - Redirect URLs に追加: `https://yaorozu-quest.vercel.app`、`http://localhost:3000`
 2. **Google プロバイダ**（Authentication → Providers → Google）
    - Google Cloud Console で OAuth 2.0 クライアントID/シークレットを作成。
    - 承認済みリダイレクト URI に `https://dwjkvgsvscprhcirewim.supabase.co/auth/v1/callback` を追加。

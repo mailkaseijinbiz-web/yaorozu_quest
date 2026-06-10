@@ -3,7 +3,7 @@
   "appName": "八百万クエスト",
   "webDir": "public",
   "server": {
-    "url": "https://yaorozuquestremote.vercel.app",
+    "url": "https://yaorozu-quest.vercel.app",
     "cleartext": false
   },
   "ios": {
