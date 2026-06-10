@@ -210,7 +210,9 @@ export default function HomePage() {
         body: JSON.stringify({ lat, lng }),
       });
       if (!res.ok) return;
-      const { spot: rawSpot, agent } = await res.json() as { spot: Spot; agent: Agent };
+      const { spot: rawSpot, agent, extras = [] } = await res.json() as {
+        spot: Spot; agent: Agent; extras?: { spot: Spot; agent: Agent }[];
+      };
       // 管理者が削除した実在スポット（安定 ID）は、再訪しても復活させない（削除を尊重）。
       if (db.getDeletedSpots().some(s => s.id === rawSpot.id)) return;
       // 同一 ID（実在スポットは安定 ID）の場が既にあれば上書きしない＝蓄積した写真・口コミを守る。
@@ -227,6 +229,16 @@ export default function HomePage() {
         : { ...rawSpot, expiresAt: new Date(Date.now() + ttlMs).toISOString() };
       db.adminSaveSpot(spot);
       db.adminSaveAgent(agent);
+      // 周辺の実在寺社（extras）もまとめて保存する。最寄り1件だけだと、大寺院の境内に
+      // 密集する子院・祠に「最寄り」を取られて本体（例: 善光寺）が地図に出ないため。
+      // 実在(verified)のみ・削除済みと既存は尊重（写真・口コミを上書きしない）。
+      for (const ex of extras) {
+        if (!ex?.spot?.verified) continue;
+        if (db.getDeletedSpots().some(s => s.id === ex.spot.id)) continue;
+        if (db.getSpots().some(s => s.id === ex.spot.id)) continue;
+        db.adminSaveSpot(ex.spot);
+        db.adminSaveAgent(ex.agent);
+      }
       db.trackApiCall('ai_generate');
       db.logActivity({ type: 'spot_generate', userId: 'system', source: 'system', spotId: spot.id, detail: spot.name });
       db.logActivity({ type: 'god_generate', userId: 'system', source: 'system', spotId: spot.id, detail: agent.name || spot.godName });
@@ -440,12 +452,12 @@ export default function HomePage() {
   useEffect(() => {
     if (needsOnboard !== false) return;
     if (geoStatus === 'locating') return;
-    // 「現在地の近く（~1.5km）に場があるか」で判定する。
-    // シードは東京中心に密集しているため spots.length はほぼ常に >0 だが、地方・新しい土地に
-    // 来るとシード全件が遠くなり近傍ゼロになる。そこで現在地基準で実在の寺社を生成する
-    // （例: 善光寺へ行ったのに地図に出ない、を解消）。
+    // 「現在地のすぐ近く（~400m）に場があるか」で判定する。
+    // 旧実装の 1.5km だと「1km 先の別の寺が登録済み」なだけで生成が走らず、
+    // いま目の前にいる寺社（例: 善光寺）がいつまでも地図に出なかった。
+    // 400m＝境内スケール。生成自体は generateVariedSpots 側の 5分/500m スロットルで抑制される。
     const hasNearbySpot = spots.some(
-      (s) => distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude) <= 1.5,
+      (s) => distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude) <= 0.4,
     );
     if (!hasNearbySpot) {
       // 近くに場が無い → 現在地そのもの＋近・中・遠に実在の寺社を生成（クエストも自動チェーン）

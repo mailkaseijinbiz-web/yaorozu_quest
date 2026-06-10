@@ -199,16 +199,21 @@ export async function POST(request: Request) {
   const geminiKey = process.env.GEMINI_API_KEY;
 
   // 1) 実在優先：OSM(Overpass) で近くの実在の寺社（神社・寺院）を探す。
-  //    寺社のみに絞った分ヒット密度が下がるため、半径を広げて取りこぼしを防ぐ（最寄り1件を採用）。
-  let real: RealPlace | null = null;
+  //    最寄り1件だけでなく周辺もまとめて返す。大寺院（例: 善光寺）の境内・門前には
+  //    子院・祠が密集しており、「最寄り1件」方式だとそちらに取られて本体が
+  //    いつまでも地図に出ない問題があったため。
+  let places: RealPlace[] = [];
   try {
-    real = (await lookupRealPlaces(lat, lng, 2500, 8))[0] ?? null;
+    places = await lookupRealPlaces(lat, lng, 2500, 8);
   } catch (err) {
     console.error('[generate-spot] overpass error:', err);
   }
+  const real = places[0] ?? null;
   if (real) {
     const { spot, agent } = await buildRealSpot(real, geminiKey);
-    return NextResponse.json({ spot, agent, source: 'osm' });
+    // 2件目以降はテンプレ味付け（Gemini は最寄り1件のみ＝API 消費を増やさない）
+    const extras = await Promise.all(places.slice(1).map((p) => buildRealSpot(p)));
+    return NextResponse.json({ spot, agent, extras, source: 'osm' });
   }
 
   // 2) 近くに実在の場が無い → 生成しない（架空の場やプレースホルダーは作らない）
