@@ -625,6 +625,14 @@ export function isQuotaError(e: unknown): boolean {
 class MockDatabase {
   private isBrowser = typeof window !== 'undefined';
 
+  constructor() {
+    // クラウド復元（cloud-sync の pull / マージ反映）は db を経由せず localStorage を
+    // 直接書き換えるため、このイベントでスポットキャッシュを破棄して読み直す。
+    if (this.isBrowser) {
+      window.addEventListener('yaorozu:external-write', () => this.invalidateSpotsCache());
+    }
+  }
+
   private load<T>(key: string, defaultValue: T): T {
     if (!this.isBrowser) return defaultValue;
     const data = localStorage.getItem(key);
@@ -655,6 +663,16 @@ class MockDatabase {
 
   /** 旧形式（シード全件保存）→ 差分形式への圧縮を、セッション中1回だけ行うフラグ */
   private spotsCompacted = false;
+  // スポットはアプリ中で最も読まれるデータ（地図・一覧・詳細が毎レンダー参照する）。
+  // 毎回の JSON パース＋シードとのマージ（4,600件）を避けるためセッション内キャッシュを持つ。
+  private spotsRawCache: Spot[] | null = null;
+  private spotsLiveCache: Spot[] | null = null;
+
+  /** db を経由しない localStorage 書き込み（クラウド復元など）の後に呼ぶ。 */
+  invalidateSpotsCache(): void {
+    this.spotsRawCache = null;
+    this.spotsLiveCache = null;
+  }
 
   /**
    * 削除済みも含む全スポット（監査・mutator の保存用）。
@@ -663,8 +681,12 @@ class MockDatabase {
    * 一度だけ差分形式へ圧縮し直し、localStorage の quota を解放する。
    */
   private getSpotsRaw(): Spot[] {
+    if (this.spotsRawCache) return this.spotsRawCache;
     const stored = this.load<Spot[] | null>(KEYS.SPOTS, null);
-    if (!Array.isArray(stored)) return INITIAL_SPOTS;
+    if (!Array.isArray(stored)) {
+      this.spotsRawCache = INITIAL_SPOTS;
+      return INITIAL_SPOTS;
+    }
     const overlay = new Map<string, Spot>();
     const extras: Spot[] = [];
     for (const s of stored) {
@@ -672,6 +694,7 @@ class MockDatabase {
       else extras.push(s);
     }
     const merged = [...INITIAL_SPOTS.map((s) => overlay.get(s.id) ?? s), ...extras];
+    this.spotsRawCache = merged;
     // 旧形式の検出: シード由来の保存件数が明らかに多い（差分なら通常は少数）
     if (!this.spotsCompacted && this.isBrowser) {
       this.spotsCompacted = true;
@@ -691,6 +714,8 @@ class MockDatabase {
    * シードと同一内容の場は書き込まず、変更・追加された場だけを永続化する。
    */
   private saveSpots(spots: Spot[]): void {
+    this.spotsRawCache = spots;
+    this.spotsLiveCache = null;
     const delta = spots.filter((s) => {
       const seed = SEED_SPOT_JSON.get(s.id);
       return !seed || seed !== JSON.stringify(s);
@@ -704,6 +729,7 @@ class MockDatabase {
   }
 
   getSpots(): Spot[] {
+    if (this.spotsLiveCache) return this.spotsLiveCache;
     const stored = this.getSpotsRaw();
     const now = Date.now();
     // 読み取り時の退役処理（ソフト削除＝deletedAt 打刻。ハード削除はせず監査ログを残す）:
@@ -734,7 +760,9 @@ class MockDatabase {
           justRetired.has(a.spotId) && !a.deletedAt ? { ...a, deletedAt: new Date().toISOString() } : a));
       }
     }
-    return withTtl.filter(s => !s.deletedAt);
+    const live = withTtl.filter(s => !s.deletedAt);
+    this.spotsLiveCache = live;
+    return live;
   }
 
   /** 削除済みスポット（生成/削除日時の監査ビュー用）。 */

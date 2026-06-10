@@ -25,7 +25,12 @@ function makeLocalStorage() {
 // db はモジュール初期化時に typeof window を見るため、グローバルを立ててから import する
 async function importDbWith(ls: ReturnType<typeof makeLocalStorage>) {
   vi.stubGlobal('localStorage', ls);
-  vi.stubGlobal('window', { localStorage: ls, dispatchEvent: () => true });
+  vi.stubGlobal('window', {
+    localStorage: ls,
+    dispatchEvent: () => true,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  });
   const mod = await import('./db');
   return mod.db;
 }

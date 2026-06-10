@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark } from 'lucide-react';
+import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, NotebookPen, CalendarDays } from 'lucide-react';
 import { Spot, Agent, User, db, isVerifiedSpot, isQuotaError, type UgcVisibility } from '../lib/db';
 import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
-import { uploadImage } from '../lib/upload';
+import { uploadImage, compressImage } from '../lib/upload';
+import { getVisitRecords, addVisitRecord, deleteVisitRecord, type VisitRecord } from '../lib/visit-records';
 import { shareToSns } from '../lib/share';
 import { grantGoShuin, hasGoShuin, getGoShuinList } from '../lib/goshuin';
 import { getLevelInfo } from '../data/levels';
@@ -86,7 +87,7 @@ function SpotDetailBody({
   userLocation,
   onOpenGoshuinBook,
 }: SpotDetailProps) {
-  const [tab, setTab] = useState<'chat' | 'requests' | 'photos' | 'leaderboard'>('chat');
+  const [tab, setTab] = useState<'chat' | 'requests' | 'photos' | 'records'>('chat');
   const [agent] = useState<Agent>(() => resolveAgent(spot));
 
   // UGCで変化する状態（写真・楽しみ方）は db から都度読む
@@ -153,14 +154,16 @@ function SpotDetailBody({
   const tasks = buildSpotTasks(spot);
 
   // 評価タスクの対象写真：クエスト証拠写真＋各スポットの奉納写真。不足時は巡礼地の代表写真で補完。
-  const evalPhotos = useMemo(() => {
+  // 証拠写真は base64 の塊で、全件パース（getAllChallengePhotoUrls）が重い。
+  // マウント時に集めると詳細ページの初期表示が遅くなるため、評価を始めるときに集める。
+  const [evalPhotos, setEvalPhotos] = useState<string[]>([]);
+  const collectEvalPhotos = () => {
     const urls: string[] = [];
     db.getAllChallengePhotoUrls().forEach((u) => u && urls.push(u));
     allSpots.forEach((s) => (s.photos || []).forEach((u) => u && urls.push(u)));
     if (urls.length < 5) allSpots.forEach((s) => { if (s.imageUrl) urls.push(s.imageUrl); });
     return Array.from(new Set(urls)).slice(0, 8);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allSpots, spot.id]);
+  };
   const evalTarget = Math.min(3, evalPhotos.length);
 
   // このスポットに最も近い未制覇クエスト（会話で能動的に挑戦を促す）
@@ -178,6 +181,54 @@ function SpotDetailBody({
   const flashToast = (text: string) => {
     setToast(text);
     setTimeout(() => setToast(null), 1800);
+  };
+
+  // ── 記録タブ：この寺社への参拝記録（日付・メモ・写真つきで何度でも残せる） ──
+  const [spotRecords, setSpotRecords] = useState<VisitRecord[]>(
+    () => getVisitRecords(currentUser.id).filter((r) => r.spotId === spot.id)
+  );
+  const refreshRecords = () => setSpotRecords(getVisitRecords(currentUser.id).filter((r) => r.spotId === spot.id));
+  const [recFormOpen, setRecFormOpen] = useState(false);
+  const [recDate, setRecDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [recNote, setRecNote] = useState('');
+  const [recPhoto, setRecPhoto] = useState<string | null>(null);
+  const [recSaving, setRecSaving] = useState(false);
+  const recPhotoInputRef = useRef<HTMLInputElement>(null);
+
+  const onPickRecPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      setRecPhoto(await compressImage(f, { maxDim: 900, quality: 0.6 }));
+    } catch {
+      /* 読み込み失敗は無視（写真なしで記録できる） */
+    }
+  };
+
+  const saveSpotRecord = () => {
+    if (recSaving) return;
+    setRecSaving(true);
+    try {
+      const rec = addVisitRecord(currentUser.id, spot, {
+        visitedAt: new Date(`${recDate}T12:00:00`).toISOString(),
+        note: recNote,
+        photo: recPhoto ?? undefined,
+      });
+      if (!rec) {
+        flashToast('端末の保存領域がいっぱいで記録できませんでした');
+        return;
+      }
+      db.recordVisit(currentUser.id, spot.id); // 探訪バッジ・徳（重複は無視）
+      refreshRecords();
+      setRecFormOpen(false);
+      setRecNote('');
+      setRecPhoto(null);
+      flashToast('📔 参拝を記録しました');
+      onChanged?.();
+    } finally {
+      setRecSaving(false);
+    }
   };
 
   /** タスク達成を確定（state＋日付つき永続化） */
@@ -294,7 +345,9 @@ function SpotDetailBody({
       }
       return;
     } else if (task.type === 'evaluate') {
-      if (evalPhotos.length === 0) { flashToast('まだ評価できる写真がありません'); return; }
+      const collected = collectEvalPhotos();
+      if (collected.length === 0) { flashToast('まだ評価できる写真がありません'); return; }
+      setEvalPhotos(collected);
       setEvalIdx(0);
       setEvaluating(true); // 評価し終えたら done にする
       return;
@@ -555,10 +608,10 @@ function SpotDetailBody({
       {/* ── タブ切替 ── */}
       <div className="flex border-b border-black/5 bg-white flex-shrink-0">
         {([
-          { key: 'chat',        label: '会話',   icon: MessageCircle },
-          { key: 'requests',    label: 'クエスト', icon: Flag },
-          { key: 'photos',      label: '写真',   icon: Camera },
-          { key: 'leaderboard', label: '石碑',   icon: Landmark },
+          { key: 'chat',     label: '会話',   icon: MessageCircle },
+          { key: 'requests', label: 'クエスト', icon: Flag },
+          { key: 'photos',   label: '写真',   icon: Camera },
+          { key: 'records',  label: '記録',   icon: NotebookPen },
         ] as const).map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setTab(key)} className={`flex-1 py-3 flex flex-row items-center justify-center gap-1.5 text-[12px] font-black transition-all cursor-pointer border-b-2 ${tab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
             <Icon className="w-3.5 h-3.5" />{label}
@@ -566,50 +619,99 @@ function SpotDetailBody({
         ))}
       </div>
 
-      {tab === 'leaderboard' ? (
-        /* ── 石碑（参拝者ランキング） ── */
+      {tab === 'records' ? (
+        /* ── 記録（この寺社への参拝記録。日付・メモ・写真つき） ── */
         <div className="flex-1 overflow-y-auto p-4">
           <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
-            <div className="px-4 pt-4 pb-2 flex items-center gap-2 border-b border-black/5">
-              <Landmark className="w-4 h-4 text-stone-500" />
-              <h3 className="text-sm font-black text-gray-800">石碑</h3>
-              <span className="text-[11px] text-gray-400 ml-auto">この地に捧げた徳</span>
+            <div className="px-4 pt-4 pb-3 flex items-center gap-2 border-b border-black/5">
+              <NotebookPen className="w-4 h-4 text-emerald-600" />
+              <h3 className="text-sm font-black text-gray-800">参拝の記録 ({spotRecords.length})</h3>
+              <button
+                onClick={() => setRecFormOpen((v) => !v)}
+                className="ml-auto flex items-center gap-1 text-[12px] font-black text-white bg-emerald-600 px-3 py-1.5 rounded-full hover:opacity-90 transition-all cursor-pointer"
+              >
+                ＋ 記録する
+              </button>
             </div>
-            {(() => {
-              const ranking = db.getSpotRanking(spot.id);
-              if (ranking.length === 0) {
-                return (
-                  <div className="text-center py-10">
-                    <div className="text-4xl mb-2">🪨</div>
-                    <p className="text-sm text-gray-400">まだ参拝者がいません</p>
-                    <p className="text-xs text-gray-300 mt-1">この地で徳を積んで刻まれよう</p>
-                  </div>
-                );
-              }
-              const RANK_MEDAL = ['🥇','🥈','🥉'];
-              return (
-                <ul>
-                  {ranking.map(({ user, toku }, i) => {
-                    const isSelf = user.id === currentUser.id;
-                    return (
-                      <li key={user.id} className={`flex items-center gap-3 px-4 py-3 border-b border-black/4 last:border-0 ${isSelf ? 'bg-amber-50/60' : ''}`}>
-                        <span className="w-6 text-center text-base flex-shrink-0">
-                          {i < 3 ? RANK_MEDAL[i] : <span className="text-[12px] font-black text-gray-400">{i + 1}</span>}
+
+            {recFormOpen && (
+              <div className="px-4 py-3 border-b border-black/5 bg-emerald-50/40 space-y-2">
+                <div className="flex items-center gap-2">
+                  <CalendarDays className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <input
+                    type="date"
+                    value={recDate}
+                    onChange={(e) => setRecDate(e.target.value)}
+                    className="flex-1 text-[13px] font-bold text-gray-700 bg-white border border-black/10 rounded-lg px-2 py-1.5"
+                  />
+                </div>
+                <textarea
+                  value={recNote}
+                  onChange={(e) => setRecNote(e.target.value)}
+                  placeholder="メモ（任意）：天気、御朱印、心に残ったこと…"
+                  rows={2}
+                  className="w-full text-[13px] text-gray-700 bg-white border border-black/10 rounded-lg px-2.5 py-2 resize-none"
+                />
+                {recPhoto && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={recPhoto} alt="記録の写真" className="w-full h-32 object-cover rounded-lg" />
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => recPhotoInputRef.current?.click()}
+                    className="flex items-center gap-1 text-[12px] font-black text-gray-600 bg-white border border-black/10 px-3 py-1.5 rounded-full cursor-pointer"
+                  >
+                    <Camera className="w-3.5 h-3.5" />{recPhoto ? '撮り直す' : '写真を添える'}
+                  </button>
+                  <input ref={recPhotoInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickRecPhoto} />
+                  <button
+                    onClick={saveSpotRecord}
+                    disabled={recSaving}
+                    className="ml-auto text-[12px] font-black text-white bg-emerald-600 px-4 py-1.5 rounded-full hover:opacity-90 disabled:opacity-50 transition-all cursor-pointer"
+                  >
+                    {recSaving ? '保存中…' : 'この内容で記録'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {spotRecords.length === 0 ? (
+              <div className="text-center py-10">
+                <div className="text-4xl mb-2">📔</div>
+                <p className="text-sm text-gray-400">まだ記録がありません</p>
+                <p className="text-xs text-gray-300 mt-1">参拝したら日付とひとことを残そう</p>
+              </div>
+            ) : (
+              <ul>
+                {[...spotRecords]
+                  .sort((a, b) => new Date(b.visitedAt).getTime() - new Date(a.visitedAt).getTime())
+                  .map((rec, i, arr) => (
+                    <li key={rec.id} className="px-4 py-3 border-b border-black/4 last:border-0">
+                      <div className="flex items-center gap-2">
+                        <CalendarDays className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                        <span className="text-[13px] font-black text-gray-800">
+                          {new Date(rec.visitedAt).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
                         </span>
-                        <img src={user.avatarUrl} alt={user.displayName} className="w-8 h-8 rounded-full border-2 flex-shrink-0 object-cover" style={{ borderColor: user.avatarFrameColor || '#e5e7eb' }} />
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-[13px] font-black truncate ${isSelf ? 'text-amber-700' : 'text-gray-800'}`}>
-                            {user.displayName}{isSelf && <span className="ml-1 text-[10px] text-amber-500">（あなた）</span>}
-                          </p>
-                          <p className="text-[10px] text-gray-400">{user.currentTitle || '巡礼者'}</p>
-                        </div>
-                        <span className="text-sm font-black text-amber-600 flex-shrink-0">{toku.toLocaleString()} 徳</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              );
-            })()}
+                        <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">
+                          {arr.length - i}回目
+                        </span>
+                        <button
+                          onClick={() => { deleteVisitRecord(currentUser.id, rec.id); refreshRecords(); }}
+                          aria-label="記録を削除"
+                          className="ml-auto text-gray-300 hover:text-rose-400 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      {rec.note && <p className="text-[13px] text-gray-600 mt-1.5 leading-relaxed">{rec.note}</p>}
+                      {rec.photo && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={rec.photo} alt="参拝の写真" className="mt-2 w-full h-36 object-cover rounded-xl" />
+                      )}
+                    </li>
+                  ))}
+              </ul>
+            )}
           </div>
         </div>
       ) : tab === 'photos' ? (
@@ -968,7 +1070,7 @@ export default function SpotDetail(props: SpotDetailProps) {
           </div>
           {/* タブ骨格 */}
           <div className="flex border-b border-black/5 bg-white flex-shrink-0">
-            {['会話', 'クエスト', '写真', '石碑'].map((label) => (
+            {['会話', 'クエスト', '写真', '記録'].map((label) => (
               <div key={label} className="flex-1 py-3 flex items-center justify-center text-[12px] font-black text-gray-300">
                 {label}
               </div>
