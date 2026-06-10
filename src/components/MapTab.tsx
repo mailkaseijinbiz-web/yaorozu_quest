@@ -816,12 +816,7 @@ export default function MapTab({
                       </div>
                     </div>
                     <div className="flex-1 min-w-0 py-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] font-black tracking-wider text-[#2563eb]/70">近くの場{nearSpotList.length > 1 ? ` ${i + 1}/${nearSpotList.length}` : ''}</span>
-                        {nearSpotList.length > 1 && (
-                          <span className="text-[10px] text-gray-400 flex items-center gap-0.5">← スワイプ →</span>
-                        )}
-                      </div>
+                      {/* めくれることはドットインジケータと右の覗きカードで伝わるため、ラベル・スワイプ表記は出さない */}
                       <h4 className="text-sm font-black text-gray-900 truncate">{s.name}</h4>
                       {s.godName && (
                         <p className="text-[11px] font-bold text-gray-400 truncate mt-0.5">
