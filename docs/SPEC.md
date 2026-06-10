@@ -92,20 +92,28 @@ happiness = (totalValue − totalIssues) + totalToku
 
 ### 3.1 メインアプリ — 3タブナビゲーション
 
-画面下部のナビゲーションバー（NAV_TABS）で 3 タブを切り替える。`activeTab` state で管理。
+画面下部のナビゲーションバー（NAV_TABS）で 4 タブを切り替える。`activeTab` state で管理。
 
 | key | ラベル | アイコン | 内容 |
 |---|---|---|---|
 | `home` | クエスト | Flag | クエスト一覧（HomeTab） |
+| `record` | 記録 | NotebookPen | 参拝記録・御朱印（RecordTab） |
 | `quest` | マップ | MapPin | Leaflet 地図（MapTab） |
 | `mypage` | マイページ | UserCircle2 | プロフィール・4サブタブ |
 
-> **重要**: ラベルとkeyが意味的に反転している。key=`home` が「クエスト」一覧を、key=`quest` が「マップ」を指す。実装・読解の際はこの反転に注意（§6.1・§6.2 冒頭でも再掲）。
+> **重要**: ラベルとkeyが意味的に反転している。key=`home` が「クエスト」一覧を、key=`quest` が「マップ」を指す。実装・読解の際はこの反転に注意（§6.1・§6.2 冒頭でも再掲）。`record` は「マップ」の左に置く。
 
 #### タブ切り替え時の自動生成
 
 - `key === 'home'`: `generateSpotNearby()` 実行＋クエスト確認。クエスト 0 件なら agentId を持つスポット優先で `generateQuestsForSpot()`。
-- `key === 'quest'` かつ `spots.length === 0`: `generateSpotNearby()`。
+- `key === 'quest'` または `key === 'record'` かつ `spots.length === 0`: `generateVariedSpots()`。
+
+#### 記録タブ（RecordTab）
+
+参拝の記録を残す画面。上部に「参拝の記録／御朱印」の2サブタブ。
+- **参拝の記録**: 「新しい記録を追加」で寺社を検索選択 → 参拝日・メモ・写真（任意）を付けて記録。「ここに行った？」で近くの寺社をワンタップ記録。「これまでの記録」は参拝日降順で一覧（同一寺社は「N回目の記録」を表示・複数回記録可）。記録は `db.recordVisit()` も呼び探訪ボーナス +5徳（重複スポットは徳なし）。
+- **御朱印**: `getGoShuinList()` のコレクションをグリッド表示。
+- 保存は `src/lib/visit-records.ts`（localStorage `yaorozu_visit_records_<userId>`、写真は圧縮 dataURL・容量超過時は写真を外して保存）。
 
 #### マイページのサブタブ
 

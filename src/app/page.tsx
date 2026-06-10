@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, Clock, Share2, X, Stamp } from 'lucide-react';
+import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, Clock, Share2, X, Stamp, NotebookPen } from 'lucide-react';
 import { db, Spot, Agent, User as UserType, UserContribution, Activity, SPOT_TTL_MS } from '../lib/db';
 import { getGoShuinList, Goshuin } from '../lib/goshuin';
 import { pullSnapshot, setSyncUser } from '../lib/cloud-sync';
@@ -9,6 +9,7 @@ import { isAuthConfigured, getSupabaseBrowser, signInWithProvider, signOutAuth, 
 import { distanceKm, destinationPoint } from '../lib/geo';
 import HomeTab from '../components/HomeTab';
 import MapTab from '../components/MapTab';
+import RecordTab from '../components/RecordTab';
 import SpotDetail from '../components/SpotDetail';
 import GoshuinBookModal from '../components/GoshuinBookModal';
 import DebugPanel from '../components/DebugPanel';
@@ -23,7 +24,7 @@ import { useDeviceHeading } from '../lib/use-device-heading';
 import { backfillTrivia } from '../lib/trivia-fill';
 import { buildTourQuest, tourAreaKey } from '../lib/quest-tour';
 
-type TabType = 'home' | 'quest' | 'mypage';
+type TabType = 'home' | 'record' | 'quest' | 'mypage';
 
 // マイページ・ヒーローの装飾シェイプ（正十角形メダリオン枠 / XPシールド）
 const MEDALLION_FRAME =
@@ -611,6 +612,7 @@ export default function HomePage() {
 
   const NAV_TABS = [
     { key: 'home' as TabType, label: 'クエスト', icon: Flag },
+    { key: 'record' as TabType, label: '記録', icon: NotebookPen },
     { key: 'quest' as TabType, label: 'マップ', icon: MapPin },
     { key: 'mypage' as TabType, label: 'マイページ', icon: UserCircle2 },
   ];
@@ -792,6 +794,17 @@ export default function HomePage() {
                   }}
                 />
               </div>
+            )}
+
+            {/* ── 記録（参拝記録・御朱印） ── */}
+            {activeTab === 'record' && (
+              <RecordTab
+                currentUser={currentUser || FALLBACK_CURRENT_USER}
+                userLocation={userLocation}
+                spots={spots}
+                onOpenDetail={setDetailSpot}
+                onChanged={refreshDatabaseStates}
+              />
             )}
 
 
@@ -1162,8 +1175,8 @@ export default function HomePage() {
                       }
                     }
                   }
-                  if (key === 'quest' && spots.length === 0) {
-                    // マップに場が表示されていない場合は近・中・遠を複数生成する
+                  if ((key === 'quest' || key === 'record') && spots.length === 0) {
+                    // マップ／記録に近くの寺社が無い場合は近・中・遠を複数生成する
                     generateVariedSpots(userLocation.lat, userLocation.lng);
                   }
                   setActiveTab(key);

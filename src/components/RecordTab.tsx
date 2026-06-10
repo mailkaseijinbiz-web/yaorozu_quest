@@ -1,0 +1,354 @@
+'use client';
+
+import React, { useMemo, useState } from 'react';
+import { Search, MapPin, Camera, CalendarDays, Trash2, Check, Stamp, NotebookPen, X } from 'lucide-react';
+import { Spot, User as UserType, db } from '../lib/db';
+import { distanceKm } from '../lib/geo';
+import {
+  getVisitRecords,
+  addVisitRecord,
+  deleteVisitRecord,
+  countVisitsForSpot,
+  VisitRecord,
+} from '../lib/visit-records';
+import { getGoShuinList } from '../lib/goshuin';
+import { compressImage } from '../lib/upload';
+
+interface RecordTabProps {
+  currentUser: UserType;
+  userLocation: { lat: number; lng: number };
+  spots: Spot[];
+  onOpenDetail?: (spot: Spot) => void;
+  onChanged?: () => void; // 徳の更新などを親へ通知
+}
+
+const todayInput = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const fmtDate = (iso: string) => {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+};
+const catEmoji = (s: { godEmoji?: string; category?: string }) => s.godEmoji || (s.category === '神社' ? '⛩️' : '🙏');
+
+export default function RecordTab({ currentUser, userLocation, spots, onOpenDetail, onChanged }: RecordTabProps) {
+  const [topTab, setTopTab] = useState<'visits' | 'goshuin'>('visits');
+  const [records, setRecords] = useState<VisitRecord[]>(() => getVisitRecords(currentUser.id));
+  const refresh = () => setRecords(getVisitRecords(currentUser.id));
+
+  // 記録追加フォーム
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState<Spot | null>(null);
+  const [date, setDate] = useState(todayInput());
+  const [note, setNote] = useState('');
+  const [photo, setPhoto] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // 現在地から近い順の寺社（「ここに行った？」候補）
+  const nearby = useMemo(
+    () =>
+      [...spots]
+        .map((s) => ({ s, d: distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude) }))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, 8),
+    [spots, userLocation.lat, userLocation.lng]
+  );
+
+  // 検索（名前・神名・カテゴリ）。近い順に最大6件。
+  const q = query.trim().toLowerCase();
+  const matches = useMemo(() => {
+    if (!q) return [];
+    return [...spots]
+      .filter((s) => [s.name, s.godName, s.category].some((t) => t && t.toLowerCase().includes(q)))
+      .map((s) => ({ s, d: distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 6)
+      .map((x) => x.s);
+  }, [q, spots, userLocation.lat, userLocation.lng]);
+
+  const sortedRecords = useMemo(
+    () => [...records].sort((a, b) => new Date(b.visitedAt).getTime() - new Date(a.visitedAt).getTime()),
+    [records]
+  );
+
+  // その寺社の何回目か（古い順に番号を振る）
+  const ordinalOf = (rec: VisitRecord) => {
+    const same = records.filter((r) => r.spotId === rec.spotId).sort((a, b) => new Date(a.visitedAt).getTime() - new Date(b.visitedAt).getTime());
+    return same.findIndex((r) => r.id === rec.id) + 1;
+  };
+
+  const onPickPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      setPhoto(await compressImage(f, { maxDim: 900, quality: 0.6 }));
+    } catch {
+      /* 読み込み失敗は無視（写真なしで記録できる） */
+    }
+  };
+
+  const resetForm = () => {
+    setSelected(null);
+    setQuery('');
+    setNote('');
+    setPhoto(null);
+    setDate(todayInput());
+  };
+
+  // 記録を保存（徳の探訪ボーナスも付与）
+  const saveRecord = (spot: Spot, opts?: { visitedAt?: string; note?: string; photo?: string }) => {
+    setSaving(true);
+    try {
+      addVisitRecord(currentUser.id, spot, opts);
+      db.recordVisit(currentUser.id, spot.id); // visitedSpotIds と探訪ボーナス（重複は無視）
+      refresh();
+      onChanged?.();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onSubmitForm = () => {
+    if (!selected || saving) return;
+    saveRecord(selected, {
+      visitedAt: new Date(`${date}T12:00:00`).toISOString(),
+      note,
+      photo: photo ?? undefined,
+    });
+    resetForm();
+  };
+
+  const goshuin = topTab === 'goshuin' ? getGoShuinList(currentUser.id) : [];
+
+  return (
+    <div className="h-full overflow-y-auto bg-[#f5f7fa] pb-6">
+      {/* 上部タブ */}
+      <div className="flex border-b border-black/5 bg-white sticky top-0 z-10">
+        {([
+          { key: 'visits' as const, label: '参拝の記録', icon: NotebookPen },
+          { key: 'goshuin' as const, label: '御朱印', icon: Stamp },
+        ]).map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            onClick={() => setTopTab(key)}
+            className={`flex-1 py-3 flex items-center justify-center gap-1.5 text-[13px] font-black transition-all cursor-pointer border-b-2 ${
+              topTab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'
+            }`}
+          >
+            <Icon className="w-4 h-4" />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {topTab === 'visits' ? (
+        <div className="p-4 space-y-6">
+          {/* 新しい記録を追加 */}
+          <section>
+            <h3 className="text-base font-black text-gray-900 mb-2">新しい記録を追加</h3>
+
+            {/* 寺社を検索して選択 */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                value={selected ? selected.name : query}
+                onChange={(e) => { setQuery(e.target.value); setSelected(null); }}
+                placeholder="寺社を選択"
+                className="w-full bg-white border border-gray-200 rounded-2xl pl-9 pr-9 py-3 text-sm text-gray-800 focus:outline-none focus:border-shrine-red shadow-sm"
+              />
+              {(selected || query) && (
+                <button
+                  onClick={resetForm}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-400 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {/* 検索候補 */}
+            {!selected && matches.length > 0 && (
+              <div className="mt-2 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                {matches.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => { setSelected(s); setQuery(''); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-0"
+                  >
+                    <span className="text-2xl">{catEmoji(s)}</span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-black text-gray-900 truncate">{s.name}</span>
+                      <span className="block text-[11px] text-gray-400 truncate">{s.category}{s.godName ? `・${s.godName}` : ''}</span>
+                    </span>
+                    <span className="text-[12px] font-black text-[#2563eb] flex items-center gap-0.5">
+                      <MapPin className="w-3 h-3" />
+                      {(() => { const d = distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude); return d < 1 ? `${Math.round(d * 1000)}m` : `${d.toFixed(1)}km`; })()}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* 選択後の入力フォーム（日付・メモ・写真） */}
+            {selected && (
+              <div className="mt-3 bg-white rounded-2xl border border-gray-100 shadow-sm p-3 space-y-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-3xl">{catEmoji(selected)}</span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-gray-900 truncate">{selected.name}</p>
+                    <p className="text-[11px] text-gray-400 truncate">{selected.category}{selected.godName ? `・${selected.godName}` : ''}</p>
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-[13px] font-bold text-gray-600">
+                  <CalendarDays className="w-4 h-4 text-gray-400" />
+                  参拝日
+                  <input
+                    type="date"
+                    value={date}
+                    max={todayInput()}
+                    onChange={(e) => setDate(e.target.value)}
+                    className="ml-auto bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-sm text-gray-800 focus:outline-none focus:border-shrine-red"
+                  />
+                </label>
+                <textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  rows={2}
+                  maxLength={140}
+                  placeholder="ひとことメモ（任意）"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-shrine-red resize-none"
+                />
+                {photo ? (
+                  <div className="relative rounded-xl overflow-hidden border border-gray-200">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={photo} alt="参拝の写真" className="w-full max-h-48 object-cover" />
+                    <button
+                      onClick={() => setPhoto(null)}
+                      className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/50 text-white flex items-center justify-center cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <label className="flex items-center justify-center gap-1.5 bg-gray-100 text-gray-600 text-[13px] font-black py-2.5 rounded-xl cursor-pointer hover:bg-gray-200 transition-all">
+                    <Camera className="w-4 h-4" />写真を追加（御朱印など・任意）
+                    <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickPhoto} />
+                  </label>
+                )}
+                <button
+                  onClick={onSubmitForm}
+                  disabled={saving}
+                  className="w-full flex items-center justify-center gap-1.5 bg-shrine-red text-white text-sm font-black py-3 rounded-xl hover:opacity-90 active:scale-[0.99] transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />この参拝を記録する（+5徳）
+                </button>
+              </div>
+            )}
+
+            {/* ここに行った？（近くの寺社をワンタップで記録） */}
+            {!selected && (
+              <div className="mt-4">
+                <p className="text-[13px] font-black text-gray-700 mb-2">ここに行った？</p>
+                <div className="space-y-1.5">
+                  {nearby.length === 0 && (
+                    <p className="text-[13px] text-gray-400">近くの寺社が見つかりません。マップを開くと周辺の寺社が読み込まれます。</p>
+                  )}
+                  {nearby.map(({ s, d }) => {
+                    const cnt = countVisitsForSpot(currentUser.id, s.id);
+                    return (
+                      <div key={s.id} className="flex items-center gap-2.5 bg-white rounded-2xl border border-gray-100 shadow-sm px-3 py-2.5">
+                        <button onClick={() => onOpenDetail?.(s)} className="text-2xl cursor-pointer">{catEmoji(s)}</button>
+                        <button onClick={() => onOpenDetail?.(s)} className="flex-1 min-w-0 text-left cursor-pointer">
+                          <span className="block text-sm font-black text-gray-900 truncate">{s.name}</span>
+                          <span className="block text-[11px] text-gray-400 truncate flex items-center gap-1">
+                            <MapPin className="w-3 h-3" />{d < 1 ? `${Math.round(d * 1000)}m` : `${d.toFixed(1)}km`}
+                            {cnt > 0 && <span className="text-emerald-600 font-black">・記録 {cnt}件</span>}
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => saveRecord(s)}
+                          disabled={saving}
+                          className="flex-shrink-0 flex items-center gap-1 bg-emerald-500 text-white text-[13px] font-black px-3 py-1.5 rounded-full hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
+                        >
+                          <Check className="w-3.5 h-3.5" />行った
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* これまでの記録 */}
+          <section>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-base font-black text-gray-900">これまでの記録</h3>
+              <span className="text-[12px] font-black text-gray-400">{records.length}件・参拝日順</span>
+            </div>
+            {sortedRecords.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 text-center">
+                <div className="text-4xl mb-2">📓</div>
+                <p className="text-[13px] text-gray-500 leading-relaxed">まだ参拝の記録がありません。<br />上の「行った」から最初の記録を残しましょう。</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {sortedRecords.map((rec) => (
+                  <div key={rec.id} className="flex gap-3 bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
+                    {rec.photo ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={rec.photo} alt={rec.spotName} className="w-16 h-16 rounded-xl object-cover flex-shrink-0" />
+                    ) : (
+                      <div className="w-16 h-16 rounded-xl flex items-center justify-center text-3xl flex-shrink-0 bg-gradient-to-br from-blue-50 to-amber-50">{rec.godEmoji}</div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-black text-emerald-600">{ordinalOf(rec)}回目の記録</span>
+                      </div>
+                      <p className="text-sm font-black text-gray-900 truncate">{rec.spotName}</p>
+                      <p className="text-[11px] text-gray-400 flex items-center gap-1 mt-0.5">
+                        <CalendarDays className="w-3 h-3" />{fmtDate(rec.visitedAt)} 参拝
+                      </p>
+                      {rec.note && <p className="text-[12px] text-gray-600 mt-1 line-clamp-2">{rec.note}</p>}
+                    </div>
+                    <button
+                      onClick={() => { deleteVisitRecord(currentUser.id, rec.id); refresh(); }}
+                      className="self-start w-7 h-7 rounded-full hover:bg-rose-50 flex items-center justify-center text-gray-300 hover:text-rose-500 transition-all cursor-pointer"
+                      title="記録を削除"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      ) : (
+        /* 御朱印コレクション（神と対話して授かった御朱印） */
+        <div className="p-4">
+          {goshuin.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 text-center">
+              <div className="text-4xl mb-2">🧧</div>
+              <p className="text-[13px] text-gray-500 leading-relaxed">まだ御朱印がありません。<br />マップで寺社を訪れ、神と対話すると御朱印を授かれます。</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {goshuin.map((g) => (
+                <div key={g.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col items-center text-center">
+                  <div className="text-4xl mb-1">{g.godEmoji}</div>
+                  <p className="text-sm font-black text-gray-900 truncate w-full">{g.spotName}</p>
+                  <p className="text-[11px] text-gray-400 truncate w-full">{g.godName}</p>
+                  <p className="text-[10px] text-gray-300 mt-1">{fmtDate(g.receivedAt)}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
