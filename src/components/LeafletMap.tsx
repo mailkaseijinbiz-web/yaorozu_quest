@@ -18,13 +18,15 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
 
-// 1画面の表示数をズームに応じて制御（広域では少なく、拡大で増やす）
+// 1画面の表示数をズームに応じて制御。
+// 街区スケール（z≥15）では画面内の寺社をすべて表示する（神社・寺はすべて地図に出す方針）。
+// 広域では描画負荷を抑えるため上限を設ける（ズームすればすべて見られる）。
 function maxMarkersForZoom(zoom: number): number {
-  if (zoom <= 12) return 12;
-  if (zoom <= 13) return 20;
-  if (zoom <= 14) return 30;
-  if (zoom <= 15) return 45;
-  return 60;
+  if (zoom <= 11) return 80;
+  if (zoom <= 12) return 150;
+  if (zoom <= 13) return 350;
+  if (zoom <= 14) return 700;
+  return Infinity;
 }
 
 interface LeafletMapProps {
@@ -98,8 +100,11 @@ export default function LeafletMap({
     // 拡大縮小ボタンは非表示（zoomControl:false のまま）
 
     mapRef.current = map;
+    // 表示スポットの再計算は移動・ズームの「完了時」に行う。
+    // 多数の寺社マーカーを毎フレーム作り直すとドラッグがカクつくため、moveend に集約する
+    // （ドラッグ中は Leaflet が既存マーカーを座標追従で滑らかに動かす）。
     const bump = () => setMapVersion((v) => v + 1);
-    map.on('move', bump);
+    map.on('moveend', bump);
     map.on('zoomend', bump);
     setMapVersion((v) => v + 1);
 
@@ -369,7 +374,9 @@ export default function LeafletMap({
 
     visibleSpots.forEach((spot) => {
       const isActive = activeSpot?.id === spot.id;
-      const iconEmoji = spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏');
+      // 種別アイコン：神社は ⛩️ / 寺院は 🙏 で必ず分ける（地図上で一目で見分けられるように）。
+      const catEmoji = spot.category === '神社' ? '⛩️' : '🙏';
+      const iconEmoji = spot.godEmoji || catEmoji;
       // 現在地マーカーとフキダシ本体が画面上で重なるスポットは、フキダシを出さずドット表示にする
       // （フキダシが現在地に被るのを防ぐ）。フキダシ本体は地点の上方に開くため、現在地が
       // 地点の真上〜同位置（横≲116px・縦 spotPt.y-82〜+2）にあるときを「被り」とみなす。
@@ -424,16 +431,18 @@ export default function LeafletMap({
       `
         : `
         <div class="relative flex flex-col items-center">
-          <div class="w-4 h-4 rounded-full bg-[#2563eb]/70 border-2 border-white shadow-sm"></div>
+          <div style="font-size:19px;line-height:1;filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.5));">${catEmoji}</div>
+          <span class="map-spot-name">${spot.name}</span>
         </div>
       `;
 
       const spotIcon = L.divIcon({
         html: spotHtml,
         className: 'custom-spot-icon',
-        iconSize: isActive && showBubble ? [210, 128] : isActive ? [150, 64] : showBubble ? [210, 108] : [120, 30],
-        // アンカー（＝この場の地理座標）。選択中は青丸の中心、フキダシは上へ持ち上げてドットとの重なりを防ぐ
-        iconAnchor: isActive && showBubble ? [105, 78] : isActive ? [75, 20] : showBubble ? [105, 60] : [60, 8],
+        iconSize: isActive && showBubble ? [210, 128] : isActive ? [150, 64] : showBubble ? [210, 108] : [140, 40],
+        // アンカー（＝この場の地理座標）。選択中は青丸の中心、フキダシは上へ持ち上げてドットとの重なりを防ぐ。
+        // 種別アイコン（⛩️/🙏）はその中心を地点に合わせ、名前キャプションは絵文字の下に出す。
+        iconAnchor: isActive && showBubble ? [105, 78] : isActive ? [75, 20] : showBubble ? [105, 60] : [70, 10],
       });
 
       const marker = L.marker([spot.latitude, spot.longitude], {
