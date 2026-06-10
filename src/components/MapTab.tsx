@@ -4,10 +4,11 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Compass, ChevronRight, Flag, X, Camera, Check, MapPin, Clock, Navigation2, MessageCircle, Send, Search } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { Spot, User, db } from '../lib/db';
-import { uploadImage } from '../lib/upload';
+import { uploadImage, compressImage } from '../lib/upload';
 import { hasGoShuin } from '../lib/goshuin';
 import { distanceKm, bearingDeg } from '../lib/geo';
 import { getHeartVoices } from '../data/god-tasks';
+import { composeWalkGuide, nextGuideStage } from '../lib/walk-guide';
 import { Challenge, ChallengeStep, difficultyLabel, terrainLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
 
 const LeafletMap = dynamic(() => import('./LeafletMap'), {
@@ -20,13 +21,10 @@ const LeafletMap = dynamic(() => import('./LeafletMap'), {
   ),
 });
 
-// 道案内の精霊のセリフ。
-// near=false（遠い）：土地の紹介 → 歩いて向かおう、という案内。
-// near=true（500m以内）：到着間近 → さあ撮影しよう、という流れに切り替える。
-function composeGuideText(step: ChallengeStep, near = false): string {
-  if (near) {
-    return '目的地はもう目の前。あたりをゆっくり見回して、心に残る一枚を写真におさめてみよう。';
-  }
+// 道案内の精霊のセリフ（ステップ開始時の導入）。
+// 土地の紹介（蘊蓄）→ 観察指示 → 写真誘導、という語り。
+// 歩いている途中の語り（距離・豆知識・観察ミッション）は ../lib/walk-guide が担う。
+function composeGuideText(step: ChallengeStep): string {
   const intro = step.trivia ? step.trivia : '';
   const action = step.action ?? '';
   const alreadyPhoto = /写真|一枚|撮|収め|おさめ/.test(action);
@@ -151,12 +149,15 @@ export default function MapTab({
   // チャレンジ：証拠写真モーダル & 達成演出
   const [proofStep, setProofStep] = useState<ChallengeStep | null>(null);
   const [proofPhoto, setProofPhoto] = useState<string | null>(null);
+  // AIフィードバック用の軽量 dataURL。proofPhoto が Supabase の公開URLになっても
+  // vision モデルへ渡せるよう、端末で圧縮した小さいコピーを別に保持する。
+  const [proofVision, setProofVision] = useState<string | null>(null);
   const [proofComment, setProofComment] = useState(''); // 証拠写真に添えるコメント
   const [uploadingProof, setUploadingProof] = useState(false);
   const [proofError, setProofError] = useState<string | null>(null); // 写真の取り込み失敗メッセージ
-  // 達成ビート（豆知識つき・手動で次へ）
+  // 達成ビート（豆知識つき・手動で次へ）。feedback は写真へのAIのひとこと（非同期で追記）
   const [celebrate, setCelebrate] = useState<
-    { title: string; icon: string; complete: boolean; trivia?: string; triviaCategory?: TriviaCategory } | null
+    { title: string; icon: string; complete: boolean; trivia?: string; triviaCategory?: TriviaCategory; stepId?: string; feedback?: string } | null
   >(null);
   // 導入（プロローグ）を見せたチャレンジID。タブ切替でアンマウントされても消えないよう localStorage に永続化。
   const [introSeenId, setIntroSeenId] = useState<string | null>(() => {
@@ -193,9 +194,12 @@ export default function MapTab({
     if (!f) return;
     setUploadingProof(true);
     setProofError(null);
+    setProofVision(null);
     try {
       const url = await uploadImage(f, `challenge-${activeChallenge?.id ?? 'x'}`);
       setProofPhoto(url);
+      // vision 用の軽量コピー（失敗しても達成フローには影響させない）
+      compressImage(f, { maxDim: 640, quality: 0.7 }).then(setProofVision).catch(() => setProofVision(null));
     } catch {
       setProofPhoto(null);
       setProofError('写真の読み込みに失敗しました。もう一度撮影・選択してください。');
@@ -220,9 +224,33 @@ export default function MapTab({
       complete: willComplete,
       trivia: cleared.trivia,
       triviaCategory: cleared.triviaCategory,
+      stepId: cleared.id,
     });
+    // 写真の内容へのAIフィードバック（fire-and-forget）。届いたら達成ビートに追記する。
+    // 失敗・遅延は無言＝既存の演出のまま（graceful degradation）。
+    const vision = proofVision;
+    if (vision) {
+      const stepSpot = (cleared.spotId ? db.getSpot(cleared.spotId) : undefined)
+        ?? (activeChallenge.spotId ? db.getSpot(activeChallenge.spotId) : undefined);
+      fetch('/api/photo-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          photoDataUrl: vision,
+          context: { spotName: stepSpot?.name, taskTitle: cleared.title, taskAction: cleared.action, godName: stepSpot?.godName },
+        }),
+        signal: AbortSignal.timeout(12_000),
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          // ユーザーが先に「次へ」を押していたら破棄（stepId ガードで古い応答の混入も防ぐ）
+          if (d?.feedback) setCelebrate((prev) => (prev && prev.stepId === cleared.id ? { ...prev, feedback: d.feedback } : prev));
+        })
+        .catch(() => {});
+    }
     setProofStep(null);
     setProofPhoto(null);
+    setProofVision(null);
     setProofComment('');
     // 自動で閉じない（豆知識を読んでから手動で次へ）
   };
@@ -264,7 +292,6 @@ export default function MapTab({
       ? distanceKm(userLocation.lat, userLocation.lng, nextStep.lat, nextStep.lng)
       : null;
   const tooFar = nextDist != null && nextDist >= 0.5;
-  const near = nextDist != null && nextDist < 0.5; // 500m以内＝到着間近
   // 挑戦中の神のアイコン（クエストを鋳造した神→次の目的地の場の神→選択中の神→既定）。目的地マーカーの青い丸に表示する。
   const challengeGodEmoji = activeChallenge
     ? ((activeChallenge.spotId ? db.getSpot(activeChallenge.spotId)?.godEmoji : undefined)
@@ -364,11 +391,29 @@ export default function MapTab({
 
   // 複数ステップのクエストでは、上部の進捗ガイドをクエスト中ずっと表示する
   const showGuide = !!activeChallenge && activeChallenge.tasks.length > 1 && !introShowing && !celebrate && !chAllDone && !!nextStep;
+  // 道中ガイド：いま表示中の語りを {stepId, stage, text} で固定保持する。
+  // text は距離バンドの遷移時に1回だけ合成するため、GPS更新・再レンダーで
+  // タイプ表示が途中リセットされない。ステージは単調増加（walk-guide 参照）。
+  const [guideMsg, setGuideMsg] = useState<{ stepId: string; stage: number; text: string } | null>(null);
   useEffect(() => {
-    if (!(showGuide && nextStep && activeChallenge)) { setBriefTyped(''); setGuideDone(false); return; }
-    // 「次は『title』へ」ではなく、土地の紹介 → 現地で写真を撮ろう、という自然な語りにする。
-    // 目的地名・距離は下部カードに表示するため、ここでは触れない。
-    const full = composeGuideText(nextStep, near);
+    if (!(showGuide && nextStep && activeChallenge)) { setGuideMsg(null); return; }
+    setGuideMsg((prev) => {
+      const sameStep = prev?.stepId === nextStep.id;
+      const stage = nextGuideStage(nextDist, sameStep ? prev!.stage : null);
+      if (sameStep && stage === prev!.stage) return prev; // 同一バンド内は更新しない
+      // ステップ開始時は導入（蘊蓄→観察指示）、歩き出してからはバンドごとの道中語り
+      // （残り距離の声かけ・現在地近くの豆知識・道中の観察ミッションのローテーション）。
+      const text = sameStep
+        ? composeWalkGuide({ questId: activeChallenge.id, step: nextStep, stage, distKm: nextDist, user: userLocation })
+        : composeGuideText(nextStep);
+      return { stepId: nextStep.id, stage, text };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showGuide, nextStep?.id, nextDist, userLocation.lat, userLocation.lng]);
+  // 語りを一文字ずつタイプ表示
+  useEffect(() => {
+    if (!guideMsg) { setBriefTyped(''); setGuideDone(false); return; }
+    const full = guideMsg.text;
     setBriefTyped('');
     setGuideDone(false);
     let i = 0;
@@ -378,8 +423,7 @@ export default function MapTab({
       if (i >= full.length) { clearInterval(id); setGuideDone(true); }
     }, 30);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showGuide, nextStep?.id, near]);
+  }, [guideMsg]);
   // タイプ中はフキダシ本文を最下部へ追従（3行枠内でスクロール）
   useEffect(() => {
     const el = guideScrollRef.current;
@@ -433,6 +477,8 @@ export default function MapTab({
           affiliates: [],
           userName: currentUser.displayName || '旅人',
           spot: { name: activeChallenge.title, category: 'クエスト', description: activeChallenge.description, enjoyments: [] },
+          // 現在地。サーバ側で「土地の実在豆知識」を引き、精霊が道中の土地の話をできるようにする
+          location: { lat: userLocation.lat, lng: userLocation.lng },
         }),
       });
       const data = await res.json();
@@ -859,6 +905,15 @@ export default function MapTab({
                   </div>
                 ) : (
                   <p className="text-[13px] text-gray-600 mt-0.5">{celebrate.complete ? 'みごと制覇じゃ。よく歩いたのう！' : 'よくやった。次へ進もうぞ。'}</p>
+                )}
+                {celebrate.feedback && (
+                  /* 奉納した写真の内容へのAIのひとこと（非同期で届いたら表示） */
+                  <div className="mt-2 text-left rounded-xl px-3 py-2 bg-amber-50 border border-amber-200 text-amber-800 celebrate-pop">
+                    <span className="inline-flex items-center gap-1.5 text-[13px] font-black">
+                      <span className="text-lg leading-none">📸</span>写真へのひとこと
+                    </span>
+                    <p className="mt-1 text-[13px] leading-relaxed">{celebrate.feedback}</p>
+                  </div>
                 )}
               </div>
             </div>

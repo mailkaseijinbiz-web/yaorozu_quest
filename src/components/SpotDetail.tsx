@@ -7,7 +7,8 @@ import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from 
 import { distanceKm } from '../lib/geo';
 import { uploadImage } from '../lib/upload';
 import { shareToSns } from '../lib/share';
-import { grantGoShuin, hasGoShuin } from '../lib/goshuin';
+import { grantGoShuin, hasGoShuin, getGoShuinList } from '../lib/goshuin';
+import { getLevelInfo } from '../data/levels';
 import YaorozuSpirit from './YaorozuSpirit';
 import GoshuinCelebrate from './GoshuinCelebrate';
 
@@ -62,7 +63,7 @@ function resolveAgent(spot: Spot): Agent {
     spotId: spot.id,
     name: godName,
     personaDescription: `${spot.name}に宿る八百万の神。`,
-    systemPrompt: `あなたは「${spot.name}」(${spot.category})に宿る神霊「${godName}」です。${spot.description} この土地の歴史・見どころ・周辺の楽しみ方について、親しみやすくも神々しい口調で案内してください。会話の中では、巡礼者がこの街をもっと楽しめるよう、近くの「クエスト（街歩きの小さな冒険）」への挑戦や、あなたへの「依頼（徳を積むタスク）」を、押しつけがましくならない範囲で前向きに勧めてください。たとえば話題が一段落したら「ついでに近くの冒険に挑んでみぬか？」のように促します。返答は150文字以内。`,
+    systemPrompt: `あなたは「${spot.name}」(${spot.category})に宿る神霊「${godName}」です。${spot.description} この土地の歴史・見どころ・周辺の楽しみ方について、親しみやすくも神々しい口調で案内してください。会話の中では、巡礼者がこの街をもっと楽しめるよう、近くの「クエスト（街歩きの小さな冒険）」への挑戦や、あなたへの「依頼（徳を積むタスク）」を、押しつけがましくならない範囲で前向きに勧めてください。たとえば話題が一段落したら「ついでに近くの冒険に挑んでみぬか？」のように促します。返答は200字程度。`,
     avatar3dUrl: 'shrine',
     haloColor: '#c5a028',
     accessoryType: 'なし',
@@ -119,11 +120,27 @@ function SpotDetailBody({
   const [evaluating, setEvaluating] = useState(false);
   const [evalIdx, setEvalIdx] = useState(0);
 
-  // チャット
-  const [messages, setMessages] = useState<Message[]>([]);
+  // チャット。会話履歴はスポット毎に localStorage で保持し、再訪時に続きから話せる
+  // （純ローカル・直近20件。キーがスポット毎に動的なため SYNC_KEYS（クラウド同期）には含めない）。
+  const [messages, setMessages] = useState<Message[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(`yaorozu_chat_log_${spot.id}`);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.slice(-20) : [];
+    } catch {
+      return [];
+    }
+  });
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (messages.length === 0) return;
+    try {
+      localStorage.setItem(`yaorozu_chat_log_${spot.id}`, JSON.stringify(messages.slice(-20)));
+    } catch {}
+  }, [messages, spot.id]);
 
   // 「あなただけ」の投稿は本人以外には見せない（AIの参照対象からも除外）
   const ugc = useMemo(
@@ -388,7 +405,7 @@ function SpotDetailBody({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spot.id]);
 
-  // チャット初期あいさつ
+  // チャット初期あいさつ（履歴が無いときだけ。復元時は前回の続きから）
   useEffect(() => {
     if (tab === 'chat' && messages.length === 0) {
       const greet = nearbyChallenge
@@ -397,30 +414,40 @@ function SpotDetailBody({
       setMessages([
         { id: `greet-${Date.now()}`, sender: 'agent', text: greet, createdAt: new Date().toISOString() },
       ]);
-      // はじめて会話を始めた（チャットを開いた）瞬間に御朱印を授ける（スポットごとに1度）
-      const stamp = grantGoShuin(
-        currentUser.id,
-        { id: spot.id, name: spot.name, category: spot.category, godEmoji: spot.godEmoji },
-        agent.name
-      );
-      if (stamp) {
-        onGoShuinGranted?.();
-        // 神の挨拶が画面に落ち着いてから授与式を始める。300m 以内なら参拝、遠隔なら遥拝
-        //（授与のゲートはしない＝GPS拒否でもコレクションできる。ラベルだけ分ける）。
-        const isNear = userLocation
-          ? distanceKm(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude) <= 0.1
-          : true;
-        setTimeout(() => setGoshuinCelebrate({ isNear }), 900);
-      }
-      // 御朱印のみクエストが進行中なら、御朱印取得済み（今授与 or 既取得）で自動的にステップ達成
-      const pending = activeChallenge?.tasks.find((t) => t.type === 'goshuin' && t.spotId === spot.id);
-      if (pending && onAdvanceChallenge && hasGoShuin(currentUser.id, spot.id)) {
-        onAdvanceChallenge(pending.id, null);
-        flashToast(`✅ 「${pending.title}」達成！`);
-      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, messages.length, agent.name, spot.name, currentUser.displayName, nearbyChallenge]);
+
+  // 御朱印の授与と、御朱印クエストの自動達成。
+  // 会話履歴を復元すると messages.length === 0 を通らないため、あいさつとは独立した
+  // effect に分離（マウント中1回＝「チャットを開いた瞬間」の従来semanticsを維持）。
+  const chatRitualDoneRef = useRef(false);
+  useEffect(() => {
+    if (tab !== 'chat' || chatRitualDoneRef.current) return;
+    chatRitualDoneRef.current = true;
+    // はじめて会話を始めた（チャットを開いた）瞬間に御朱印を授ける（スポットごとに1度）
+    const stamp = grantGoShuin(
+      currentUser.id,
+      { id: spot.id, name: spot.name, category: spot.category, godEmoji: spot.godEmoji },
+      agent.name
+    );
+    if (stamp) {
+      onGoShuinGranted?.();
+      // 神の挨拶が画面に落ち着いてから授与式を始める。300m 以内なら参拝、遠隔なら遥拝
+      //（授与のゲートはしない＝GPS拒否でもコレクションできる。ラベルだけ分ける）。
+      const isNear = userLocation
+        ? distanceKm(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude) <= 0.1
+        : true;
+      setTimeout(() => setGoshuinCelebrate({ isNear }), 900);
+    }
+    // 御朱印のみクエストが進行中なら、御朱印取得済み（今授与 or 既取得）で自動的にステップ達成
+    const pending = activeChallenge?.tasks.find((t) => t.type === 'goshuin' && t.spotId === spot.id);
+    if (pending && onAdvanceChallenge && hasGoShuin(currentUser.id, spot.id)) {
+      onAdvanceChallenge(pending.id, null);
+      flashToast(`✅ 「${pending.title}」達成！`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, spot.id, activeChallenge?.id]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -435,6 +462,18 @@ function SpotDetailBody({
     setIsLoading(true);
     if (onMessageSent) onMessageSent();
     try {
+      // 巡礼者の歩み（神が会話で「そなたの旅」に触れられるようにする軽量サマリ）
+      const stats = db.getUserStats(currentUser.id);
+      const prog = db.getChallengeProgress();
+      const questsById = new Map(db.getAllQuests().map((q) => [q.id, q]));
+      const userContext = {
+        visitCount: stats.visitedSpotIds.length,
+        totalToku: currentUser.totalToku,
+        levelTitle: getLevelInfo(currentUser.totalToku).current.title,
+        goshuinCount: getGoShuinList(currentUser.id).length,
+        questClears: prog.completed.length,
+        questClearsHere: prog.completed.filter((id) => questsById.get(id)?.spotId === spot.id).length,
+      };
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -446,7 +485,9 @@ function SpotDetailBody({
           ugc,
           affiliates,
           userName: currentUser.displayName,
-          spot: { name: spot.name, category: spot.category, description: spot.description, enjoyments, godName: spot.godName },
+          // latitude/longitude はサーバ側で「土地の実在豆知識」を引くために使う
+          spot: { name: spot.name, category: spot.category, description: spot.description, enjoyments, godName: spot.godName, latitude: spot.latitude, longitude: spot.longitude },
+          userContext,
         }),
       });
       if (!res.ok) throw new Error('failed');

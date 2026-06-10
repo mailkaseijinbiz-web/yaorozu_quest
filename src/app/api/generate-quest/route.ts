@@ -4,6 +4,8 @@
 // プロバイダ: Gemini 優先 → OpenAI → ルールベース fallback（いずれも raw fetch）。
 import { NextResponse } from 'next/server';
 import { TASK_CATALOG, kindOfType, type TaskType, type Task, type Quest } from '../../../data/tasks';
+import { getTriviaNear, type Trivia } from '../../../data/tokyo-trivia';
+import { buildFallbackQuest } from '../../../lib/quest-fallback';
 import { isAnyPushConfigured, sendToAll } from '../../../lib/push-server';
 
 interface SpotInput {
@@ -84,55 +86,22 @@ function coerceQuest(raw: unknown, n: number, spot: SpotInput, ts: number): Ques
   };
 }
 
-// ── ルールベース fallback（価値→sense / 課題→act / 投稿→understand を必ず混ぜる） ──
-function buildFallbackQuest(spot: SpotInput, count: number, ts: number): Quest[] {
-  const enjoy = spot.enjoyments ?? [];
-  const issues = spot.issues ?? [];
-  const at = (lat?: number, lng?: number) => ({ lat: spot.latitude ?? lat, lng: spot.longitude ?? lng });
-  const mk = (type: TaskType, i: number, over: Partial<Task> = {}): Task => {
-    const c = TASK_CATALOG[type];
-    return { id: `s${i}`, type, kind: c.kind, icon: c.icon, label: c.label, title: c.title, reward: c.reward, spotId: spot.id, ...over };
-  };
+// ルールベース fallback は ../../../lib/quest-fallback.ts に分離
+// （観察ミッションカタログ＋実在豆知識から決定論的に組み立てる。テスト可能な純関数）。
 
-  const quests: Quest[] = [];
-  for (let n = 0; n < count; n++) {
-    const enjoyment = enjoy.length ? enjoy[n % enjoy.length] : '';
-    const issue = issues.length ? issues[n % issues.length] : '';
-    const tasks: Task[] = [
-      mk('visit', 0, { title: `${spot.name}に立つ`, action: `${spot.name}へ足を運び、この地の気を感じよう。`, ...at() }),
-      mk('photo', 1, { title: enjoyment ? `「${enjoyment}」を一枚に` : '佳き一枚を奉納', action: `${enjoyment || 'この場の魅力'}を写真に収めよう。`, ...at() }),
-      mk('review', 2, { action: `${spot.name}で感じた価値を、後の巡礼者へ言伝てよう。` }),
-      issue
-        ? mk('resolveIssue', 3, { title: `課題を動かす：${issue}`.slice(0, 40), action: `${spot.name}の課題「${issue}」を、あなたの手で少し動かそう。`, issueRef: { issueIndex: n % issues.length, issueText: issue } })
-        : mk('sns', 3, { action: `${spot.name}の名を、外の世界にも広めよう。` }),
-    ];
-    quests.push({
-      id: `uq-${spot.id || 'spot'}-${ts}-${n}`,
-      spotId: spot.id,
-      title: enjoyment ? `${spot.name}・${enjoyment}の巡礼` : `${spot.name}の巡礼`,
-      description: `${spot.name}を訪れ、価値を見出し、課題を動かす街歩き。`,
-      difficulty: 1,
-      minLevel: 1,
-      estMinutes: 20,
-      badgeIcon: spot.category === '神社' ? '⛩️' : '🏮',
-      badgeName: `${spot.name}の巡礼者`,
-      goalName: spot.name,
-      goalLat: spot.latitude ?? 0,
-      goalLng: spot.longitude ?? 0,
-      tasks,
-      source: 'generated',
-    });
-  }
-  return quests;
-}
-
-function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '', spotRules = ''): string {
+function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '', spotRules = '', nearby: Trivia[] = []): string {
   const soul = spot.soulMd ? `\n神の魂（口調・人格・世界観。これに沿った語り口で）:\n${spot.soulMd.slice(0, 1200)}` : '';
   const policy = rules.trim() ? `【生成ルール（最優先で厳守）】\n${rules.trim().slice(0, 2500)}\n\n` : '';
   // アマテラス＝全神の基底（普遍原則）。最優先の生成ルールと衝突する場合は生成ルールを優先する。
   const base = godRules.trim() ? `【神の普遍原則（アマテラス・全神の基底）】\n${godRules.trim().slice(0, 600)}\n（普遍原則。上の生成ルールと衝突する場合は生成ルールを優先する）\n\n` : '';
   // 場の生成ルールは「この場の価値・課題がどう整備されたか」の背景文脈として短く添える（生成指示ではない）。
   const spotPolicy = spotRules.trim() ? `\nこの場の価値・課題は次の方針で整備されている（背景。価値・課題の読み解きの参考に）:\n${spotRules.trim().slice(0, 600)}` : '';
+  // 近傍の実在豆知識。モデルが trivia/action に使ってよい「確かな事実」として渡す。
+  const materials = nearby.length
+    ? `\nこの土地の実在の素材（約4km圏内の確かな事実。trivia・action に最優先で使う）:\n${nearby
+        .map((t) => `- 【${t.landmark ?? t.area}】${t.body.slice(0, 160)}${t.walkTips[0] ? ` ／ 観察: ${t.walkTips[0]}` : ''}`)
+        .join('\n')}`
+    : '';
   return `${policy}${base}あなたは位置情報巡礼ゲーム「八百万クエスト」のクエストデザイナーです。
 以下の「場」を題材に、街歩き型のクエストを${count}個、日本語で考えてください。
 
@@ -148,13 +117,19 @@ function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '
 - bonnou_ask は人間の内面が対象で場に依存しない。bonnou_resolve は bonnou_ask の後に意味を持つ。
 - 価値タスクは「楽しみ方」から、操作タスクは「課題」から作ってください。
 - 参拝・信仰の所作（goshuin 御朱印をもらう / donate お賽銭を捧げる / gratitude 感謝を捧げる）や、覚りを高める所作（bonnou_resolve 煩悩を手放す / meditate 瞑想する）も適宜織り交ぜてください。特に神社・寺院など霊的な場では積極的に取り入れます。
-- 各タスクに trivia（その場所・土地にまつわる豆知識1〜2文。達成時にユーザーへ表示される）を付けてください。事実に自信がある場合のみ固有名詞を使い、不確かなら寺社の作法・見どころ・歩き方の一般知識にします。triviaCategory は 地形/歴史/建築/道路 のいずれか。
+- 各タスクに trivia（その場所・土地にまつわる豆知識1〜2文。達成時にユーザーへ表示される）を付けてください。下の「実在の素材」があればそれを最優先に使い、無ければ寺社の作法・見どころ・歩き方の一般知識にします。素材に無い固有名詞は創作しません。triviaCategory は 地形/歴史/建築/道路 のいずれか。
+
+町歩きの設計原則（クエストを「歩いて楽しい」体験にする）:
+- action は現地・道中で体を使う観察ミッションにする（〜を探す/見上げる/数える/見比べる/耳を澄ます/坂の上り下りを体感する）。スマホ内で完結する指示にしない。
+- trivia は「行くと確かめられる予告」として書き、同じタスクの action でそれを確かめさせる（例: trivia「この参道の蛇行は暗渠の名残」→ action「道のくねりに消えた川の流れを探そう」）。
+- 各クエストに「歩くからこそ気づく」要素（坂・段差・路地・古い石造物・狛犬や鳥居の個性・暗渠のサイン）を最低1つ入れる。
+- 参道の正中を避けて端を歩く、ご神木に触れる、御朱印や変わりおみくじを探す、門前の名物を味わうといった、寺社歩きならではの楽しみも織り交ぜてよい。
 
 場の名前: ${spot.name}
 カテゴリ: ${spot.category}
 説明: ${spot.description ?? ''}
 価値（楽しみ方）: ${(spot.enjoyments ?? []).join(' / ') || '（未収集）'}
-課題: ${(spot.issues ?? []).map((s, i) => `[${i}] ${s}`).join(' / ') || '（なし）'}${spotPolicy}${soul}
+課題: ${(spot.issues ?? []).map((s, i) => `[${i}] ${s}`).join(' / ') || '（なし）'}${materials}${spotPolicy}${soul}
 
 必ず次のJSONだけを出力してください（前後に文章を付けない）:
 {"quests":[{"title":"クエスト名","description":"100字以内の導入","difficulty":1,"estMinutes":20,"badgeIcon":"絵文字","badgeName":"バッジ名","tasks":[{"type":"visit","title":"タスク名","action":"行動指示","reward":20,"issueIndex":0,"trivia":"豆知識1〜2文","triviaCategory":"歴史"}]}]}`;
@@ -186,7 +161,9 @@ export async function POST(request: Request) {
 
     const geminiKey = process.env.GEMINI_API_KEY;
     const openaiKey = process.env.OPENAI_API_KEY;
-    const prompt = buildPrompt(spot, count, rules, godRules, spotRules);
+    const nearby =
+      spot.latitude != null && spot.longitude != null ? getTriviaNear(spot.latitude, spot.longitude, 4, 3) : [];
+    const prompt = buildPrompt(spot, count, rules, godRules, spotRules, nearby);
 
     const finalize = (parsed: unknown) => {
       const arr = (parsed as { quests?: unknown[] })?.quests;

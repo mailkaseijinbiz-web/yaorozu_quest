@@ -21,6 +21,7 @@ import type { Quest } from '../data/tasks';
 import { subscribePush } from '../lib/push-client';
 import { useDeviceHeading } from '../lib/use-device-heading';
 import { backfillTrivia } from '../lib/trivia-fill';
+import { buildTourQuest, tourAreaKey } from '../lib/quest-tour';
 
 type TabType = 'home' | 'quest' | 'mypage';
 
@@ -473,6 +474,29 @@ export default function HomePage() {
       }
     }
   }, [needsOnboard, spots, geoStatus, userLocation, generateVariedSpots, generateQuestsForSpot, generateSpotNearby]);
+
+  // 周遊クエスト（複数の神社をまわるプラン）。現在地周辺の実在神社2〜4社を歩く順に
+  // 束ねた「◯社めぐり」を1件用意する。AI不要・決定論的（同日同エリアで安定）。
+  // エリアグリッド（tourAreaKey）を saveGeneratedQuests の差し替えキーに使い、重複生成を防ぐ。
+  const lastTourKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (needsOnboard !== false || geoStatus === 'locating') return;
+    const key = tourAreaKey(userLocation.lat, userLocation.lng);
+    if (lastTourKeyRef.current === key) return;
+    if (db.getQuestsForSpot(key).length > 0) {
+      lastTourKeyRef.current = key;
+      return;
+    }
+    const d = new Date();
+    const dateSeed = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const quest = buildTourQuest({ lat: userLocation.lat, lng: userLocation.lng }, db.getSpots(), { dateSeed });
+    if (quest) {
+      db.saveGeneratedQuests(key, [quest]);
+      lastTourKeyRef.current = key;
+      setSpots(db.getSpots()); // クエスト一覧の再描画を促す
+    }
+    // quest が null（近傍の神社不足）の間は key を記録せず、場が増えたら再試行する
+  }, [needsOnboard, geoStatus, userLocation, spots]);
 
   useEffect(() => {
     if (activeSpot) {
