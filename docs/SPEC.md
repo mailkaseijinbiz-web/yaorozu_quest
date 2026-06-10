@@ -423,6 +423,7 @@ GPS生成スポットは `SPOT_TTL_MS = 30 * 24 * 60 * 60 * 1000`（30日）の 
 - **チャレンジ進行**: 上部に青バナー「Challenge In Progress」。マルチステップなら精霊フォックス＋予報バブル（1字/30ms）。下部に次ウェイポイントカード（500m閾値）。500m以遠ならボタングレーアウト、タップで「📍 近づいてください」警告（2.8秒で自動消去）。距離表示の色: ≤50m=emerald, ≤300m=amber, それ以外=青。
 - **チャレンジ完了**: 「証拠写真」ボタン → file input（capture='environment'）→ プレビュー → `onAdvanceChallenge(stepId, photoUrl)`。全ステップ完了で celebrate モーダル（紙吹雪18片、バッジ、精霊バブル＋トリビア）。
 - **インタラクティブカード**: activeChallenge が無いとき、画面下部にユーザーレベルで参加可能な最寄り未制覇クエストを表示（completed除外、activeId除外、`userLevel >= minLevel`）。距離優先・レベル可否で並べ替え。クリックで `onStartChallenge`。創世主神社を `godSpot.godName` で表示。
+- **近くの場カード（スワイプ・カルーセル）**: クエスト未参加時に画面下部へ最寄り10件をカード表示。**指に追従する横スワイプ**で隣の場へ切替（`translateX` を touchmove で直接更新、touchend で閾値判定して隣カードへスナップ）。**右に次カードを約24px チラ見せ**して横にめくれることを示す（ビューポート幅 − PEEK=34px をカード幅に、カード間 GAP=10px）。タップで詳細（`onOpenDetail`）。スワイプ直後のタップは `swipedRef` で誤爆防止。
 - **精霊ガイドチャット（マップモード）**: 予報バブル右上のフォックスアイコンで開く。`buildGuideLog`（説明＋各ステップガイド再構成）+ 追加交換を表示。`POST /api/chat`、精霊名「道案内の精霊」、systemPrompt は200字以内推奨。
 - **TTSトグル**: 音量アイコンで切替。`localStorage['yaorozu_tts']`（'0'|'1'）。ON時は `/api/tts`（ElevenLabs）→ 失敗/鍵なしで Web Speech へフォールバック。
 - **地図再描画**: リサイズ/orientationchange/PWA復帰（pageshow）で `invalidateSize()`。`onMapMove` は60000ms（60秒）スロットルでアクティビティログ記録。
