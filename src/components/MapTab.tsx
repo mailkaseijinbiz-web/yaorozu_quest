@@ -797,7 +797,7 @@ export default function MapTab({
               const held = hasGoShuin(currentUser.id, s.id); // この場の御朱印を授かり済みか
               const ugc = ugcCounts[s.id] ?? 0;
               // 探索コンパス：その場の方角を指す（端末の向きがあれば実方向、無ければ北基準）
-              const compassRot = bearingDeg(userLocation.lat, userLocation.lng, s.latitude, s.longitude) - (deviceHeading ?? 0);
+              const cardPhoto = (s.photos && s.photos[0]) || s.imageUrl || '';
               return (
                 <div
                   key={s.id}
@@ -808,12 +808,14 @@ export default function MapTab({
                   className="text-left bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-black/5 overflow-hidden cursor-pointer"
                 >
                   <div className="flex items-stretch gap-3">
-                    <div className="w-20 self-stretch rounded-l-2xl flex items-center justify-center text-4xl flex-shrink-0 bg-gradient-to-br from-blue-100 to-amber-100 relative">
-                      {godEmoji}
-                      {/* 探索コンパス：枠の上辺を、その場の方向へ回る矢印が指す（宝探し誘導） */}
-                      <div className="absolute inset-1.5 pointer-events-none transition-transform duration-300" style={{ transform: `rotate(${compassRot}deg)` }}>
-                        <Navigation2 className="w-3.5 h-3.5 text-[#2563eb] fill-[#2563eb] absolute top-0 left-1/2 -translate-x-1/2" />
-                      </div>
+                    {/* 左：その場の写真（奉納写真→代表写真の順）。無ければ神の絵文字 */}
+                    <div className="w-20 self-stretch rounded-l-2xl flex items-center justify-center text-4xl flex-shrink-0 bg-gradient-to-br from-blue-100 to-amber-100 relative overflow-hidden">
+                      {cardPhoto ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={cardPhoto} alt={s.name} className="absolute inset-0 w-full h-full object-cover" />
+                      ) : (
+                        godEmoji
+                      )}
                     </div>
                     <div className="flex-1 min-w-0 py-3">
                       {/* めくれることはドットインジケータと右の覗きカードで伝わるため、ラベル・スワイプ表記は出さない */}

@@ -7,6 +7,7 @@ import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from 
 import { distanceKm } from '../lib/geo';
 import { uploadImage, compressImage } from '../lib/upload';
 import { getVisitRecords, addVisitRecord, deleteVisitRecord, type VisitRecord } from '../lib/visit-records';
+import { getAddress } from '../lib/address';
 import { shareToSns } from '../lib/share';
 import { grantGoShuin, hasGoShuin, getGoShuinList } from '../lib/goshuin';
 import { getLevelInfo } from '../data/levels';
@@ -87,7 +88,8 @@ function SpotDetailBody({
   userLocation,
   onOpenGoshuinBook,
 }: SpotDetailProps) {
-  const [tab, setTab] = useState<'chat' | 'requests' | 'photos' | 'records'>('chat');
+  // 詳細ページは「記録」（参拝の記録）がメイン。開いた直後は記録タブを表示する
+  const [tab, setTab] = useState<'chat' | 'requests' | 'photos' | 'records'>('records');
   const [agent] = useState<Agent>(() => resolveAgent(spot));
 
   // UGCで変化する状態（写真・楽しみ方）は db から都度読む
@@ -177,6 +179,16 @@ function SpotDetailBody({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spot.id]);
   const heroPhoto = photos[0] || spot.imageUrl || '';
+
+  // 住所（逆ジオコーディング・キャッシュつき）。緯度経度の生の数字は表示しない
+  const [address, setAddress] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getAddress(spot.latitude, spot.longitude).then((a) => {
+      if (alive && a) setAddress(a);
+    });
+    return () => { alive = false; };
+  }, [spot.latitude, spot.longitude]);
 
   const flashToast = (text: string) => {
     setToast(text);
@@ -340,7 +352,10 @@ function SpotDetailBody({
         flashToast(`🔴 御朱印を授かっている！ +${task.reward}徳`);
         onChanged?.();
       } else {
-        flashToast('「会話」タブで神と語らうと御朱印を授かれます');
+        const near = userLocation
+          ? distanceKm(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude) < 0.1
+          : false;
+        flashToast(near ? '「会話」タブで神と語らうと御朱印を授かれます' : '御朱印は現地（100m以内）で神と語らうと授かれます');
         setTab('chat');
       }
       return;
@@ -473,26 +488,28 @@ function SpotDetailBody({
   }, [tab, messages.length, agent.name, spot.name, currentUser.displayName, nearbyChallenge]);
 
   // 御朱印の授与と、御朱印クエストの自動達成。
-  // 会話履歴を復元すると messages.length === 0 を通らないため、あいさつとは独立した
-  // effect に分離（マウント中1回＝「チャットを開いた瞬間」の従来semanticsを維持）。
+  // 御朱印は「実地参拝の証」：現在地からスポットまで 100m 未満のときだけ授かれる。
+  // 遠いうちは何もせず、userLocation の更新（歩いて近づく）で再評価される。
   const chatRitualDoneRef = useRef(false);
   useEffect(() => {
     if (tab !== 'chat' || chatRitualDoneRef.current) return;
+    const isNear = userLocation
+      ? distanceKm(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude) < 0.1
+      : false;
+    // まだ遠く、御朱印も未取得なら待つ（近づいた位置更新で再実行される）
+    if (!isNear && !hasGoShuin(currentUser.id, spot.id)) return;
     chatRitualDoneRef.current = true;
-    // はじめて会話を始めた（チャットを開いた）瞬間に御朱印を授ける（スポットごとに1度）
-    const stamp = grantGoShuin(
-      currentUser.id,
-      { id: spot.id, name: spot.name, category: spot.category, godEmoji: spot.godEmoji },
-      agent.name
-    );
-    if (stamp) {
-      onGoShuinGranted?.();
-      // 神の挨拶が画面に落ち着いてから授与式を始める。300m 以内なら参拝、遠隔なら遥拝
-      //（授与のゲートはしない＝GPS拒否でもコレクションできる。ラベルだけ分ける）。
-      const isNear = userLocation
-        ? distanceKm(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude) <= 0.1
-        : true;
-      setTimeout(() => setGoshuinCelebrate({ isNear }), 900);
+    if (isNear) {
+      const stamp = grantGoShuin(
+        currentUser.id,
+        { id: spot.id, name: spot.name, category: spot.category, godEmoji: spot.godEmoji },
+        agent.name
+      );
+      if (stamp) {
+        onGoShuinGranted?.();
+        // 神の挨拶が画面に落ち着いてから授与式を始める（100m未満＝参拝の証）
+        setTimeout(() => setGoshuinCelebrate({ isNear: true }), 900);
+      }
     }
     // 御朱印のみクエストが進行中なら、御朱印取得済み（今授与 or 既取得）で自動的にステップ達成
     const pending = activeChallenge?.tasks.find((t) => t.type === 'goshuin' && t.spotId === spot.id);
@@ -501,7 +518,7 @@ function SpotDetailBody({
       flashToast(`✅ 「${pending.title}」達成！`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, spot.id, activeChallenge?.id]);
+  }, [tab, spot.id, activeChallenge?.id, userLocation]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -570,15 +587,14 @@ function SpotDetailBody({
 
   return (
     <div className="absolute inset-0 bg-[#f5f7fa] flex flex-col">
-      {/* ── ヒーロー写真（無ければ NO IMAGE） ── */}
+      {/* ── ヒーロー写真（無ければ神の絵文字を据えた飾り背景。文字は出さない） ── */}
       <div className="relative h-52 flex-shrink-0 bg-gray-200">
         {heroPhoto ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={heroPhoto} alt={spot.name} className="w-full h-full object-cover" />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-center px-6 bg-gray-100">
-            <span className="text-sm font-black text-gray-400 tracking-[0.3em]">NO IMAGE</span>
-            <p className="text-[13px] text-gray-400 mt-1.5">「写真」タブから最初の一枚を奉納しよう</p>
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-100 via-amber-50 to-amber-100">
+            <span className="text-7xl opacity-80">{godEmoji}</span>
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-black/30 pointer-events-none" />
@@ -598,20 +614,22 @@ function SpotDetailBody({
             <span className="ml-1.5 text-[12px] font-bold bg-gray-500/70 backdrop-blur-md px-2 py-0.5 rounded-full">未検証</span>
           )}
           <h1 className="text-2xl font-black mt-1.5 leading-tight drop-shadow-lg">{spot.name}</h1>
-          <div className="flex items-center gap-1 mt-0.5 text-white/90">
-            <MapPin className="w-3 h-3" />
-            <span className="text-[13px]">{spot.latitude.toFixed(4)}, {spot.longitude.toFixed(4)}</span>
-          </div>
+          {address && (
+            <div className="flex items-center gap-1 mt-0.5 text-white/90">
+              <MapPin className="w-3 h-3" />
+              <span className="text-[13px]">{address}</span>
+            </div>
+          )}
         </div>
       </div>
 
       {/* ── タブ切替 ── */}
       <div className="flex border-b border-black/5 bg-white flex-shrink-0">
         {([
+          { key: 'records',  label: '記録',   icon: NotebookPen },
           { key: 'chat',     label: '会話',   icon: MessageCircle },
           { key: 'requests', label: 'クエスト', icon: Flag },
           { key: 'photos',   label: '写真',   icon: Camera },
-          { key: 'records',  label: '記録',   icon: NotebookPen },
         ] as const).map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setTab(key)} className={`flex-1 py-3 flex flex-row items-center justify-center gap-1.5 text-[12px] font-black transition-all cursor-pointer border-b-2 ${tab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
             <Icon className="w-3.5 h-3.5" />{label}
@@ -732,7 +750,7 @@ function SpotDetailBody({
             </div>
             {photos.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-center">
-                <span className="text-sm font-black text-gray-300 tracking-[0.3em]">NO IMAGE</span>
+                <span className="text-4xl">{godEmoji}</span>
                 <p className="text-[13px] text-gray-400 mt-2">まだ写真がありません。<br />最初の一枚を奉納しよう。</p>
               </div>
             ) : (
@@ -1070,7 +1088,7 @@ export default function SpotDetail(props: SpotDetailProps) {
           </div>
           {/* タブ骨格 */}
           <div className="flex border-b border-black/5 bg-white flex-shrink-0">
-            {['会話', 'クエスト', '写真', '記録'].map((label) => (
+            {['記録', '会話', 'クエスト', '写真'].map((label) => (
               <div key={label} className="flex-1 py-3 flex items-center justify-center text-[12px] font-black text-gray-300">
                 {label}
               </div>
