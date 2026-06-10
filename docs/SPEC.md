@@ -112,8 +112,13 @@ happiness = (totalValue − totalIssues) + totalToku
 
 参拝の記録を残す画面。上部に「参拝の記録／御朱印」の2サブタブ。
 - **参拝の記録**: 「新しい記録を追加」で寺社を検索選択 → 参拝日・メモ・写真（任意）を付けて記録。「ここに行った？」で近くの寺社をワンタップ記録。「これまでの記録」は参拝日降順で一覧（同一寺社は「N回目の記録」を表示・複数回記録可）。記録は `db.recordVisit()` も呼び探訪ボーナス +5徳（重複スポットは徳なし）。
-- **御朱印**: `getGoShuinList()` のコレクションをグリッド表示。
+- **御朱印**: `getGoShuinList()` のコレクションをグリッド表示。**「御朱印を撮影して保存」**で実物の御朱印を写真つきで追加できる（`addPhotoGoshuin`／`source:'photo'`、寺社は選択 or 自由入力、`deleteGoshuin` で削除可）。写真がある御朱印は朱印円の代わりに写真を表示（マイページ・御朱印帳モーダルも対応）。
 - 保存は `src/lib/visit-records.ts`（localStorage `yaorozu_visit_records_<userId>`、写真は圧縮 dataURL・容量超過時は写真を外して保存）。書き込み時に `schedulePush()` でクラウド同期（`yaorozu_visit_records_user-self` は SYNC_KEYS 対象）。
+
+#### PWA・更新検知
+
+- **Service Worker**（`public/sw.js`）はキャッシュせず配信はネットワークに委ねる（古いアプリシェルを掴まない）。`skipWaiting`＋`clients.claim`。Web Push 受信・通知タップ処理を持つ。`/sw.js` は `Cache-Control: no-cache`（`next.config.ts` の headers）。
+- **新デプロイの検知**: `next.config.ts` がデプロイごとに一意な `NEXT_PUBLIC_BUILD_ID`（Vercel はコミットSHA、他はビルド時刻）をバンドルへ埋め込む。`PwaRegister` がアプリ復帰（visibilitychange）・5分間隔で `/api/version` を `no-store` で取得し、自分のビルドIDと異なれば「✨ 新しいバージョンがあります — タップで更新」トーストを表示。タップで `location.reload()`。これにより PWA（ホーム画面起動）でも手動キャッシュ削除なしに更新できる。
 
 #### マイページのサブタブ
 
