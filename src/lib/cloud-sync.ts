@@ -13,6 +13,7 @@ const SYNC_KEYS = [
   'yaorozu_challenge_comments',
   'yaorozu_activities',
   'yaorozu_goshuin_user-self',
+  'yaorozu_visit_records_user-self', // 参拝記録（RecordTab）
   'yaorozu_daily_v1',      // 参拝ストリーク・カムバック（日付キーマップ）
   'yaorozu_god_tasks_v1',  // 場の御用の本日達成（日付キーマップ）
   // 管理者が作成するコンテンツ

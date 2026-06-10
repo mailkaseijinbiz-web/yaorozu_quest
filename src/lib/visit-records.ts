@@ -3,7 +3,10 @@
 // ユーザーが「ここに行った」と記録した参拝の履歴を localStorage に保存する。
 // 御朱印（goshuin.ts）が「神と対話した証」なのに対し、こちらは実地の参拝そのものを
 // 日付・メモ・写真つきで何度でも残せる軽量な記録（同じ寺社に複数回の記録を持てる）。
+// user-self のキーは SYNC_KEYS 対象。書き込み時に schedulePush でクラウド同期する。
 // -----------------------------------------------------------------------------
+
+import { schedulePush } from './cloud-sync';
 
 export interface VisitRecord {
   id: string;
@@ -36,6 +39,7 @@ export function getVisitRecords(userId: string): VisitRecord[] {
 function write(userId: string, list: VisitRecord[]): boolean {
   try {
     localStorage.setItem(storageKey(userId), JSON.stringify(list));
+    schedulePush(); // クラウドへ同期（user-self のキーは SYNC_KEYS 対象）
     return true;
   } catch {
     return false; // 容量超過など

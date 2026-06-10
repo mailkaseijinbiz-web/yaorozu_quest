@@ -113,7 +113,7 @@ happiness = (totalValue − totalIssues) + totalToku
 参拝の記録を残す画面。上部に「参拝の記録／御朱印」の2サブタブ。
 - **参拝の記録**: 「新しい記録を追加」で寺社を検索選択 → 参拝日・メモ・写真（任意）を付けて記録。「ここに行った？」で近くの寺社をワンタップ記録。「これまでの記録」は参拝日降順で一覧（同一寺社は「N回目の記録」を表示・複数回記録可）。記録は `db.recordVisit()` も呼び探訪ボーナス +5徳（重複スポットは徳なし）。
 - **御朱印**: `getGoShuinList()` のコレクションをグリッド表示。
-- 保存は `src/lib/visit-records.ts`（localStorage `yaorozu_visit_records_<userId>`、写真は圧縮 dataURL・容量超過時は写真を外して保存）。
+- 保存は `src/lib/visit-records.ts`（localStorage `yaorozu_visit_records_<userId>`、写真は圧縮 dataURL・容量超過時は写真を外して保存）。書き込み時に `schedulePush()` でクラウド同期（`yaorozu_visit_records_user-self` は SYNC_KEYS 対象）。
 
 #### マイページのサブタブ
 
@@ -362,19 +362,21 @@ ITEM_POOL（7種）: お守り🧿 / 御神酒🍶 / 絵馬🎴 / 神札🎋 / �
 | API_CALLS | `yaorozu_api_calls` | |
 | REVOKED | `yaorozu_revoked_users` | |
 
-### 5.2 クラウド同期（SYNC_KEYS, 16個）
+### 5.2 クラウド同期（SYNC_KEYS）
 
-Supabase へ同期されるキーは **正確に16個** であり、全 KEYS のサブセットである（`src/lib/cloud-sync.ts` で検証済み）。トリビア（`yaorozu_trivia`）・メトリクススナップショット（`yaorozu_metrics_snapshots`）など純ローカルデータは含まない。
+Supabase へ同期されるキーは全 KEYS のサブセットである（正本は `src/lib/cloud-sync.ts`）。トリビア（`yaorozu_trivia`）・メトリクススナップショット（`yaorozu_metrics_snapshots`）など純ローカルデータは含まない。
 
 ```
 yaorozu_users, yaorozu_ugc, yaorozu_user_stats, yaorozu_challenge_progress,
-yaorozu_challenge_photos, yaorozu_activities, yaorozu_goshuin_user-self,
-yaorozu_spots_v3, yaorozu_agents_v2, yaorozu_quests_v2, yaorozu_quest_rules,
+yaorozu_challenge_photos, yaorozu_challenge_comments, yaorozu_activities,
+yaorozu_goshuin_user-self, yaorozu_visit_records_user-self,
+yaorozu_daily_v1, yaorozu_god_tasks_v1,
+yaorozu_spots_v4, yaorozu_agents_v2, yaorozu_quests_v2, yaorozu_quest_rules,
 yaorozu_spot_rules, yaorozu_system_role, yaorozu_dainichi_identity,
-yaorozu_api_calls, yaorozu_revoked_users
+yaorozu_api_calls, yaorozu_revoked_users, yaorozu_bonnou, yaorozu_app_settings
 ```
 
-> **注**: 管理コンソール側の一部記述で「27 SYNC_KEYS」とされる箇所があるが誤りである。SYNC_KEYS のリストは1つだけ存在し、その要素数は16である。`yaorozu_goshuin_user-self`（御朱印）が含まれ、単一ユーザーデモのため userId が固定で埋め込まれている点に注意。
+> **注**: `yaorozu_goshuin_user-self`（御朱印）・`yaorozu_visit_records_user-self`（参拝記録）は単一ユーザーデモのため userId（`user-self`）が固定で埋め込まれている。スナップショットのバケットは `SNAPSHOT_ID`（未ログイン=`user-self`／OAuth ログイン中は認証ユーザーID）で切り替わる。
 
 スナップショットIDは単一ユーザーデモのため固定値 `user-self`（SNAPSHOT_ID）。将来は認証ユーザーIDを使用。
 
@@ -935,6 +937,6 @@ Supabase クライアントは service-role キー使用・サーバーAPIルー
 | 道案内の精霊 | クエスト進行を案内する専用エージェント（`agent-guide-spirit`）。 |
 | 合成エージェント | 個別 Agent 不在時に Spot 情報のみで応答するエージェント（`agent-synthetic-*`）。 |
 | 失効（Revocation） | 管理者削除によりユーザーを `yaorozu_revoked_users` に追加し再ログインを強制する処理。 |
-| スナップショット | localStorage の16個の SYNC_KEYS をまとめた Supabase 同期単位（ID は `user-self`）。 |
+| スナップショット | localStorage の SYNC_KEYS（`src/lib/cloud-sync.ts`）をまとめた Supabase 同期単位（バケットID は `SNAPSHOT_ID`）。 |
 | トリビア（TriviaEntry） | 町歩き蘊蓄DB（約1000件以上）。地形/歴史/建築/道路の4カテゴリ。SYNC対象外の純ローカルデータ。 |
 | TTL | GPS生成スポットの30日有効期限（SPOT_TTL_MS）。`getSpots()` で期限切れを自動削除。 |
