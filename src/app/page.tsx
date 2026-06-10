@@ -10,6 +10,7 @@ import { distanceKm, destinationPoint } from '../lib/geo';
 import HomeTab from '../components/HomeTab';
 import MapTab from '../components/MapTab';
 import SpotDetail from '../components/SpotDetail';
+import GoshuinBookModal from '../components/GoshuinBookModal';
 import DebugPanel from '../components/DebugPanel';
 import OnboardingFlow from '../components/OnboardingFlow';
 import { isDebugEnabled, getDebugLocation, setDebugLocation, type DebugLatLng } from '../lib/debug';
@@ -121,6 +122,8 @@ export default function HomePage() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [mypageTab, setMypageTab] = useState<'activity' | 'goshuin' | 'badges' | 'quests'>('activity');
   const [goShuinList, setGoShuinList] = useState<Goshuin[]>([]);
+  // 御朱印帳 modal（授与式の「御朱印帳を見る」から開く）
+  const [goshuinBookOpen, setGoshuinBookOpen] = useState(false);
   // 達成クエストの振り返り modal
   const [reviewQuest, setReviewQuest] = useState<Challenge | null>(null);
 
@@ -275,8 +278,15 @@ export default function HomePage() {
     users.forEach(u => { profiles[u.id] = u; });
     setCreatorProfiles(profiles);
 
-    const initialSpot = initSpots[0];
-    setActiveSpot(initialSpot ?? null);
+    // 初期アクティブは「現在地（未取得時は既定の東京中心）に最も近い実在スポット」。
+    // 配列先頭を選ぶと、シード順（緯度ソート）で最南西の場へ地図が飛んでしまうため。
+    const nearestSpot = initSpots.reduce<Spot | null>((best, s) => {
+      const d = distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude);
+      if (!best) return s;
+      const bd = distanceKm(userLocation.lat, userLocation.lng, best.latitude, best.longitude);
+      return d < bd ? s : best;
+    }, null);
+    setActiveSpot(nearestSpot);
 
     // 管理者に削除されたユーザーは再ログイン画面へ
     if (db.isRevoked('user-self')) {
@@ -1126,9 +1136,9 @@ export default function HomePage() {
             allSpots={spots}
             userLocation={userLocation}
             onOpenGoshuinBook={() => {
-              window.history.back(); // detailSpot は history 連動なので同じ流儀で閉じる
-              setActiveTab('mypage');
-              setMypageTab('goshuin');
+              // 授与式の文脈を保ったまま、その場に御朱印帳を modal で重ねて表示する
+              if (currentUser) setGoShuinList(getGoShuinList(currentUser.id));
+              setGoshuinBookOpen(true);
             }}
             onClose={() => window.history.back()}
             onOpenRelated={(s) => setDetailSpot(s)}
@@ -1160,6 +1170,11 @@ export default function HomePage() {
               refreshDatabaseStates();
             }}
           />
+        )}
+
+        {/* ── 御朱印帳 modal（授与式の「御朱印帳を見る」から開く） ── */}
+        {goshuinBookOpen && (
+          <GoshuinBookModal goShuinList={goShuinList} onClose={() => setGoshuinBookOpen(false)} />
         )}
 
         {/* ── 達成クエストの振り返り modal（写真・物語を振り返り、#YAOROZUQUEST でシェア） ── */}
