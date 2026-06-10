@@ -29,8 +29,9 @@ const MEDALLION_FRAME =
   'polygon(50% 0%, 79.4% 9.5%, 97.6% 34.5%, 97.6% 65.5%, 79.4% 90.5%, 50% 100%, 20.6% 90.5%, 2.4% 65.5%, 2.4% 34.5%, 20.6% 9.5%)';
 const XP_SHIELD = 'polygon(0% 0%, 100% 0%, 100% 58%, 50% 100%, 0% 58%)';
 
-// 場・クエストを「近い / 中くらい / 遠い」が混ざるように散らす距離（km）。約 500m / 1000m / 3000m。
-const VARIED_SPOT_DISTANCES_KM = [0.5, 1.0, 3.0];
+// 場・クエストを散らす距離（km）。先頭の 0 ＝現在地そのもの（訪れた寺社を必ず1件出す）。
+// 続けて 約 500m / 1000m / 3000m に「近い / 中くらい / 遠い」を散らす。
+const VARIED_SPOT_DISTANCES_KM = [0, 0.5, 1.0, 3.0];
 
 // 新たに獲得したバッジを検出（既読は localStorage で管理。初回は既存を既読化して演出しない）。
 function detectNewBadges(stats: UserContribution, user: UserType): BadgeState[] {
@@ -439,8 +440,15 @@ export default function HomePage() {
   useEffect(() => {
     if (needsOnboard !== false) return;
     if (geoStatus === 'locating') return;
-    if (spots.length === 0) {
-      // 場が無い → 近・中・遠が混ざるよう複数生成（クエストも自動チェーン）
+    // 「現在地の近く（~1.5km）に場があるか」で判定する。
+    // シードは東京中心に密集しているため spots.length はほぼ常に >0 だが、地方・新しい土地に
+    // 来るとシード全件が遠くなり近傍ゼロになる。そこで現在地基準で実在の寺社を生成する
+    // （例: 善光寺へ行ったのに地図に出ない、を解消）。
+    const hasNearbySpot = spots.some(
+      (s) => distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude) <= 1.5,
+    );
+    if (!hasNearbySpot) {
+      // 近くに場が無い → 現在地そのもの＋近・中・遠に実在の寺社を生成（クエストも自動チェーン）
       generateVariedSpots(userLocation.lat, userLocation.lng);
     } else if (db.getAllQuests().length === 0) {
       // 場はあるがクエストが無い → 既存の場からクエストを生成
@@ -452,7 +460,7 @@ export default function HomePage() {
         generateSpotNearby(userLocation.lat, userLocation.lng);
       }
     }
-  }, [needsOnboard, spots.length, geoStatus, userLocation, generateVariedSpots, generateQuestsForSpot, generateSpotNearby]);
+  }, [needsOnboard, spots, geoStatus, userLocation, generateVariedSpots, generateQuestsForSpot, generateSpotNearby]);
 
   useEffect(() => {
     if (activeSpot) {
