@@ -11,6 +11,7 @@ import HomeTab from '../components/HomeTab';
 import MapTab from '../components/MapTab';
 import SpotDetail from '../components/SpotDetail';
 import DebugPanel from '../components/DebugPanel';
+import OnboardingFlow from '../components/OnboardingFlow';
 import { isDebugEnabled, getDebugLocation, setDebugLocation, type DebugLatLng } from '../lib/debug';
 import { getLevelInfo } from '../data/levels';
 import { getBadgeStates, godAvatarEmoji, type BadgeState } from '../data/badges';
@@ -18,6 +19,7 @@ import { Challenge } from '../data/challenges';
 import type { Quest } from '../data/tasks';
 import { subscribePush } from '../lib/push-client';
 import { useDeviceHeading } from '../lib/use-device-heading';
+import { backfillTrivia } from '../lib/trivia-fill';
 
 type TabType = 'home' | 'quest' | 'mypage';
 
@@ -59,10 +61,15 @@ const FALLBACK_CURRENT_USER: UserType = {
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [isRevoked, setIsRevoked] = useState(false); // 管理者削除によるアカウント失効
-  const [needsOnboard, setNeedsOnboard] = useState(false); // 初回起動の登録（オンボーディング）
+  // 初回起動の登録（オンボーディング）。null=未判定。
+  // boolean 初期値だと初回マウントの effect フラッシュで watchPosition が「未判定のまま」起動し、
+  // オンボーディングより先に OS の位置情報ダイアログが出てしまう（プレパーミッション設計が破られる）。
+  const [needsOnboard, setNeedsOnboard] = useState<boolean | null>(null);
   const [onboardName, setOnboardName] = useState(''); // オンボーディングの名前入力
   const [authProfile, setAuthProfile] = useState<AuthProfile | null>(null); // OAuthログイン中のユーザー
   const [earnedBadge, setEarnedBadge] = useState<BadgeState | null>(null); // 新規獲得バッジの演出
+  const [pushNotice, setPushNotice] = useState<string | null>(null); // 通知購読の結果トースト
+  const [comebackDays, setComebackDays] = useState<number | null>(null); // カムバック歓迎（◯日ぶり）
   const [spots, setSpots] = useState<Spot[]>([]);
   const [activeSpot, setActiveSpot] = useState<Spot | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -92,6 +99,9 @@ export default function HomePage() {
   const [userLocation, setUserLocation] = useState({ lat: 35.6580, lng: 139.7514 });
   // GPS 取得状態（失敗時にユーザーへ明示する）
   const [geoStatus, setGeoStatus] = useState<'locating' | 'ok' | 'denied' | 'error'>('locating');
+  // 位置情報を「あとで」にしたユーザーへ、直後に OS ダイアログを出し直さないためのフラグ
+  // （地図の「再取得」など、ユーザー自身の操作で解除される）
+  const [geoSkipped, setGeoSkipped] = useState(false);
   // デバッグモード（位置情報が許可されない環境でも現在地を手動指定してテストできる）
   const [debugMode, setDebugMode] = useState(false);
   useEffect(() => { setDebugMode(isDebugEnabled()); }, []);
@@ -154,7 +164,8 @@ export default function HomePage() {
       if (res.ok) {
         const data = await res.json() as { quests?: Quest[] };
         if (Array.isArray(data.quests) && data.quests.length) {
-          db.saveGeneratedQuests(spot.id, data.quests);
+          // AI が trivia を返さなかったタスクへ、ローカルの蘊蓄DBから補完（候補が無ければそのまま）
+          db.saveGeneratedQuests(spot.id, backfillTrivia(data.quests, spot));
           db.trackApiCall('ai_generate');
           refreshDatabaseStates();
           // 通知はサーバ自動プッシュ（/api/generate-quest）が担うため、ここでは出さない
@@ -276,10 +287,13 @@ export default function HomePage() {
     const self = db.getUser('user-self') ?? FALLBACK_CURRENT_USER;
     setCurrentUser(self);
     setEditName(self.displayName);
-    // 初回起動：未登録ならオンボーディング（名前・アバター設定）へ
+    // 初回起動：未登録ならオンボーディング（名前・アバター設定）へ。
+    // 登録済みなら false を明示してから位置情報の監視（watchPosition）が始まる。
     if (typeof window !== 'undefined' && localStorage.getItem('yaorozu_registered') !== '1') {
       setNeedsOnboard(true);
       setOnboardName(self.displayName && self.displayName !== '巡礼者' ? self.displayName : '');
+    } else {
+      setNeedsOnboard(false);
     }
     setUserStats(db.getUserStats('user-self'));
     setActiveChallengeId(db.getChallengeProgress().activeId);
@@ -292,30 +306,26 @@ export default function HomePage() {
       setGoShuinList(getGoShuinList('user-self'));
     }
 
-    // 初回生成のシード座標：デバッグ位置があればそれ、無ければ東京デフォルト（GPS取得前）
-    const seed = (isDebugEnabled() && getDebugLocation()) || { lat: 35.6580, lng: 139.7514 };
-    // 初回表示時：場が無ければ生成（クエスト有無に関係なく）。場があってクエストが無ければクエストだけ生成
-    if (initSpots.length === 0) {
-      // 場も無い → 近・中・遠の場を複数生成（場の生成後にクエストも自動チェーンされる）
-      generateVariedSpots(seed.lat, seed.lng);
-    } else if (db.getAllQuests().length === 0) {
-      // 場はあるがクエストが無い → クエストを生成
-      const agentSpotIds = new Set(db.getAgents().map(a => a.spotId));
-      const spotWithAgent = initSpots.find(s => agentSpotIds.has(s.id));
-      if (spotWithAgent) {
-        generateQuestsForSpot(spotWithAgent, db.getAgentBySpot(spotWithAgent.id) ?? null);
-      } else {
-        generateSpotNearby(seed.lat, seed.lng);
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // 初回の場・クエスト生成はここでは行わない。
+    // 旧実装はマウント直後に東京固定座標(35.658,139.751)で生成していたため、地方ユーザーの
+    // 初回クエストが数百km先に湧いていた。位置が確定してから下の自動生成エフェクトが行う。
   }, []);
 
   // クラウド永続化：起動時にスナップショットを復元（鍵未設定なら no-op）
   useEffect(() => {
     let cancelled = false;
     pullSnapshot().then((applied) => {
-      if (applied && !cancelled) refreshDatabaseStates();
+      if (cancelled) return;
+      if (applied) refreshDatabaseStates();
+      // カムバック判定はクラウド復元の後に行う（復元前のローカル判定は別端末の活動を見落とす）。
+      // 未登録（オンボーディング中）の新規ユーザーには出さない。
+      if (typeof window !== 'undefined' && localStorage.getItem('yaorozu_registered') === '1') {
+        const gap = db.grantComebackBonus();
+        if (gap) {
+          setComebackDays(gap);
+          refreshDatabaseStates();
+        }
+      }
     });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -353,6 +363,7 @@ export default function HomePage() {
 
   // 実際のGPS現在地を取得して反映
   const requestLocation = useCallback(() => {
+    setGeoSkipped(false); // ユーザー自身が要求した＝「あとで」フラグを解除して以降の追従を有効化
     // デバッグモード：実 GPS を使わず、手動設定した座標（無ければ既定の東京中心）を現在地にする
     if (isDebugEnabled()) {
       const dbg = getDebugLocation();
@@ -378,8 +389,11 @@ export default function HomePage() {
     );
   }, []);
 
-  // GPS を継続監視して、歩いて移動しても現在地が追従して更新されるようにする
+  // GPS を継続監視して、歩いて移動しても現在地が追従して更新されるようにする。
+  // オンボーディング中・要否未判定（null）の間は起動しない＝初回起動でいきなり OS の
+  // 許可ダイアログを出さない（step2 で「近くの神様を探すため」という文脈を添えてから要求する）。
   useEffect(() => {
+    if (needsOnboard !== false || geoSkipped) return;
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setGeoStatus('error');
       return;
@@ -397,7 +411,7 @@ export default function HomePage() {
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
     );
     return () => navigator.geolocation.clearWatch(watchId);
-  }, []);
+  }, [needsOnboard, geoSkipped]);
 
   // デバッグ：指定座標を現在地として設定し、その地点の場を生成する
   const applyDebugLocation = useCallback((loc: DebugLatLng) => {
@@ -409,13 +423,26 @@ export default function HomePage() {
     if (currentUser) db.logActivity({ type: 'map_move', userId: currentUser.id, source: 'human' });
   }, [generateVariedSpots, currentUser]);
 
-  // 場が0件かつ位置情報が確定したら自動生成（初回起動・全期限切れ後）。
-  // 地図に場が無いので、近・中・遠が混ざるよう複数生成する。
+  // 場・クエストの自動生成（初回起動・全期限切れ後・オンボーディング完了直後）。
+  // 位置情報が確定してから現在地基準で生成する。オンボーディング中は geoStatus が
+  // 'locating' のままなので走らない（東京固定座標での先走り生成と AI API の浪費を防ぐ）。
   useEffect(() => {
-    if (spots.length > 0) return;
+    if (needsOnboard !== false) return;
     if (geoStatus === 'locating') return;
-    generateVariedSpots(userLocation.lat, userLocation.lng);
-  }, [spots.length, geoStatus, userLocation, generateVariedSpots]);
+    if (spots.length === 0) {
+      // 場が無い → 近・中・遠が混ざるよう複数生成（クエストも自動チェーン）
+      generateVariedSpots(userLocation.lat, userLocation.lng);
+    } else if (db.getAllQuests().length === 0) {
+      // 場はあるがクエストが無い → 既存の場からクエストを生成
+      const agentSpotIds = new Set(db.getAgents().map(a => a.spotId));
+      const spotWithAgent = db.getSpots().find(s => agentSpotIds.has(s.id));
+      if (spotWithAgent) {
+        generateQuestsForSpot(spotWithAgent, db.getAgentBySpot(spotWithAgent.id) ?? null);
+      } else {
+        generateSpotNearby(userLocation.lat, userLocation.lng);
+      }
+    }
+  }, [needsOnboard, spots.length, geoStatus, userLocation, generateVariedSpots, generateQuestsForSpot, generateSpotNearby]);
 
   useEffect(() => {
     if (activeSpot) {
@@ -449,6 +476,13 @@ export default function HomePage() {
     const t = setTimeout(() => setEarnedBadge(null), 4500);
     return () => clearTimeout(t);
   }, [earnedBadge]);
+
+  // 通知購読トーストを4秒で自動的に閉じる
+  useEffect(() => {
+    if (!pushNotice) return;
+    const t = setTimeout(() => setPushNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [pushNotice]);
 
   // 達成クエストを写真とともに振り返りシェア（Web Share API、非対応時はクリップボード）
   const shareQuest = async (title: string, badgeName: string, badgeIcon: string, photos: string[]) => {
@@ -539,7 +573,7 @@ export default function HomePage() {
             onClick={() => {
               db.reinstateUser('user-self');
               // ユーザーデータをクリアして再スタート（登録もリセットしてオンボーディングへ）
-              ['yaorozu_users','yaorozu_user_stats','yaorozu_challenge_progress','yaorozu_challenge_photos','yaorozu_goshuin_user-self','yaorozu_registered'].forEach(k => localStorage.removeItem(k));
+              ['yaorozu_users','yaorozu_user_stats','yaorozu_challenge_progress','yaorozu_challenge_photos','yaorozu_goshuin_user-self','yaorozu_registered','yaorozu_daily_v1','yaorozu_god_tasks_v1'].forEach(k => localStorage.removeItem(k));
               window.location.reload();
             }}
             className="w-full bg-shrine-red text-white font-black py-3 rounded-xl hover:opacity-90 cursor-pointer"
@@ -551,75 +585,31 @@ export default function HomePage() {
     );
   }
 
-  // 初回起動：巡礼者登録（オンボーディング）
+  // 初回起動：3ステップ・オンボーディング（世界観 → 名前 → 位置情報プライミング）
   if (needsOnboard) {
-    const previewName = onboardName.trim() || 'あなた';
-    const avatarUrl = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(previewName)}`;
-    const register = () => {
-      const name = onboardName.trim();
-      if (!name) return;
-      const updated = db.updateUserProfile('user-self', name); // displayName + avatar を設定
-      setCurrentUser(updated);
-      setEditName(updated.displayName);
-      try { localStorage.setItem('yaorozu_registered', '1'); } catch {}
-      if (currentUser) db.logActivity({ type: 'home_view', userId: 'user-self', source: 'human', detail: '登録' });
-      setNeedsOnboard(false);
-      refreshDatabaseStates();
-    };
     return (
-      <div className="flex-1 min-h-dvh bg-[#eaecef] flex items-center justify-center p-6">
-        <div className="bg-white rounded-3xl shadow-xl p-8 max-w-xs w-full text-center">
-          <div className="text-2xl font-black tracking-tight leading-none mb-1">
-            <span className="text-shrine-red">YAOROZU</span><span className="text-gray-900"> QUEST</span>
-          </div>
-          <p className="text-[13px] text-gray-500 mb-5">巡礼者として、名前を授かりましょう。</p>
-
-          {/* アカウントでログイン（OAuth 設定時のみ表示） */}
-          {isAuthConfigured() && (
-            <div className="mb-5">
-              <button
-                onClick={() => signInWithProvider('google')}
-                className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 text-gray-800 font-black py-3 rounded-xl hover:bg-gray-50 active:scale-[0.99] transition-all cursor-pointer mb-2"
-              >
-                <span className="text-base">🔵</span> Google で続ける
-              </button>
-              <button
-                onClick={() => signInWithProvider('apple')}
-                className="w-full flex items-center justify-center gap-2 bg-black text-white font-black py-3 rounded-xl hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer"
-              >
-                <span className="text-base"></span> Apple で続ける
-              </button>
-              <div className="flex items-center gap-2 my-4">
-                <span className="flex-1 h-px bg-gray-200" />
-                <span className="text-[11px] text-gray-400">または</span>
-                <span className="flex-1 h-px bg-gray-200" />
-              </div>
-              <p className="text-[12px] font-bold text-gray-500 mb-2">ゲストとして始める</p>
-            </div>
-          )}
-
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={avatarUrl} alt="アバター" className="w-24 h-24 mx-auto rounded-full border-4 border-shrine-red/30 bg-sky-50 mb-4" />
-          <input
-            type="text"
-            value={onboardName}
-            onChange={(e) => setOnboardName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') register(); }}
-            maxLength={12}
-            autoFocus
-            placeholder="巡礼者の名前"
-            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-center text-base text-gray-900 focus:outline-none focus:border-shrine-red mb-2"
-          />
-          <p className="text-[11px] text-gray-400 mb-4">アバターは名前から自動生成されます（後でクエストの「アバターを撮る」で写真にできます）。</p>
-          <button
-            onClick={register}
-            disabled={!onboardName.trim()}
-            className="w-full bg-shrine-red text-white font-black py-3 rounded-xl hover:opacity-90 disabled:opacity-40 cursor-pointer"
-          >
-            巡礼をはじめる
-          </button>
-        </div>
-      </div>
+      <OnboardingFlow
+        initialName={onboardName}
+        geoStatus={geoStatus}
+        onRequestLocation={requestLocation}
+        onComplete={(name, { requestedLocation }) => {
+          const trimmed = name.trim();
+          if (!trimmed) return;
+          const updated = db.updateUserProfile('user-self', trimmed); // displayName + avatar を設定
+          setCurrentUser(updated);
+          setEditName(updated.displayName);
+          try { localStorage.setItem('yaorozu_registered', '1'); } catch {}
+          db.logActivity({ type: 'home_view', userId: 'user-self', source: 'human', detail: '登録' });
+          if (!requestedLocation) {
+            // 「あとで」：本編に入った直後に OS ダイアログを出し直さない。
+            // 東京中心を仮の現在地とし、地図のバナー（再取得）からいつでも有効化できる。
+            setGeoSkipped(true);
+            setGeoStatus('error');
+          }
+          setNeedsOnboard(false);
+          refreshDatabaseStates();
+        }}
+      />
     );
   }
 
@@ -658,7 +648,12 @@ export default function HomePage() {
                 userLocation={userLocation}
                 isGeneratingQuests={isGeneratingQuests}
                 onStartChallenge={(cid) => {
-                  subscribePush(); // クエスト参加を機に通知購読（以降サーバ自動プッシュが届く）
+                  // クエスト参加を機に通知購読（以降サーバ自動プッシュが届く）。
+                  // 拒否されても旅は続けられることを明示し、「無視された/壊れた」という不安を残さない。
+                  subscribePush().then((r) => {
+                    if (r === 'denied') setPushNotice('通知は届かぬが、旅は続けられるぞ。マイページからいつでも有効にできる');
+                    else if (r === 'subscribed') setPushNotice('📯 神からの知らせが届くようになった');
+                  });
                   db.setActiveChallenge(cid);
                   setActiveChallengeId(cid);
                   setActiveTab('quest');
@@ -723,7 +718,9 @@ export default function HomePage() {
                     const ch = db.getQuest(activeChallengeId);
                     if (!ch) return;
                     if (photo) db.saveChallengePhoto(activeChallengeId, stepId, photo);
-                    db.completeChallengeStep(currentUser.id, activeChallengeId, stepId, ch.tasks.length);
+                    // 参加モーダルで約束した「+◯徳」をそのまま払う（未指定タスクは既定の20徳）
+                    const task = ch.tasks.find((t) => t.id === stepId);
+                    db.completeChallengeStep(currentUser.id, activeChallengeId, stepId, ch.tasks.length, task?.reward);
                     refreshDatabaseStates();
                   }}
                 />
@@ -1053,6 +1050,18 @@ export default function HomePage() {
 
         </div>
 
+        {/* 通知購読の結果トースト（参加フローを妨げない軽量ピル） */}
+        {pushNotice && (
+          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[3500] max-w-[85%] celebrate-pop">
+            <div
+              onClick={() => setPushNotice(null)}
+              className="bg-gray-900/90 text-white text-[12px] font-bold px-4 py-2.5 rounded-full shadow-lg text-center leading-snug cursor-pointer"
+            >
+              {pushNotice}
+            </div>
+          </div>
+        )}
+
         <nav
           className="glass-panel border-t border-black/5 pt-2 px-1 flex justify-around items-center z-[3000] bg-white/95 backdrop-blur-lg flex-shrink-0"
           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}
@@ -1110,6 +1119,12 @@ export default function HomePage() {
             spot={detailSpot}
             currentUser={currentUser || FALLBACK_CURRENT_USER}
             allSpots={spots}
+            userLocation={userLocation}
+            onOpenGoshuinBook={() => {
+              window.history.back(); // detailSpot は history 連動なので同じ流儀で閉じる
+              setActiveTab('mypage');
+              setMypageTab('goshuin');
+            }}
             onClose={() => window.history.back()}
             onOpenRelated={(s) => setDetailSpot(s)}
             onChanged={refreshDatabaseStates}
@@ -1134,7 +1149,9 @@ export default function HomePage() {
               const ch = db.getQuest(activeChallengeId);
               if (!ch) return;
               if (photo) db.saveChallengePhoto(activeChallengeId, stepId, photo);
-              db.completeChallengeStep(currentUser.id, activeChallengeId, stepId, ch.tasks.length);
+              // 参加モーダルで約束した「+◯徳」をそのまま払う（未指定タスクは既定の20徳）
+              const task = ch.tasks.find((t) => t.id === stepId);
+              db.completeChallengeStep(currentUser.id, activeChallengeId, stepId, ch.tasks.length, task?.reward);
               refreshDatabaseStates();
             }}
           />
@@ -1196,6 +1213,26 @@ export default function HomePage() {
             </div>
           );
         })()}
+
+        {/* ── カムバック歓迎（3日以上ぶりの帰還を祝う） ── */}
+        {comebackDays !== null && (
+          <div className="absolute inset-0 z-[4400] flex items-center justify-center p-6" onClick={() => setComebackDays(null)}>
+            <div className="absolute inset-0 bg-black/55" />
+            <div className="relative celebrate-pop w-full max-w-[300px] bg-white rounded-3xl shadow-2xl px-6 py-7 text-center">
+              <p className="text-[11px] font-black tracking-[0.25em] text-sky-500">WELCOME BACK</p>
+              <div className="text-6xl mt-3 leading-none">⛩️</div>
+              <h3 className="text-lg font-black text-gray-900 mt-3">{comebackDays}日ぶりじゃの。よう戻った</h3>
+              <p className="text-[13px] text-gray-500 mt-1 leading-relaxed">留守の間も場は息災じゃ。お帰りの祝いに徳を授けよう。</p>
+              <p className="text-xl font-black text-amber-600 mt-2">+30徳</p>
+              <button
+                onClick={() => setComebackDays(null)}
+                className="w-full mt-5 bg-gradient-to-r from-sky-500 to-blue-600 text-white text-[15px] font-black py-3 rounded-full shadow-lg shadow-sky-500/40 hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer"
+              >
+                ただいま参った
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── バッジ獲得演出 ── */}
         {earnedBadge && (

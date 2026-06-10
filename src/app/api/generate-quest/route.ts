@@ -50,6 +50,12 @@ function coerceTask(raw: unknown, i: number, spot: SpotInput): Task {
     task.issueRef = { issueIndex: idx, issueText: spot.issues[idx] };
     task.title = `課題を動かす：${spot.issues[idx]}`.slice(0, 40);
   }
+  // 蘊蓄（達成カードに出る町歩きの豆知識）。モデルが返した場合のみ採用。
+  if (typeof r.trivia === 'string' && r.trivia.trim()) {
+    task.trivia = r.trivia.trim().slice(0, 140);
+    const cat = String(r.triviaCategory ?? '');
+    task.triviaCategory = (['地形', '歴史', '建築', '道路'] as const).find((c) => c === cat) ?? '歴史';
+  }
   return task;
 }
 
@@ -142,6 +148,7 @@ function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '
 - bonnou_ask は人間の内面が対象で場に依存しない。bonnou_resolve は bonnou_ask の後に意味を持つ。
 - 価値タスクは「楽しみ方」から、操作タスクは「課題」から作ってください。
 - 参拝・信仰の所作（goshuin 御朱印をもらう / donate お賽銭を捧げる / gratitude 感謝を捧げる）や、覚りを高める所作（bonnou_resolve 煩悩を手放す / meditate 瞑想する）も適宜織り交ぜてください。特に神社・寺院など霊的な場では積極的に取り入れます。
+- 各タスクに trivia（その場所・土地にまつわる豆知識1〜2文。達成時にユーザーへ表示される）を付けてください。事実に自信がある場合のみ固有名詞を使い、不確かなら寺社の作法・見どころ・歩き方の一般知識にします。triviaCategory は 地形/歴史/建築/道路 のいずれか。
 
 場の名前: ${spot.name}
 カテゴリ: ${spot.category}
@@ -150,7 +157,7 @@ function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '
 課題: ${(spot.issues ?? []).map((s, i) => `[${i}] ${s}`).join(' / ') || '（なし）'}${spotPolicy}${soul}
 
 必ず次のJSONだけを出力してください（前後に文章を付けない）:
-{"quests":[{"title":"クエスト名","description":"100字以内の導入","difficulty":1,"estMinutes":20,"badgeIcon":"絵文字","badgeName":"バッジ名","tasks":[{"type":"visit","title":"タスク名","action":"行動指示","reward":20,"issueIndex":0}]}]}`;
+{"quests":[{"title":"クエスト名","description":"100字以内の導入","difficulty":1,"estMinutes":20,"badgeIcon":"絵文字","badgeName":"バッジ名","tasks":[{"type":"visit","title":"タスク名","action":"行動指示","reward":20,"issueIndex":0,"trivia":"豆知識1〜2文","triviaCategory":"歴史"}]}]}`;
 }
 
 function extractJson(text: string): unknown {
