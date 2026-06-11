@@ -9,7 +9,7 @@ import { hasGoShuin } from '../lib/goshuin';
 import { distanceKm, bearingDeg } from '../lib/geo';
 import { getHeartVoices } from '../data/god-tasks';
 import { composeWalkGuide, nextGuideStage } from '../lib/walk-guide';
-import { Challenge, ChallengeStep, difficultyLabel, terrainLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
+import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
 
 const LeafletMap = dynamic(() => import('./LeafletMap'), {
   ssr: false,
@@ -337,6 +337,10 @@ export default function MapTab({
   const dragRef = useRef<{ startX: number; dragging: boolean; dx: number }>({ startX: 0, dragging: false, dx: 0 });
 
   // ビューポート幅からカード幅を計測（右の覗き分を差し引く）。
+  // カード領域はクエスト中・達成ビート中は描画されないため、「表示されているか」を
+  // 依存に含める（cardSpot だけだと、クエスト終了で再表示されたとき el=null のまま
+  // 計測されず slideW=0 → カードが全幅＋ズレた位置で描画され左右が見切れる）。
+  const cardCarouselVisible = !activeChallenge && !celebrate && !!cardSpot;
   useEffect(() => {
     const el = cardViewportRef.current;
     if (!el) return;
@@ -345,7 +349,7 @@ export default function MapTab({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [!!cardSpot]);
+  }, [cardCarouselVisible]);
   // 現在カードの位置を ref に同期（タッチハンドラのクロージャから最新を読む）。
   useEffect(() => { cardIdxRef.current = cardIdx < 0 ? 0 : cardIdx; }, [cardIdx]);
 
@@ -780,7 +784,8 @@ export default function MapTab({
             className="flex items-stretch will-change-transform"
             style={{
               gap: `${CARD_GAP}px`,
-              transform: `translateX(${cardBaseFor(cardIdx < 0 ? 0 : cardIdx)}px)`,
+              // 計測前（slideW=0）はオフセットを掛けない＝見切れたカードを出さない
+              transform: `translateX(${slideW ? cardBaseFor(cardIdx < 0 ? 0 : cardIdx) : 0}px)`,
               transition: slideW ? 'transform .3s cubic-bezier(.22,.61,.36,1)' : 'none',
             }}
           >
@@ -792,8 +797,7 @@ export default function MapTab({
               const held = hasGoShuin(currentUser.id, s.id); // この場の御朱印を授かり済みか
               const ugc = ugcCounts[s.id] ?? 0;
               // 探索コンパス：その場の方角を指す（端末の向きがあれば実方向、無ければ北基準）
-              const compassRot = bearingDeg(userLocation.lat, userLocation.lng, s.latitude, s.longitude) - (deviceHeading ?? 0);
-              const ter = terrainLabel(s.terrain); // 地形(Terrain)バッジ用
+              const cardPhoto = (s.photos && s.photos[0]) || s.imageUrl || '';
               return (
                 <div
                   key={s.id}
@@ -804,20 +808,17 @@ export default function MapTab({
                   className="text-left bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-black/5 overflow-hidden cursor-pointer"
                 >
                   <div className="flex items-stretch gap-3">
-                    <div className="w-20 self-stretch rounded-l-2xl flex items-center justify-center text-4xl flex-shrink-0 bg-gradient-to-br from-blue-100 to-amber-100 relative">
-                      {godEmoji}
-                      {/* 探索コンパス：枠の上辺を、その場の方向へ回る矢印が指す（宝探し誘導） */}
-                      <div className="absolute inset-1.5 pointer-events-none transition-transform duration-300" style={{ transform: `rotate(${compassRot}deg)` }}>
-                        <Navigation2 className="w-3.5 h-3.5 text-[#2563eb] fill-[#2563eb] absolute top-0 left-1/2 -translate-x-1/2" />
-                      </div>
+                    {/* 左：その場の写真（奉納写真→代表写真の順）。無ければ神の絵文字 */}
+                    <div className="w-20 self-stretch rounded-l-2xl flex items-center justify-center text-4xl flex-shrink-0 bg-gradient-to-br from-blue-100 to-amber-100 relative overflow-hidden">
+                      {cardPhoto ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={cardPhoto} alt={s.name} className="absolute inset-0 w-full h-full object-cover" />
+                      ) : (
+                        godEmoji
+                      )}
                     </div>
                     <div className="flex-1 min-w-0 py-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] font-black tracking-wider text-[#2563eb]/70">近くの場{nearSpotList.length > 1 ? ` ${i + 1}/${nearSpotList.length}` : ''}</span>
-                        {nearSpotList.length > 1 && (
-                          <span className="text-[10px] text-gray-400 flex items-center gap-0.5">← スワイプ →</span>
-                        )}
-                      </div>
+                      {/* めくれることはドットインジケータと右の覗きカードで伝わるため、ラベル・スワイプ表記は出さない */}
                       <h4 className="text-sm font-black text-gray-900 truncate">{s.name}</h4>
                       {s.godName && (
                         <p className="text-[11px] font-bold text-gray-400 truncate mt-0.5">
@@ -829,7 +830,6 @@ export default function MapTab({
                         <span className="text-[13px] font-black flex items-center gap-0.5 text-[#2563eb]">
                           <MapPin className="w-3 h-3" /><span className="tabular-nums">{distVal}</span><span className="text-[11px]">{distUnit}</span>
                         </span>
-                        <span className={`text-[12px] font-black px-1.5 py-0.5 rounded-full ${ter.tone}`}>🥾 {ter.label}</span>
                         {held && <span className="text-[13px] font-black text-shrine-red flex items-center gap-0.5">🔴 御朱印</span>}
                         {ugc > 0 && <span className="text-[13px] flex items-center gap-0.5 text-gray-400"><Camera className="w-3 h-3" />{ugc}</span>}
                       </div>

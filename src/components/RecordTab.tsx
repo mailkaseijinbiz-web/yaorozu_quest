@@ -46,15 +46,17 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
   const [photo, setPhoto] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // 現在地から近い順の寺社（「ここに行った？」候補）
+  // 現在地から近い順の寺社（「ここに行った？」候補）。
+  // 最初は3件だけ見せて「もっと見る」で広げる（記録フォームが主役なので控えめに）。
   const nearby = useMemo(
     () =>
       [...spots]
         .map((s) => ({ s, d: distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude) }))
         .sort((a, b) => a.d - b.d)
-        .slice(0, 8),
+        .slice(0, 18),
     [spots, userLocation.lat, userLocation.lng]
   );
+  const [nearbyShown, setNearbyShown] = useState(3);
 
   // 検索（名前・神名・カテゴリ）。近い順に最大6件。
   const q = query.trim().toLowerCase();
@@ -303,7 +305,7 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
               </div>
             )}
 
-            {/* ここに行った？（近くの寺社をワンタップで記録） */}
+            {/* ここに行った？（近くの寺社から選ぶ。「行った」で上の記録フォームが開く） */}
             {!selected && (
               <div className="mt-4">
                 <p className="text-[13px] font-black text-gray-700 mb-2">ここに行った？</p>
@@ -311,7 +313,7 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                   {nearby.length === 0 && (
                     <p className="text-[13px] text-gray-400">近くの寺社が見つかりません。マップを開くと周辺の寺社が読み込まれます。</p>
                   )}
-                  {nearby.map(({ s, d }) => {
+                  {nearby.slice(0, nearbyShown).map(({ s, d }) => {
                     const cnt = countVisitsForSpot(currentUser.id, s.id);
                     return (
                       <div key={s.id} className="flex items-center gap-2.5 bg-white rounded-2xl border border-gray-100 shadow-sm px-3 py-2.5">
@@ -324,15 +326,22 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                           </span>
                         </button>
                         <button
-                          onClick={() => saveRecord(s)}
-                          disabled={saving}
-                          className="flex-shrink-0 flex items-center gap-1 bg-emerald-500 text-white text-[13px] font-black px-3 py-1.5 rounded-full hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
+                          onClick={() => { setSelected(s); setQuery(''); }}
+                          className="flex-shrink-0 flex items-center gap-1 bg-emerald-500 text-white text-[13px] font-black px-3 py-1.5 rounded-full hover:opacity-90 active:scale-95 transition-all cursor-pointer"
                         >
                           <Check className="w-3.5 h-3.5" />行った
                         </button>
                       </div>
                     );
                   })}
+                  {nearby.length > nearbyShown && (
+                    <button
+                      onClick={() => setNearbyShown((n) => n + 5)}
+                      className="w-full text-[13px] font-black text-gray-500 bg-white border border-gray-100 shadow-sm rounded-2xl py-2.5 hover:bg-gray-50 transition-all cursor-pointer"
+                    >
+                      もっと見る
+                    </button>
+                  )}
                 </div>
               </div>
             )}

@@ -53,5 +53,11 @@ export async function uploadImage(file: File, prefix = 'misc'): Promise<string> 
   } catch {
     /* ネットワーク失敗時は base64 フォールバック */
   }
-  return dataUrl; // Supabase 未設定 or 失敗時
+  // Supabase 未設定 or 失敗時は base64 がそのまま localStorage に保存されるため、
+  // quota（約5MB）を守れるよう小さめに再圧縮して返す（見た目の劣化は軽微）。
+  try {
+    return await compressImage(file, { maxDim: 800, quality: 0.72 });
+  } catch {
+    return dataUrl;
+  }
 }
