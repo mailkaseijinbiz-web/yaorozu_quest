@@ -9,8 +9,15 @@
 // -----------------------------------------------------------------------------
 
 import React from 'react';
+import dynamic from 'next/dynamic';
 import { X } from 'lucide-react';
+import { db } from '../lib/db';
 import type { Goshuin } from '../lib/goshuin';
+
+const GoshuinJapanMap = dynamic(() => import('./GoshuinJapanMap'), {
+  ssr: false,
+  loading: () => <div className="w-full h-56 rounded-2xl bg-gray-100 animate-pulse" />,
+});
 
 interface GoshuinBookModalProps {
   goShuinList: Goshuin[];
@@ -18,6 +25,13 @@ interface GoshuinBookModalProps {
 }
 
 export default function GoshuinBookModal({ goShuinList, onClose }: GoshuinBookModalProps) {
+  const points = goShuinList
+    .map((g) => {
+      if (typeof g.lat === 'number' && typeof g.lng === 'number') return { lat: g.lat, lng: g.lng, name: g.spotName };
+      const s = db.getSpot(g.spotId);
+      return s ? { lat: s.latitude, lng: s.longitude, name: g.spotName } : null;
+    })
+    .filter((p): p is { lat: number; lng: number; name: string } => !!p);
   return (
     <div
       className="absolute inset-0 z-[3400] bg-black/50 flex items-end sm:items-center justify-center"
@@ -53,6 +67,12 @@ export default function GoshuinBookModal({ goShuinList, onClose }: GoshuinBookMo
             </div>
           ) : (
             <>
+              {points.length > 0 && (
+                <div className="mb-3">
+                  <GoshuinJapanMap points={points} />
+                  <p className="text-[10px] text-gray-400 mt-1 text-center">🗾 御朱印を授かった {points.length} か所が灯っています</p>
+                </div>
+              )}
               <div className="flex justify-between items-center mb-3">
                 <span className="text-[10px] text-gray-400">※御朱印は公式のものではありません</span>
                 <span className="text-[11px] text-gray-400 font-bold">{goShuinList.length} 社寺</span>

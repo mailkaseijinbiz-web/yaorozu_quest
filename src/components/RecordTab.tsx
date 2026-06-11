@@ -1,7 +1,13 @@
 'use client';
 
 import React, { useMemo, useState, useEffect, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { Search, MapPin, Camera, CalendarDays, Trash2, Check, Stamp, NotebookPen, X, Pencil } from 'lucide-react';
+
+const GoshuinJapanMap = dynamic(() => import('./GoshuinJapanMap'), {
+  ssr: false,
+  loading: () => <div className="w-full h-56 rounded-2xl bg-gray-100 animate-pulse" />,
+});
 import { Spot, User as UserType, db } from '../lib/db';
 import { distanceKm } from '../lib/geo';
 import {
@@ -240,6 +246,29 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
   const [goshuinList, setGoshuinList] = useState<Goshuin[]>(() => getGoShuinList(currentUser.id));
   const refreshGoshuin = () => setGoshuinList(getGoShuinList(currentUser.id));
   const [gFormOpen, setGFormOpen] = useState(false);
+  const [goshuinSort, setGoshuinSort] = useState<'date' | 'place'>('date'); // 御朱印の並び替え（日時順／場所順）
+  // 日本地図に灯す赤い点（緯度経度。古い御朱印は spot から補完）
+  const goshuinPoints = useMemo(
+    () =>
+      goshuinList
+        .map((g) => {
+          if (typeof g.lat === 'number' && typeof g.lng === 'number') return { lat: g.lat, lng: g.lng, name: g.spotName };
+          const s = db.getSpot(g.spotId);
+          return s ? { lat: s.latitude, lng: s.longitude, name: g.spotName } : null;
+        })
+        .filter((p): p is { lat: number; lng: number; name: string } => !!p),
+    [goshuinList]
+  );
+  // 並び替え後の御朱印（日時=新しい順／場所=寺社名の五十音順、同名は新しい順）
+  const sortedGoshuin = useMemo(
+    () =>
+      [...goshuinList].sort((a, b) => {
+        const t = new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime();
+        if (goshuinSort === 'place') return a.spotName.localeCompare(b.spotName, 'ja') || t;
+        return t;
+      }),
+    [goshuinList, goshuinSort]
+  );
   const [gQuery, setGQuery] = useState('');
   const [gSelected, setGSelected] = useState<Spot | null>(null);
   const [gName, setGName] = useState('');
@@ -279,6 +308,8 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
         category: gSelected?.category,
         godName: gSelected?.godName,
         godEmoji: gSelected?.godEmoji,
+        latitude: gSelected?.latitude,
+        longitude: gSelected?.longitude,
         photo: gPhoto,
       });
       if (!saved) {
@@ -647,12 +678,35 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
             </div>
           ) : (
             <>
+              {/* 日本地図：御朱印を授かった場所が赤く灯る */}
+              {goshuinPoints.length > 0 && (
+                <div>
+                  <GoshuinJapanMap points={goshuinPoints} />
+                  <p className="text-[10px] text-gray-400 mt-1 text-center">🗾 御朱印を授かった {goshuinPoints.length} か所が灯っています</p>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-[10px] text-gray-400">※御朱印は公式のものではありません</span>
                 <span className="text-[12px] font-black text-gray-400">{goshuinList.length}件</span>
               </div>
+              {/* 並び替え：日時順 / 場所順 */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-black text-gray-400">並び替え</span>
+                {([
+                  { key: 'date', label: '日時順' },
+                  { key: 'place', label: '場所順' },
+                ] as const).map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => setGoshuinSort(key)}
+                    className={`text-[12px] font-black px-2.5 py-1 rounded-full transition-all cursor-pointer ${goshuinSort === key ? 'bg-shrine-red text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <div className="grid grid-cols-2 gap-3">
-                {[...goshuinList].reverse().map((g) => (
+                {sortedGoshuin.map((g) => (
                   <div key={g.id} className="relative bg-white rounded-2xl border border-red-100 shadow-sm p-3 flex flex-col items-center text-center">
                     {g.source === 'photo' && (
                       <button

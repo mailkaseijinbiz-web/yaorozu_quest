@@ -586,7 +586,7 @@ function SpotDetailBody({
     if (isNear) {
       const stamp = grantGoShuin(
         currentUser.id,
-        { id: spot.id, name: spot.name, category: spot.category, godEmoji: spot.godEmoji },
+        { id: spot.id, name: spot.name, category: spot.category, godEmoji: spot.godEmoji, latitude: spot.latitude, longitude: spot.longitude },
         agent.name
       );
       if (stamp) {

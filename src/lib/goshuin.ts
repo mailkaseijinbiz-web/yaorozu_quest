@@ -10,6 +10,8 @@ export interface Goshuin {
   godEmoji: string;
   category: string;
   receivedAt: string; // ISO 8601
+  lat?: number;       // 授かった場の緯度（日本地図表示用・後方互換で任意）
+  lng?: number;       // 授かった場の経度
   photo?: string;     // 実物の御朱印を撮影した写真（圧縮 dataURL・任意）
   source?: 'conversation' | 'photo'; // 授与経路。未設定=対話（後方互換）
 }
@@ -53,7 +55,7 @@ function writeList(userId: string, list: Goshuin[]): boolean {
  */
 export function addPhotoGoshuin(
   userId: string,
-  input: { spotId?: string; spotName: string; category?: string; godName?: string; godEmoji?: string; photo: string }
+  input: { spotId?: string; spotName: string; category?: string; godName?: string; godEmoji?: string; photo: string; latitude?: number; longitude?: number }
 ): Goshuin | null {
   const stamp: Goshuin = {
     id: `photo_${input.spotId || 'free'}_${Date.now()}`,
@@ -63,6 +65,8 @@ export function addPhotoGoshuin(
     godEmoji: input.godEmoji || (input.category === '神社' ? '⛩️' : '🙏'),
     category: input.category || '',
     receivedAt: new Date().toISOString(),
+    lat: input.latitude,
+    lng: input.longitude,
     photo: input.photo,
     source: 'photo',
   };
@@ -77,7 +81,7 @@ export function deleteGoshuin(userId: string, id: string): void {
 /** 御朱印を授ける。既に持っている場合は null を返す。 */
 export function grantGoShuin(
   userId: string,
-  spot: { id: string; name: string; category: string; godEmoji?: string },
+  spot: { id: string; name: string; category: string; godEmoji?: string; latitude?: number; longitude?: number },
   godName: string
 ): Goshuin | null {
   if (hasGoShuin(userId, spot.id)) return null;
@@ -89,6 +93,8 @@ export function grantGoShuin(
     godEmoji: spot.godEmoji || '🙏',
     category: spot.category,
     receivedAt: new Date().toISOString(),
+    lat: spot.latitude,
+    lng: spot.longitude,
   };
   try {
     const list = getGoShuinList(userId);
