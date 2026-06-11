@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, Share2, X, Stamp, NotebookPen } from 'lucide-react';
+import { UserCircle2, MapPin, Check, Flag, Pencil, Share2, X, Stamp, NotebookPen } from 'lucide-react';
 import { db, Spot, Agent, User as UserType, UserContribution, SPOT_TTL_MS } from '../lib/db';
 import { getGoShuinList, Goshuin } from '../lib/goshuin';
 import { pullSnapshot, setSyncUser } from '../lib/cloud-sync';
@@ -26,7 +26,7 @@ import { backfillTrivia } from '../lib/trivia-fill';
 import { buildTourQuest, tourAreaKey } from '../lib/quest-tour';
 import UserTitle from '../components/UserTitle';
 
-type TabType = 'home' | 'quest' | 'mypage';
+type TabType = 'home' | 'record' | 'goshuin' | 'quest' | 'mypage';
 
 // マイページ・ヒーローの装飾シェイプ（正十角形メダリオン枠 / XPシールド）
 const MEDALLION_FRAME =
@@ -125,7 +125,6 @@ export default function HomePage() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
-  const [mypageTab, setMypageTab] = useState<'record' | 'goshuin' | 'badges' | 'quests'>('record');
   const [goShuinList, setGoShuinList] = useState<Goshuin[]>([]);
   // 御朱印帳 modal（授与式の「御朱印帳を見る」から開く）
   const [goshuinBookOpen, setGoshuinBookOpen] = useState(false);
@@ -617,6 +616,8 @@ export default function HomePage() {
   const NAV_TABS = [
     { key: 'home' as TabType, label: 'クエスト', icon: Flag },
     { key: 'quest' as TabType, label: 'マップ', icon: MapPin },
+    { key: 'record' as TabType, label: '記録', icon: NotebookPen },
+    { key: 'goshuin' as TabType, label: '御朱印', icon: Stamp },
     { key: 'mypage' as TabType, label: 'マイページ', icon: UserCircle2 },
   ];
 
@@ -799,6 +800,30 @@ export default function HomePage() {
               </div>
             )}
 
+            {/* ── 記録（参拝の記録）メインタブ ── */}
+            {activeTab === 'record' && (
+              <RecordTab
+                section="visits"
+                currentUser={currentUser || FALLBACK_CURRENT_USER}
+                userLocation={userLocation}
+                spots={spots}
+                onOpenDetail={setDetailSpot}
+                onChanged={refreshDatabaseStates}
+              />
+            )}
+
+            {/* ── 御朱印 メインタブ ── */}
+            {activeTab === 'goshuin' && (
+              <RecordTab
+                section="goshuin"
+                currentUser={currentUser || FALLBACK_CURRENT_USER}
+                userLocation={userLocation}
+                spots={spots}
+                onOpenDetail={setDetailSpot}
+                onChanged={refreshDatabaseStates}
+              />
+            )}
+
             {/* ── マイページ ── */}
             {activeTab === 'mypage' && currentUser && (
               <div className="overflow-y-auto h-full bg-gradient-to-b from-sky-50 via-white to-amber-50/50">
@@ -946,85 +971,10 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                {/* タブ */}
-                <div className="flex border-b border-black/5 bg-white sticky top-0 z-10">
-                  {([
-                    { key: 'record',   label: '記録',           icon: NotebookPen },
-                    { key: 'goshuin',  label: '御朱印',         icon: Stamp },
-                    { key: 'quests',   label: '達成クエスト',   icon: Flag },
-                    { key: 'badges',   label: 'バッジ',         icon: Trophy },
-                  ] as const).map(({ key, label, icon: Icon }) => (
-                    <button key={key} onClick={() => setMypageTab(key)} className={`flex-1 py-2.5 flex flex-col items-center justify-center gap-0.5 text-[10px] font-black transition-all cursor-pointer border-b-2 ${mypageTab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
-                      <Icon className="w-3.5 h-3.5" />{label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* タブ内容 */}
+                {/* タブ内容（マイページはバッジのみ） */}
                 <div className="p-4">
-                  {/* 記録（参拝記録・御朱印） */}
-                  {mypageTab === 'record' && (
-                    <RecordTab
-                      currentUser={currentUser}
-                      userLocation={userLocation}
-                      spots={spots}
-                      onOpenDetail={setDetailSpot}
-                      onChanged={refreshDatabaseStates}
-                    />
-                  )}
-
-                  {/* 御朱印帳 */}
-                  {mypageTab === 'goshuin' && (() => {
-                    if (goShuinList.length === 0) {
-                      return (
-                        <div className="text-center py-14">
-                          <div className="text-5xl mb-3">📖</div>
-                          <p className="text-sm font-black text-gray-500">御朱印帳が空です</p>
-                          <p className="text-xs text-gray-400 mt-1">神と対話すると御朱印を授かります</p>
-                        </div>
-                      );
-                    }
-                    return (
-                      <div>
-                        <div className="flex justify-between items-center mb-3">
-                          <span className="text-[10px] text-gray-400">※御朱印は公式のものではありません</span>
-                          <span className="text-[11px] text-gray-400 font-bold">{goShuinList.length} 社寺</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          {[...goShuinList].reverse().map((g) => {
-                            const d = new Date(g.receivedAt);
-                            const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
-                            const timeStr = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-                            return (
-                              <div key={g.id} className="bg-white rounded-2xl border border-red-100 shadow-sm overflow-hidden flex flex-col items-center py-4 px-2 gap-1.5">
-                                {g.photo ? (
-                                  // 撮影して保存した実物の御朱印
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img src={g.photo} alt={g.spotName} className="w-20 h-20 rounded-lg object-cover flex-shrink-0" />
-                                ) : (
-                                  /* 朱印円 */
-                                  <div className="relative w-20 h-20 flex-shrink-0">
-                                    <div className="absolute inset-0 rounded-full border-4 border-red-600/80" />
-                                    <div className="absolute inset-1.5 rounded-full border-2 border-red-600/40" />
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5">
-                                      <span className="text-2xl leading-none">{g.godEmoji}</span>
-                                      <span className="text-[8px] font-black text-red-700 text-center leading-tight px-1" style={{ maxWidth: 64 }}>{g.godName}</span>
-                                    </div>
-                                  </div>
-                                )}
-                                {/* スポット名 */}
-                                <p className="text-[11px] font-black text-gray-800 text-center leading-tight line-clamp-2">{g.spotName}</p>
-                                <p className="text-[9px] text-gray-400">{dateStr} {timeStr}</p>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })()}
-
                   {/* バッジ */}
-                  {mypageTab === 'badges' && userStats && (() => {
+                  {userStats && (() => {
                     const badges = getBadgeStates(userStats, currentUser);
                     return (
                       <div className="grid grid-cols-3 gap-2.5">
@@ -1052,53 +1002,6 @@ export default function HomePage() {
                             )}
                           </div>
                         ))}
-                      </div>
-                    );
-                  })()}
-
-                  {/* 称号 */}
-                  {/* 達成したクエスト */}
-                  {mypageTab === 'quests' && (() => {
-                    const completedIds = db.getChallengeProgress().completed;
-                    const completedChallenges = completedIds.map((id) => db.getQuest(id)).filter((c): c is NonNullable<typeof c> => !!c);
-                    return completedChallenges.length === 0 ? (
-                      <div className="text-center py-12">
-                        <Flag className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                        <p className="text-sm text-gray-400">まだ達成したクエストがありません。<br />クエストを制覇してバッジを集めよう。</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {completedChallenges.map((ch) => {
-                          const photoMap = db.getChallengePhotos(ch.id);
-                          const photos = ch.tasks.map((s) => photoMap[s.id]).filter((p): p is string => !!p);
-                          return (
-                            <div key={ch.id} className="bg-amber-50/50 rounded-2xl p-3 border border-gold/40">
-                              <div className="flex items-center gap-3">
-                                <div className="w-12 h-12 rounded-xl bg-gold/20 flex items-center justify-center text-3xl flex-shrink-0">{ch.badgeIcon}</div>
-                                <div className="flex-1 min-w-0">
-                                  <h4 className="text-base font-black text-gray-900 truncate">{ch.title}</h4>
-                                  <p className="text-[13px] text-amber-700 font-bold">🏆 「{ch.badgeName}」バッジ獲得</p>
-                                </div>
-                                <span className="text-[11px] font-black text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full flex-shrink-0">制覇</span>
-                              </div>
-
-                              {photos.length > 0 && (
-                                <div className="flex gap-2 overflow-x-auto scrollbar-none mt-3">
-                                  {photos.map((p, i) => (
-                                    <img key={i} src={p} alt="振り返り写真" className="w-20 h-20 rounded-xl object-cover flex-shrink-0 border border-gold/30" />
-                                  ))}
-                                </div>
-                              )}
-
-                              <button
-                                onClick={() => setReviewQuest(ch)}
-                                className="w-full mt-3 bg-shrine-red text-white text-[13px] font-black py-2.5 rounded-full flex items-center justify-center gap-1.5 cursor-pointer hover:opacity-90"
-                              >
-                                <Share2 className="w-4 h-4" />写真とシェアして振り返る
-                              </button>
-                            </div>
-                          );
-                        })}
                       </div>
                     );
                   })()}
@@ -1151,8 +1054,8 @@ export default function HomePage() {
                       }
                     }
                   }
-                  if (key === 'quest' && spots.length === 0) {
-                    // マップに近くの寺社が無い場合は近・中・遠を複数生成する
+                  if ((key === 'quest' || key === 'record' || key === 'goshuin') && spots.length === 0) {
+                    // マップ／記録／御朱印で近くの寺社が無い場合は近・中・遠を複数生成する
                     generateVariedSpots(userLocation.lat, userLocation.lng);
                   }
                   setActiveTab(key);
