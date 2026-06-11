@@ -2,6 +2,7 @@
 import { generateTrivia } from '../data/trivia-seed';
 import { generateTokyoSpots } from '../data/tokyo-spots';
 import { schedulePush } from './cloud-sync';
+import { distanceKm } from './geo';
 import type { Quest } from '../data/tasks';
 import { CHALLENGES } from '../data/challenges';
 import { hasGoShuin } from './goshuin';
@@ -1150,6 +1151,74 @@ class MockDatabase {
     // 生成クエストはハード削除（再生成可能・orphan を残さない）
     this.save(KEYS.QUESTS, this.getGeneratedQuests().filter(q => q.spotId !== id));
     this.logActivity({ type: 'spot_delete', userId: 'system', source: 'system', spotId: id, detail: target?.name });
+  }
+
+  /**
+   * ほぼ同じ場所（既定 約60m 以内）で同じ名前の場をマージする。
+   * 代表(canonical)は「検証済み → 写真が多い → 作成が古い」順で選び、重複の写真・価値・課題・UGC・
+   * 生成クエストを代表へ寄せて、重複はソフト削除（神もカスケード）。マージした重複の件数を返す。
+   */
+  mergeDuplicateSpots(thresholdKm = 0.06): number {
+    const live = this.getSpots();
+    const norm = (s: string) => s.replace(/\s+/g, '').trim();
+    const groups = new Map<string, Spot[]>();
+    for (const s of live) {
+      const k = norm(s.name);
+      const arr = groups.get(k);
+      if (arr) arr.push(s); else groups.set(k, [s]);
+    }
+    const ts = new Date().toISOString();
+    const canonUpdates = new Map<string, Spot>(); // id -> 更新後の代表
+    const dupToCanon = new Map<string, string>(); // 重複id -> 代表id
+    const uniq = (xs: string[]) => Array.from(new Set(xs.filter(Boolean)));
+
+    for (const arr of groups.values()) {
+      if (arr.length < 2) continue;
+      const used = new Set<string>();
+      for (let i = 0; i < arr.length; i++) {
+        if (used.has(arr[i].id)) continue;
+        const cluster = [arr[i]];
+        used.add(arr[i].id);
+        for (let j = i + 1; j < arr.length; j++) {
+          if (used.has(arr[j].id)) continue;
+          if (distanceKm(arr[i].latitude, arr[i].longitude, arr[j].latitude, arr[j].longitude) <= thresholdKm) {
+            cluster.push(arr[j]); used.add(arr[j].id);
+          }
+        }
+        if (cluster.length < 2) continue;
+        const canonical = { ...[...cluster].sort((a, b) => {
+          const va = (isVerifiedSpot(a) ? 1 : 0) - (isVerifiedSpot(b) ? 1 : 0);
+          if (va !== 0) return -va;
+          const pa = (a.photos?.length ?? 0) - (b.photos?.length ?? 0);
+          if (pa !== 0) return -pa;
+          return (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
+        })[0] };
+        const dups = cluster.filter((s) => s.id !== canonical.id);
+        canonical.photos = uniq([...(canonical.photos ?? []), ...dups.flatMap((d) => d.photos ?? [])]);
+        canonical.enjoyments = uniq([...(canonical.enjoyments ?? []), ...dups.flatMap((d) => d.enjoyments ?? [])]);
+        canonical.issues = uniq([...(canonical.issues ?? []), ...dups.flatMap((d) => d.issues ?? [])]);
+        canonUpdates.set(canonical.id, canonical);
+        for (const d of dups) dupToCanon.set(d.id, canonical.id);
+      }
+    }
+    if (dupToCanon.size === 0) return 0;
+
+    // スポット：代表を更新、重複をソフト削除
+    const raw = this.getSpotsRaw();
+    this.saveSpots(raw.map((s) => {
+      if (dupToCanon.has(s.id) && !s.deletedAt) return { ...s, deletedAt: ts };
+      const c = canonUpdates.get(s.id);
+      if (c) return { ...s, photos: c.photos, enjoyments: c.enjoyments, issues: c.issues };
+      return s;
+    }));
+    // 神：重複の神をカスケードでソフト削除
+    this.save(KEYS.AGENTS, this.getAgentsRaw().map((a) => dupToCanon.has(a.spotId) && !a.deletedAt ? { ...a, deletedAt: ts } : a));
+    // UGC・生成クエストの spotId を代表へ付け替え
+    this.save(KEYS.UGC, this.getUgc().map((p) => dupToCanon.has(p.spotId) ? { ...p, spotId: dupToCanon.get(p.spotId)! } : p));
+    this.save(KEYS.QUESTS, this.getGeneratedQuests().map((q) => q.spotId && dupToCanon.has(q.spotId) ? { ...q, spotId: dupToCanon.get(q.spotId)! } : q));
+    for (const canonId of canonUpdates.keys()) this.recalculateSpotCreator(canonId);
+    this.logActivity({ type: 'spot_delete', userId: 'system', source: 'system', detail: `重複の場を${dupToCanon.size}件マージ` });
+    return dupToCanon.size;
   }
 
   // Upsert a user

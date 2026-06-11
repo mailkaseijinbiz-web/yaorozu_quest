@@ -739,8 +739,6 @@ function SpotDetailBody({
       <div className="flex border-b border-black/5 bg-white flex-shrink-0">
         {([
           { key: 'records',  label: '記録',   icon: NotebookPen },
-          { key: 'chat',     label: '会話',   icon: MessageCircle },
-          { key: 'requests', label: 'クエスト', icon: Flag },
           { key: 'photos',   label: '写真',   icon: Camera },
         ] as const).map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setTab(key)} className={`flex-1 py-3 flex flex-row items-center justify-center gap-1.5 text-[12px] font-black transition-all cursor-pointer border-b-2 ${tab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
