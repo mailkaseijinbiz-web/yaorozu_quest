@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Eye, MapPin, Stamp, NotebookPen, Sparkles, Users as UsersGroup, Flag } from 'lucide-react';
+import { Eye, MapPin, Stamp, NotebookPen, Sparkles, Flag } from 'lucide-react';
 import { db, Spot, User } from '../../lib/db';
 import { getGoShuinList } from '../../lib/goshuin';
 import { getVisitRecords } from '../../lib/visit-records';
@@ -72,8 +72,6 @@ function UserDetail({ user, spots, onClose }: { user: User; spots: Spot[]; onClo
         <Stat icon={Stamp} label="御朱印" value={goshuin.length} />
         <Stat icon={NotebookPen} label="参拝記録" value={records.length} />
         <Stat icon={Flag} label="所持アイテム" value={stats.items.length} />
-        <Stat icon={UsersGroup} label="フォロワー" value={stats.followers} />
-        <Stat icon={UsersGroup} label="フォロー中" value={stats.following} />
       </div>
 
       {/* 貢献内訳（達成タスク） */}
