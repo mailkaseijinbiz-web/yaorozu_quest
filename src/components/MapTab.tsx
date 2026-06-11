@@ -7,6 +7,7 @@ import { Spot, User, db } from '../lib/db';
 import { uploadImage, compressImage } from '../lib/upload';
 import { hasGoShuin } from '../lib/goshuin';
 import { distanceKm, bearingDeg } from '../lib/geo';
+import { getAddress } from '../lib/address';
 import { getHeartVoices } from '../data/god-tasks';
 import { composeWalkGuide, nextGuideStage } from '../lib/walk-guide';
 import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
@@ -103,6 +104,25 @@ export default function MapTab({
         .sort((a, b) => a.d - b.d)
         .slice(0, 5)
     : [];
+
+  // 同名スポットが複数ヒットしたとき（例: 「善光寺」は実在の同名寺が各地にある）、
+  // 住所で見分けられるように逆ジオコーディングで補う（キャッシュつき・同名の行のみ）。
+  const [matchAddrs, setMatchAddrs] = useState<Record<string, string>>({});
+  const matchKey = spotMatches.map((m) => m.s.id).join(',');
+  useEffect(() => {
+    if (!matchKey) return;
+    const counts = new Map<string, number>();
+    spotMatches.forEach(({ s }) => counts.set(s.name, (counts.get(s.name) ?? 0) + 1));
+    const ambiguous = spotMatches.filter(({ s }) => (counts.get(s.name) ?? 0) > 1);
+    let alive = true;
+    ambiguous.forEach(({ s }) => {
+      getAddress(s.latitude, s.longitude).then((a) => {
+        if (alive && a) setMatchAddrs((prev) => (prev[s.id] === a ? prev : { ...prev, [s.id]: a }));
+      });
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchKey]);
 
   // 任意の場所をジオコーディング（450msデバウンス・入力途中の応答は中断）
   useEffect(() => {
@@ -598,7 +618,10 @@ export default function MapTab({
                       <span className="text-xl flex-shrink-0">{s.godEmoji || (s.category === '神社' ? '⛩️' : '🙏')}</span>
                       <span className="flex-1 min-w-0">
                         <span className="block text-[13px] font-black text-gray-900 truncate">{s.name}</span>
-                        <span className="block text-[11px] text-gray-400 truncate">{s.category}{s.godName ? `・${s.godName}` : ''}</span>
+                        {/* 同名スポットは住所で見分ける（住所が引けたら神名より優先表示） */}
+                        <span className="block text-[11px] text-gray-400 truncate">
+                          {matchAddrs[s.id] ? `${s.category}・${matchAddrs[s.id]}` : `${s.category}${s.godName ? `・${s.godName}` : ''}`}
+                        </span>
                       </span>
                       <span className="text-[11px] font-bold text-[#2563eb] tabular-nums flex-shrink-0">
                         {d < 1 ? `${Math.round(d * 1000)}m` : `${d.toFixed(1)}km`}
