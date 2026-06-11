@@ -59,6 +59,7 @@ export interface WalkGuideInput {
   stage: number;
   distKm: number | null;
   user: { lat: number; lng: number };
+  nonce?: number; // フキダシのタップで話題を次々に切り替えるための種（同一バンド内でも内容を変える）
 }
 
 /**
@@ -66,17 +67,17 @@ export interface WalkGuideInput {
  * 内容: 到着間近 → 到着の声かけ / それ以外 → 距離・豆知識・観察ミッションのローテ。
  */
 export function composeWalkGuide(input: WalkGuideInput): string {
-  const { questId, step, stage, distKm, user } = input;
+  const { questId, step, stage, distKm, user, nonce = 0 } = input;
 
-  // 到着間近（300m未満）
-  if (stage >= 100) {
+  // 到着間近（300m未満）。タップでの話題替え（nonce）時は固定文を出さず通常ローテへ。
+  if (nonce === 0 && stage >= 100) {
     return '目的地はもう目の前。あたりをゆっくり見回して、心に残る一枚を写真におさめてみよう。';
   }
-  if (stage === 99) {
+  if (nonce === 0 && stage === 99) {
     return '間もなく到着じゃ。鳥居や門が見えたら、一度立ち止まって全体の姿を眺めてみよ。';
   }
 
-  const seed = hash(`${questId}:${step.id}:${stage}`);
+  const seed = hash(`${questId}:${step.id}:${stage}:${nonce}`);
   const kind = (['distance', 'trivia', 'mission'] as const)[seed % 3];
 
   if (kind === 'trivia') {
