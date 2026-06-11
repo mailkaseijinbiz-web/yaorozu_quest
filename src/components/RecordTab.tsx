@@ -286,6 +286,17 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
     return [...map.entries()].map(([pref, items]) => ({ pref, items })).sort((a, b) => order(a.pref) - order(b.pref));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortedGoshuin]);
+  // 日時順＝月ごとにグルーピング（新しい月が先。sortedGoshuin が既に新しい順なので挿入順を保つ）
+  const goshuinByMonth = useMemo(() => {
+    const map = new Map<string, Goshuin[]>();
+    for (const g of sortedGoshuin) {
+      const d = new Date(g.receivedAt);
+      const label = `${d.getFullYear()}年${d.getMonth() + 1}月`;
+      const arr = map.get(label);
+      if (arr) arr.push(g); else map.set(label, [g]);
+    }
+    return [...map.entries()].map(([month, items]) => ({ month, items }));
+  }, [sortedGoshuin]);
 
   // 御朱印カード（タップでモーダル＝写真保存もできる）
   const renderGoshuinCard = (g: Goshuin) => (
@@ -297,7 +308,7 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
     >
       {g.source === 'photo' && (
         <button
-          onClick={(e) => { e.stopPropagation(); deleteGoshuin(currentUser.id, g.id); refreshGoshuin(); onChanged?.(); }}
+          onClick={(e) => { e.stopPropagation(); if (confirm(`「${g.spotName}」の御朱印を削除しますか？`)) { deleteGoshuin(currentUser.id, g.id); refreshGoshuin(); onChanged?.(); } }}
           className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/30 text-white flex items-center justify-center cursor-pointer z-10"
           title="御朱印を削除"
         >
@@ -635,7 +646,7 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                         )}
                         <div className="absolute top-2 right-2 flex gap-1.5">
                           <button onClick={() => openEdit(rec)} className="w-8 h-8 rounded-full bg-black/45 text-white flex items-center justify-center cursor-pointer hover:bg-black/60 transition-all" title="記録を編集"><Pencil className="w-4 h-4" /></button>
-                          <button onClick={() => { deleteVisitRecord(currentUser.id, rec.id); refresh(); }} className="w-8 h-8 rounded-full bg-black/45 text-white flex items-center justify-center cursor-pointer hover:bg-black/60 transition-all" title="記録を削除"><Trash2 className="w-4 h-4" /></button>
+                          <button onClick={() => { if (confirm(`「${rec.spotName}」のこの記録を削除しますか？`)) { deleteVisitRecord(currentUser.id, rec.id); refresh(); } }} className="w-8 h-8 rounded-full bg-black/45 text-white flex items-center justify-center cursor-pointer hover:bg-black/60 transition-all" title="記録を削除"><Trash2 className="w-4 h-4" /></button>
                         </div>
                       </div>
                       <div className="p-3">
@@ -667,7 +678,7 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                       </div>
                       <div className="self-start flex flex-col items-center gap-1">
                         <button onClick={() => openEdit(rec)} className="w-7 h-7 rounded-full hover:bg-blue-50 flex items-center justify-center text-gray-300 hover:text-blue-500 transition-all cursor-pointer" title="記録を編集"><Pencil className="w-4 h-4" /></button>
-                        <button onClick={() => { deleteVisitRecord(currentUser.id, rec.id); refresh(); }} className="w-7 h-7 rounded-full hover:bg-rose-50 flex items-center justify-center text-gray-300 hover:text-rose-500 transition-all cursor-pointer" title="記録を削除"><Trash2 className="w-4 h-4" /></button>
+                        <button onClick={() => { if (confirm(`「${rec.spotName}」のこの記録を削除しますか？`)) { deleteVisitRecord(currentUser.id, rec.id); refresh(); } }} className="w-7 h-7 rounded-full hover:bg-rose-50 flex items-center justify-center text-gray-300 hover:text-rose-500 transition-all cursor-pointer" title="記録を削除"><Trash2 className="w-4 h-4" /></button>
                       </div>
                     </div>
                   );
@@ -792,7 +803,18 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                   ))}
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-3">{sortedGoshuin.map(renderGoshuinCard)}</div>
+                <div className="space-y-3">
+                  {goshuinByMonth.map(({ month, items }) => (
+                    <div key={month}>
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <span className="text-sm">🗓️</span>
+                        <h4 className="text-[12px] font-black text-gray-500">{month}（{items.length}）</h4>
+                        <span className="flex-1 h-px bg-gray-200" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">{items.map(renderGoshuinCard)}</div>
+                    </div>
+                  ))}
+                </div>
               )}
             </>
           )}
@@ -822,12 +844,18 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
               {reviewGoshuin.godName && <p className="text-[12px] text-gray-500 mt-0.5">{reviewGoshuin.godName}</p>}
               <p className="text-[11px] text-gray-400 mt-0.5">{fmtDate(reviewGoshuin.receivedAt)} ・ {prefOfGoshuin(reviewGoshuin)}</p>
             </div>
-            <div className="p-4">
+            <div className="p-4 space-y-2">
               <label className="w-full inline-flex items-center justify-center gap-2 bg-shrine-red text-white text-sm font-black py-3 rounded-full cursor-pointer hover:opacity-90 active:scale-[0.99] transition-all">
                 <Camera className="w-4 h-4" />{reviewGoshuin.photo ? '実物の写真を撮り直す' : '実物の御朱印を写真で保存'}
                 <input ref={reviewGoshuinPhotoRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickReviewGoshuinPhoto} />
               </label>
-              <p className="text-[10px] text-gray-400 mt-2 text-center">いただいた実物の御朱印を撮って残せます</p>
+              <p className="text-[10px] text-gray-400 text-center">いただいた実物の御朱印を撮って残せます</p>
+              <button
+                onClick={() => { if (confirm(`「${reviewGoshuin.spotName}」の御朱印を削除しますか？`)) { deleteGoshuin(currentUser.id, reviewGoshuin.id); refreshGoshuin(); onChanged?.(); setReviewGoshuin(null); } }}
+                className="w-full inline-flex items-center justify-center gap-1.5 text-[13px] font-black text-rose-500 py-2 rounded-full hover:bg-rose-50 transition-all cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />この御朱印を削除
+              </button>
             </div>
           </div>
         </div>
