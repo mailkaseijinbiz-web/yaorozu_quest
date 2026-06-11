@@ -591,6 +591,18 @@ function SpotDetailBody({
       const stats = db.getUserStats(currentUser.id);
       const prog = db.getChallengeProgress();
       const questsById = new Map(db.getAllQuests().map((q) => [q.id, q]));
+      
+      // 過去の記憶と直近の訪問地を取得（フェーズ2: 神々のネットワークと記憶）
+      const visitHistory = stats.visitedSpotIds;
+      const lastSpotId = visitHistory.length > 1 && visitHistory[visitHistory.length - 1] === spot.id 
+        ? visitHistory[visitHistory.length - 2] 
+        : visitHistory[visitHistory.length - 1];
+      const lastVisitedSpotName = lastSpotId && lastSpotId !== spot.id ? db.getSpot(lastSpotId)?.name : undefined;
+      const pastMemories = getVisitRecords(currentUser.id)
+        .filter(r => r.spotId === spot.id && r.note)
+        .map(r => r.note)
+        .slice(0, 3); // 最新3件の過去のメモを記憶として渡す
+
       const userContext = {
         visitCount: stats.visitedSpotIds.length,
         totalToku: currentUser.totalToku,
@@ -598,7 +610,10 @@ function SpotDetailBody({
         goshuinCount: getGoShuinList(currentUser.id).length,
         questClears: prog.completed.length,
         questClearsHere: prog.completed.filter((id) => questsById.get(id)?.spotId === spot.id).length,
+        lastVisitedSpotName,
+        pastMemories: pastMemories.length > 0 ? pastMemories : undefined,
       };
+      
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1147,7 +1162,7 @@ function SpotDetailBody({
         <VintageCameraOverlay
           vintageImageUrl={spot.vintagePhotoUrl}
           onCapture={(base64) => {
-            setRecPhoto(base64);
+            setRecPhotos((prev) => [...prev, base64].slice(0, MAX_RECORD_PHOTOS));
             setIsVintageCameraOpen(false);
           }}
           onCancel={() => setIsVintageCameraOpen(false)}

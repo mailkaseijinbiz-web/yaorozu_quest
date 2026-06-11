@@ -1344,6 +1344,12 @@ class MockDatabase {
     return totalAmount;
   }
 
+  /** 汎用：任意の行いに徳を付与（おみくじ・スポット提案など、場に紐づかない加点） */
+  grantToku(userId: string, amount: number, detail?: string): void {
+    this.rewardToku(userId, amount);
+    this.logActivity({ type: 'task', userId, detail: detail ?? '徳の授与', reward: amount });
+  }
+
   /** 汎用：神の依頼タスク達成で徳を付与 */
   completeGodTask(userId: string, spotId: string, reward: number): void {
     this.rewardToku(userId, reward);

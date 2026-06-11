@@ -32,7 +32,6 @@ interface SpotContext {
   longitude?: number;
 }
 
-/** 巡礼者の歩み（クライアントから渡る軽量サマリ。全フィールド任意＝旧形式でも動く） */
 interface UserContext {
   visitCount?: number;
   totalToku?: number;
@@ -40,6 +39,8 @@ interface UserContext {
   goshuinCount?: number;
   questClears?: number;
   questClearsHere?: number;
+  lastVisitedSpotName?: string;
+  pastMemories?: string[];
 }
 
 // spot 情報に基づく動的フォールバック（個別Agent未登録のスポット用）
@@ -247,12 +248,30 @@ export async function POST(request: Request) {
 
     // 巡礼者の歩み（神が会話の中で自然に触れられるようにする）
     const uc: UserContext | undefined = userContext;
-    const userContextSection = uc
-      ? `
+    
+    // 現在の季節を判定
+    const currentMonth = new Date().getMonth() + 1;
+    let season = "春";
+    if (currentMonth >= 6 && currentMonth <= 8) season = "夏";
+    if (currentMonth >= 9 && currentMonth <= 11) season = "秋";
+    if (currentMonth === 12 || currentMonth <= 2) season = "冬";
+    // 簡易的な天気シミュレーション（日時ベースのシード等でもよいが今回はランダムまたは文脈）
+    const weathers = ["晴れ", "曇り", "雨", "風が強い"];
+    const weather = weathers[Math.floor(Math.random() * weathers.length)];
 
-The pilgrim's journey so far (real data; weave it into conversation naturally and with respect, when relevant):
+    const networkSection = uc?.lastVisitedSpotName
+      ? `\n- 直前に訪れた場所: ${uc.lastVisitedSpotName}（この情報を使い、「さきほど${uc.lastVisitedSpotName}の神がそなたを褒めておったぞ」などと神同士のネットワークを仄めかすこと）`
+      : '';
+      
+    const memorySection = uc?.pastMemories && uc.pastMemories.length > 0
+      ? `\n- 過去の参拝時の記憶/願い: ${uc.pastMemories.join(', ')}（「あの時の願いはどうなった？」など、長期記憶として過去の話を振ること）`
+      : '';
+
+    const userContextSection = uc
+      ? `\n\nThe pilgrim's journey so far (real data; weave it into conversation naturally and with respect, when relevant):
 - 巡った場所: ${uc.visitCount ?? 0}カ所 / 徳: ${uc.totalToku ?? 0} / 称号: ${uc.levelTitle ?? '見習い巡礼者'}
-- 御朱印: ${uc.goshuinCount ?? 0}体 / 果たしたクエスト: ${uc.questClears ?? 0}個${uc.questClearsHere ? `（この場では${uc.questClearsHere}個）` : ''}`
+- 御朱印: ${uc.goshuinCount ?? 0}体 / 果たしたクエスト: ${uc.questClears ?? 0}個${uc.questClearsHere ? `（この場では${uc.questClearsHere}個）` : ''}${networkSection}${memorySection}
+- 今の季節と天気: ${season}の${weather}（「今日は${weather}で気持ちが良いな」「${season}の風が心地よい」など、季節や天候に言及して会話に現実感を持たせること）`
       : '';
 
     // 土地の実在豆知識（半径2km）。事実として会話に使ってよい素材を渡す

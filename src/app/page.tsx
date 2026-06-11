@@ -945,7 +945,7 @@ export default function HomePage() {
                     <button
                       onClick={async () => {
                         const res = await subscribePush();
-                        if (res.success) {
+                        if (res === 'subscribed') {
                           setPushNotice('神々からの呼びかけを許可しました');
                         } else {
                           setPushNotice('通知の許可が拒否されたか、ブラウザが未対応です');
