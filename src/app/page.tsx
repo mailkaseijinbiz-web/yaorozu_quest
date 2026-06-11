@@ -376,6 +376,8 @@ export default function HomePage() {
     pullSnapshot().then((applied) => {
       if (cancelled) return;
       if (applied) refreshDatabaseStates();
+      // ほぼ同じ場所・同名の重複した場をマージ（クラウド復元の後に1回）
+      try { if (db.mergeDuplicateSpots() > 0) refreshDatabaseStates(); } catch {}
       // カムバック判定はクラウド復元の後に行う（復元前のローカル判定は別端末の活動を見落とす）。
       // 未登録（オンボーディング中）の新規ユーザーには出さない。
       if (typeof window !== 'undefined' && localStorage.getItem('yaorozu_registered') === '1') {
@@ -1097,7 +1099,7 @@ export default function HomePage() {
         )}
 
         <nav
-          className="glass-panel border-t border-black/5 pt-2 px-1 flex justify-around items-center z-[3000] bg-white/95 backdrop-blur-lg flex-shrink-0"
+          className="glass-panel border-t border-black/5 pt-2 px-1 flex items-stretch z-[3000] bg-white/95 backdrop-blur-lg flex-shrink-0"
           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}
         >
           {NAV_TABS.map(({ key, label, icon: Icon }) => {
@@ -1132,12 +1134,12 @@ export default function HomePage() {
                   }
                   setActiveTab(key);
                 }}
-                className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-xl transition-all cursor-pointer relative ${
+                className={`flex-1 min-w-0 flex flex-col items-center gap-0.5 py-1 px-1 rounded-xl transition-all cursor-pointer relative ${
                   isActive ? 'text-shrine-red font-bold scale-105' : 'text-gray-400 hover:text-gray-600'
                 }`}
               >
                 <Icon className="w-6 h-6" />
-                <span className="text-[13px]">{label}</span>
+                <span className="text-[11px] leading-tight truncate max-w-full">{label}</span>
                 {hasUnread && (
                   <span className="absolute top-0.5 right-2 w-2 h-2 bg-shrine-red rounded-full" />
                 )}
