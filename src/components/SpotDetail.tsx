@@ -13,6 +13,7 @@ import { grantGoShuin, hasGoShuin, getGoShuinList } from '../lib/goshuin';
 import { getLevelInfo } from '../data/levels';
 import YaorozuSpirit from './YaorozuSpirit';
 import GoshuinCelebrate from './GoshuinCelebrate';
+import PhotoLightbox from './PhotoLightbox';
 
 interface Message {
   id: string;
@@ -179,6 +180,9 @@ function SpotDetailBody({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spot.id]);
   const heroPhoto = photos[0] || spot.imageUrl || '';
+
+  // 写真のモーダル拡大表示（ヒーロー・みんなの写真・記録の写真で共用）
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   // 住所（逆ジオコーディング・キャッシュつき）。緯度経度の生の数字は表示しない
   const [address, setAddress] = useState<string | null>(null);
@@ -591,7 +595,7 @@ function SpotDetailBody({
       <div className="relative h-52 flex-shrink-0 bg-gray-200">
         {heroPhoto ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={heroPhoto} alt={spot.name} className="w-full h-full object-cover" />
+          <img src={heroPhoto} alt={spot.name} onClick={() => setLightbox(heroPhoto)} className="w-full h-full object-cover cursor-zoom-in" />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-100 via-amber-50 to-amber-100">
             <span className="text-7xl opacity-80">{godEmoji}</span>
@@ -724,7 +728,7 @@ function SpotDetailBody({
                       {rec.note && <p className="text-[13px] text-gray-600 mt-1.5 leading-relaxed">{rec.note}</p>}
                       {rec.photo && (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={rec.photo} alt="参拝の写真" className="mt-2 w-full h-36 object-cover rounded-xl" />
+                        <img src={rec.photo} alt="参拝の写真" onClick={() => setLightbox(rec.photo!)} className="mt-2 w-full h-36 object-cover rounded-xl cursor-zoom-in" />
                       )}
                     </li>
                   ))}
@@ -758,7 +762,7 @@ function SpotDetailBody({
                 {photos.map((url) => (
                   <div key={url} className="relative aspect-square rounded-lg overflow-hidden border border-black/5">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={url} alt="投稿写真" className="w-full h-full object-cover" />
+                    <img src={url} alt="投稿写真" onClick={() => setLightbox(url)} className="w-full h-full object-cover cursor-zoom-in" />
                     <button
                       onClick={() => handleRejectPhoto(url)}
                       title="不適切な写真を却下"
@@ -1008,6 +1012,9 @@ function SpotDetailBody({
           {toast}
         </div>
       )}
+
+      {/* 写真のモーダル拡大表示 */}
+      {lightbox && <PhotoLightbox src={lightbox} onClose={() => setLightbox(null)} />}
     </div>
   );
 }

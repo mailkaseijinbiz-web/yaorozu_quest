@@ -13,6 +13,7 @@ import {
 } from '../lib/visit-records';
 import { getGoShuinList, addPhotoGoshuin, deleteGoshuin, Goshuin } from '../lib/goshuin';
 import { compressImage } from '../lib/upload';
+import PhotoLightbox from './PhotoLightbox';
 
 interface RecordTabProps {
   currentUser: UserType;
@@ -39,6 +40,8 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
   const refresh = () => setRecords(getVisitRecords(currentUser.id));
   // タップで開く「記録の詳細」（写真を大きく・メモ全文・寺社詳細への導線）
   const [recDetail, setRecDetail] = useState<VisitRecord | null>(null);
+  // 写真のモーダル拡大表示
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   // 記録追加フォーム
   const [query, setQuery] = useState('');
@@ -489,7 +492,12 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                     )}
                     {g.photo ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={g.photo} alt={g.spotName} className="w-full h-28 rounded-xl object-cover mb-1.5" />
+                      <img
+                        src={g.photo}
+                        alt={g.spotName}
+                        onClick={() => setLightbox(g.photo!)}
+                        className="w-full h-28 rounded-xl object-cover mb-1.5 cursor-zoom-in"
+                      />
                     ) : (
                       <div className="relative w-20 h-20 flex-shrink-0 mb-1">
                         <div className="absolute inset-0 rounded-full border-4 border-red-600/80" />
@@ -518,10 +526,15 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
           <div className="fixed inset-0 z-[3500] flex items-center justify-center p-5">
             <div className="absolute inset-0 bg-black/55" onClick={() => setRecDetail(null)} />
             <div className="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden max-h-[85vh] flex flex-col">
-              {/* 写真（あれば大きく） */}
+              {/* 写真（あれば大きく・タップでさらに拡大） */}
               {recDetail.photo ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={recDetail.photo} alt={recDetail.spotName} className="w-full h-56 object-cover flex-shrink-0" />
+                <img
+                  src={recDetail.photo}
+                  alt={recDetail.spotName}
+                  onClick={() => setLightbox(recDetail.photo!)}
+                  className="w-full h-56 object-cover flex-shrink-0 cursor-zoom-in"
+                />
               ) : (
                 <div className="w-full h-32 flex items-center justify-center text-6xl bg-gradient-to-br from-blue-50 to-amber-50 flex-shrink-0">
                   {recDetail.godEmoji}
@@ -572,6 +585,9 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
           </div>
         );
       })()}
+
+      {/* 写真のモーダル拡大表示 */}
+      {lightbox && <PhotoLightbox src={lightbox} onClose={() => setLightbox(null)} />}
     </div>
   );
 }
