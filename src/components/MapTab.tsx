@@ -370,10 +370,11 @@ export default function MapTab({
   // マーカータップ/スワイプで activeSpot が変わり、それに追従してカードと地図ハイライトが更新される。
   const cardSpot = activeSpot ?? nearSpotList[0] ?? null;
   const cardIdx = cardSpot ? nearSpotList.findIndex((s) => s.id === cardSpot.id) : -1;
-  // ── 指に追従する横スワイプ・カルーセル（次のカードが右にチラ見えする） ──
-  // PEEK=右に覗かせる次カードの幅+間隔、GAP=カード間の間隔。実カード幅は計測で決める。
+  // ── 指に追従する横スワイプ・カルーセル ──
+  // カードはビューポートにぴったり収める（次カードの「チラ見せ」は右端が切れて
+  // 見えるためやめた）。GAP=カード間の間隔。実カード幅は計測で決める。
   const CARD_GAP = 10;
-  const CARD_PEEK = 34; // 右に約 (PEEK-GAP)=24px 次カードを覗かせる
+  const CARD_PEEK = 0;
   const cardViewportRef = useRef<HTMLDivElement | null>(null);
   const cardTrackRef = useRef<HTMLDivElement | null>(null);
   const [slideW, setSlideW] = useState(0);
@@ -860,14 +861,13 @@ export default function MapTab({
               transition: slideW ? 'transform .3s cubic-bezier(.22,.61,.36,1)' : 'none',
             }}
           >
-            {nearSpotList.map((s, i) => {
+            {nearSpotList.map((s) => {
               const d = distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude);
               const distVal = d < 1 ? `${Math.round(d * 1000)}` : d.toFixed(1);
               const distUnit = d < 1 ? 'm' : 'km';
               const godEmoji = s.godEmoji || (s.category === '神社' ? '⛩️' : '🙏');
               const held = hasGoShuin(currentUser.id, s.id); // この場の御朱印を授かり済みか
               const ugc = ugcCounts[s.id] ?? 0;
-              // 探索コンパス：その場の方角を指す（端末の向きがあれば実方向、無ければ北基準）
               const cardPhoto = (s.photos && s.photos[0]) || s.imageUrl || '';
               return (
                 <div
@@ -904,14 +904,6 @@ export default function MapTab({
                         {held && <span className="text-[13px] font-black text-shrine-red flex items-center gap-0.5">🔴 御朱印</span>}
                         {ugc > 0 && <span className="text-[13px] flex items-center gap-0.5 text-gray-400"><Camera className="w-3 h-3" />{ugc}</span>}
                       </div>
-                      {/* ページインジケータ（ドット） */}
-                      {nearSpotList.length > 1 && (
-                        <div className="flex items-center gap-1 mt-1.5">
-                          {nearSpotList.map((_, j) => (
-                            <span key={j} className={`h-1 rounded-full transition-all ${j === i ? 'w-3 bg-[#2563eb]' : 'w-1 bg-gray-300'}`} />
-                          ))}
-                        </div>
-                      )}
                     </div>
                     <div className="self-center pr-3 flex-shrink-0 text-[#2563eb]"><ChevronRight className="w-5 h-5" /></div>
                   </div>

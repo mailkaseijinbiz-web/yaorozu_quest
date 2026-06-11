@@ -76,6 +76,37 @@ export function addVisitRecord(
   return null;
 }
 
+/**
+ * 参拝記録を更新（再編集）。photo は undefined=変更なし / null=削除 / 文字列=差し替え。
+ * 写真つきで保存できないとき（容量超過）は写真を外して再試行する。
+ */
+export function updateVisitRecord(
+  userId: string,
+  id: string,
+  patch: { visitedAt?: string; note?: string; photo?: string | null }
+): VisitRecord | null {
+  const list = getVisitRecords(userId);
+  const idx = list.findIndex((r) => r.id === id);
+  if (idx === -1) return null;
+  const cur = list[idx];
+  const next: VisitRecord = {
+    ...cur,
+    visitedAt: patch.visitedAt ?? cur.visitedAt,
+    note: patch.note !== undefined ? patch.note.trim() || undefined : cur.note,
+    photo: patch.photo === undefined ? cur.photo : patch.photo ?? undefined,
+  };
+  const updated = [...list];
+  updated[idx] = next;
+  if (write(userId, updated)) return next;
+  // 容量超過 → 写真を外して保存し直す
+  if (next.photo) {
+    next.photo = undefined;
+    updated[idx] = { ...next };
+    if (write(userId, updated)) return next;
+  }
+  return null;
+}
+
 export function deleteVisitRecord(userId: string, id: string): void {
   write(userId, getVisitRecords(userId).filter((r) => r.id !== id));
 }

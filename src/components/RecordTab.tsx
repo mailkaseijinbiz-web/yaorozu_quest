@@ -7,6 +7,7 @@ import { distanceKm } from '../lib/geo';
 import {
   getVisitRecords,
   addVisitRecord,
+  updateVisitRecord,
   deleteVisitRecord,
   countVisitsForSpot,
   VisitRecord,
@@ -27,6 +28,11 @@ const todayInput = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
+const isoToInput = (iso: string) => {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return todayInput();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 const fmtDate = (iso: string) => {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
@@ -40,6 +46,35 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
   const refresh = () => setRecords(getVisitRecords(currentUser.id));
   // タップで開く「記録の詳細」（写真を大きく・メモ全文・寺社詳細への導線）
   const [recDetail, setRecDetail] = useState<VisitRecord | null>(null);
+  // 詳細モーダル内の再編集フォーム（null=閲覧モード）
+  const [recEdit, setRecEdit] = useState<{ date: string; note: string; photo: string | null } | null>(null);
+  const openRecDetail = (rec: VisitRecord) => { setRecDetail(rec); setRecEdit(null); };
+  const onPickEditPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      const p = await compressImage(f, { maxDim: 900, quality: 0.6 });
+      setRecEdit((prev) => (prev ? { ...prev, photo: p } : prev));
+    } catch {
+      /* 読み込み失敗は無視 */
+    }
+  };
+  const saveRecEdit = () => {
+    if (!recDetail || !recEdit) return;
+    const saved = updateVisitRecord(currentUser.id, recDetail.id, {
+      visitedAt: new Date(`${recEdit.date}T12:00:00`).toISOString(),
+      note: recEdit.note,
+      photo: recEdit.photo, // null なら写真を削除
+    });
+    if (!saved) {
+      alert('保存できませんでした（端末の保存容量が一杯の可能性があります）');
+      return;
+    }
+    refresh();
+    setRecDetail(saved);
+    setRecEdit(null);
+  };
   // 写真のモーダル拡大表示
   const [lightbox, setLightbox] = useState<string | null>(null);
 
@@ -368,7 +403,7 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                 {sortedRecords.map((rec) => (
                   <div key={rec.id} className="flex gap-3 bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
                     {/* カード本体のタップで詳細を開く（削除は右の独立ボタン） */}
-                    <button onClick={() => setRecDetail(rec)} className="flex gap-3 flex-1 min-w-0 text-left cursor-pointer">
+                    <button onClick={() => openRecDetail(rec)} className="flex gap-3 flex-1 min-w-0 text-left cursor-pointer">
                       {rec.photo ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={rec.photo} alt={rec.spotName} className="w-16 h-16 rounded-xl object-cover flex-shrink-0" />
@@ -522,17 +557,19 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
       {/* ── 記録の詳細（写真を大きく・メモ全文・寺社詳細への導線） ── */}
       {recDetail && (() => {
         const detailSpot = spots.find((s) => s.id === recDetail.spotId) ?? null;
+        // 編集中は編集フォームの写真をプレビュー（差し替え・削除が即見える）
+        const shownPhoto = recEdit ? recEdit.photo : recDetail.photo ?? null;
         return (
           <div className="fixed inset-0 z-[3500] flex items-center justify-center p-5">
             <div className="absolute inset-0 bg-black/55" onClick={() => setRecDetail(null)} />
             <div className="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden max-h-[85vh] flex flex-col">
               {/* 写真（あれば大きく・タップでさらに拡大） */}
-              {recDetail.photo ? (
+              {shownPhoto ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={recDetail.photo}
+                  src={shownPhoto}
                   alt={recDetail.spotName}
-                  onClick={() => setLightbox(recDetail.photo!)}
+                  onClick={() => setLightbox(shownPhoto)}
                   className="w-full h-56 object-cover flex-shrink-0 cursor-zoom-in"
                 />
               ) : (
@@ -553,33 +590,97 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                   <span className="text-[11px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
                     {ordinalOf(recDetail)}回目の記録
                   </span>
-                  <span className="text-[11px] text-gray-400 flex items-center gap-1">
-                    <CalendarDays className="w-3 h-3" />{fmtDate(recDetail.visitedAt)} 参拝
-                  </span>
+                  {!recEdit && (
+                    <span className="text-[11px] text-gray-400 flex items-center gap-1">
+                      <CalendarDays className="w-3 h-3" />{fmtDate(recDetail.visitedAt)} 参拝
+                    </span>
+                  )}
                 </div>
                 <h3 className="text-lg font-black text-gray-900 mt-1.5">{recDetail.godEmoji} {recDetail.spotName}</h3>
-                {recDetail.note ? (
-                  <p className="text-[14px] text-gray-700 leading-relaxed mt-2 whitespace-pre-wrap">{recDetail.note}</p>
-                ) : (
-                  <p className="text-[13px] text-gray-300 mt-2">メモはありません</p>
-                )}
 
-                <div className="flex items-center gap-2 mt-4">
-                  {detailSpot && (
-                    <button
-                      onClick={() => { setRecDetail(null); onOpenDetail?.(detailSpot); }}
-                      className="flex-1 flex items-center justify-center gap-1.5 bg-shrine-red text-white text-[13px] font-black py-2.5 rounded-xl hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer"
-                    >
-                      <MapPin className="w-4 h-4" />この寺社の詳細を開く
-                    </button>
-                  )}
-                  <button
-                    onClick={() => { deleteVisitRecord(currentUser.id, recDetail.id); refresh(); setRecDetail(null); }}
-                    className="flex items-center justify-center gap-1 text-[13px] font-black text-rose-500 bg-rose-50 px-3.5 py-2.5 rounded-xl hover:bg-rose-100 transition-all cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />削除
-                  </button>
-                </div>
+                {recEdit ? (
+                  /* ── 再編集フォーム（参拝日・メモ・写真の差し替え/削除） ── */
+                  <div className="mt-3 space-y-2.5">
+                    <label className="flex items-center gap-2 text-[13px] font-bold text-gray-600">
+                      <CalendarDays className="w-4 h-4 text-gray-400" />
+                      参拝日
+                      <input
+                        type="date"
+                        value={recEdit.date}
+                        max={todayInput()}
+                        onChange={(e) => setRecEdit({ ...recEdit, date: e.target.value })}
+                        className="ml-auto bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-sm text-gray-800 focus:outline-none focus:border-shrine-red"
+                      />
+                    </label>
+                    <textarea
+                      value={recEdit.note}
+                      onChange={(e) => setRecEdit({ ...recEdit, note: e.target.value })}
+                      rows={3}
+                      maxLength={140}
+                      placeholder="ひとことメモ（任意）"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-shrine-red resize-none"
+                    />
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-1.5 bg-gray-100 text-gray-600 text-[12px] font-black px-3 py-2 rounded-xl cursor-pointer hover:bg-gray-200 transition-all">
+                        <Camera className="w-4 h-4" />{recEdit.photo ? '写真を差し替え' : '写真を追加'}
+                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickEditPhoto} />
+                      </label>
+                      {recEdit.photo && (
+                        <button
+                          onClick={() => setRecEdit({ ...recEdit, photo: null })}
+                          className="text-[12px] font-black text-rose-500 bg-rose-50 px-3 py-2 rounded-xl hover:bg-rose-100 transition-all cursor-pointer"
+                        >
+                          写真を削除
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        onClick={saveRecEdit}
+                        className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-600 text-white text-[13px] font-black py-2.5 rounded-xl hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer"
+                      >
+                        <Check className="w-4 h-4" />変更を保存
+                      </button>
+                      <button
+                        onClick={() => setRecEdit(null)}
+                        className="text-[13px] font-black text-gray-500 bg-gray-100 px-4 py-2.5 rounded-xl hover:bg-gray-200 transition-all cursor-pointer"
+                      >
+                        キャンセル
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {recDetail.note ? (
+                      <p className="text-[14px] text-gray-700 leading-relaxed mt-2 whitespace-pre-wrap">{recDetail.note}</p>
+                    ) : (
+                      <p className="text-[13px] text-gray-300 mt-2">メモはありません</p>
+                    )}
+
+                    <div className="flex items-center gap-2 mt-4">
+                      {detailSpot && (
+                        <button
+                          onClick={() => { setRecDetail(null); onOpenDetail?.(detailSpot); }}
+                          className="flex-1 flex items-center justify-center gap-1.5 bg-shrine-red text-white text-[13px] font-black py-2.5 rounded-xl hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer"
+                        >
+                          <MapPin className="w-4 h-4" />この寺社の詳細を開く
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setRecEdit({ date: isoToInput(recDetail.visitedAt), note: recDetail.note ?? '', photo: recDetail.photo ?? null })}
+                        className="flex items-center justify-center gap-1 text-[13px] font-black text-gray-600 bg-gray-100 px-3.5 py-2.5 rounded-xl hover:bg-gray-200 transition-all cursor-pointer"
+                      >
+                        ✏️ 編集
+                      </button>
+                      <button
+                        onClick={() => { deleteVisitRecord(currentUser.id, recDetail.id); refresh(); setRecDetail(null); }}
+                        className="flex items-center justify-center gap-1 text-[13px] font-black text-rose-500 bg-rose-50 px-3.5 py-2.5 rounded-xl hover:bg-rose-100 transition-all cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />削除
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
