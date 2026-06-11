@@ -143,6 +143,43 @@ export function isStationaryQuest(q: Quest): boolean {
   return q.tasks.length === 1 && STATIONARY_TASK_TYPES.has(q.tasks[0].type);
 }
 
+/**
+ * 御朱印未取得の場に出す、シンプルな「御朱印を授かる」クエスト（1タスク）。
+ * 現地100m以内で御朱印が自動授与され達成になる（MapTab 側の処理）。
+ */
+export function buildGoshuinQuest(spot: { id: string; name: string; category: string; latitude: number; longitude: number; godEmoji?: string }): Quest {
+  const godEmoji = spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏');
+  return {
+    id: `goshuin-${spot.id}`,
+    spotId: spot.id,
+    title: `${spot.name}で御朱印を授かる`,
+    description: `${spot.name}（${spot.category}）へ参り、神と語らって御朱印を授かろう。`,
+    difficulty: 1,
+    minLevel: 0,
+    estMinutes: 15,
+    badgeIcon: godEmoji,
+    badgeName: `${spot.name}の御朱印`,
+    goalName: spot.name,
+    goalLat: spot.latitude,
+    goalLng: spot.longitude,
+    tasks: [
+      {
+        id: 's0',
+        type: 'goshuin',
+        spotId: spot.id,
+        lat: spot.latitude,
+        lng: spot.longitude,
+        kind: TASK_CATALOG.goshuin.kind,
+        icon: TASK_CATALOG.goshuin.icon,
+        label: TASK_CATALOG.goshuin.label,
+        title: `${spot.name}で御朱印を授かる`,
+        reward: TASK_CATALOG.goshuin.reward,
+      },
+    ],
+    source: 'static',
+  };
+}
+
 export function getChallenge(id: string): Quest | undefined {
   return CHALLENGES.find((c) => c.id === id);
 }

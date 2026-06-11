@@ -852,6 +852,13 @@ export default function HomePage() {
                   setUserLocation={setUserLocation}
                   creatorProfiles={creatorProfiles}
                   onOpenDetail={setDetailSpot}
+                  onRecordVisit={(s) => {
+                    const uid = (currentUser || FALLBACK_CURRENT_USER).id;
+                    addVisitRecord(uid, s);
+                    db.recordVisit(uid, s.id); // visitedSpotIds と探訪ボーナス（重複は無視）
+                    refreshDatabaseStates();
+                    setPushNotice(`📝 ${s.name} の参拝を記録しました`);
+                  }}
                   deviceHeading={deviceHeading}
                   currentUser={currentUser || FALLBACK_CURRENT_USER}
                   activeChallenge={activeChallengeId ? db.getQuest(activeChallengeId) ?? null : null}

@@ -131,7 +131,8 @@ export function buildTourQuest(
       `${first.name}を起点に${route.length}つの社を歩いてめぐる小さな巡礼路。参道から本殿への空気の切り替わりを感じながら、社ごとの個性を見比べよう。`,
       160,
     ),
-    difficulty: pathKm <= 1.5 ? 1 : 2,
+    // 巡る社の数で難易度：2社=ふつう(中)、3社以上=むずかしい(高)
+    difficulty: route.length >= 3 ? 3 : 2,
     minLevel: 1,
     estMinutes,
     badgeIcon: '⛩️',

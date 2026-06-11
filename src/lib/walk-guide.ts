@@ -69,9 +69,9 @@ export interface WalkGuideInput {
 export function composeWalkGuide(input: WalkGuideInput): string {
   const { questId, step, stage, distKm, user, nonce = 0 } = input;
 
-  // 到着間近（300m未満）。タップでの話題替え（nonce）時は固定文を出さず通常ローテへ。
+  // 目的地100m未満：写真に残して記録するよう促す。タップでの話題替え(nonce)時は通常ローテへ。
   if (nonce === 0 && stage >= 100) {
-    return '目的地はもう目の前。あたりをゆっくり見回して、心に残る一枚を写真におさめてみよう。';
+    return '目的地はもう目の前。写真に残して記録にしよう。';
   }
   if (nonce === 0 && stage === 99) {
     return '間もなく到着じゃ。鳥居や門が見えたら、一度立ち止まって全体の姿を眺めてみよ。';
