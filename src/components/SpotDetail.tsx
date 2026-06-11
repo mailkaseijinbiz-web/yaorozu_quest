@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark, Crown, NotebookPen, CalendarDays, Volume2, Stamp } from 'lucide-react';
+import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark, Crown, NotebookPen, CalendarDays, Volume2, Stamp, Pencil } from 'lucide-react';
 import { Spot, Agent, User, db, isVerifiedSpot, isQuotaError, type UgcVisibility } from '../lib/db';
 import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
 import { uploadImage, compressImage } from '../lib/upload';
-import { getVisitRecords, addVisitRecord, deleteVisitRecord, hasRecordForSpotOnDate, recordPhotos, MAX_RECORD_PHOTOS, type VisitRecord } from '../lib/visit-records';
+import { getVisitRecords, addVisitRecord, deleteVisitRecord, updateVisitRecord, hasRecordForSpotOnDate, recordPhotos, MAX_RECORD_PHOTOS, type VisitRecord } from '../lib/visit-records';
 import { getAddress } from '../lib/address';
 import { shareToSns } from '../lib/share';
 import { grantGoShuin, hasGoShuin, getGoShuinList } from '../lib/goshuin';
@@ -215,7 +215,24 @@ function SpotDetailBody({
   const [recNote, setRecNote] = useState('');
   const [recPhotos, setRecPhotos] = useState<string[]>([]);
   const [recSaving, setRecSaving] = useState(false);
+  const [editingRecId, setEditingRecId] = useState<string | null>(null); // 編集中の記録ID（null=新規）
   const recPhotoInputRef = useRef<HTMLInputElement>(null);
+
+  // 既存の記録を編集モードで開く（フォームに内容を流し込む）
+  const openRecEdit = (rec: VisitRecord) => {
+    setEditingRecId(rec.id);
+    setRecDate(rec.visitedAt.slice(0, 10));
+    setRecNote(rec.note || '');
+    setRecPhotos(recordPhotos(rec));
+    setRecFormOpen(true);
+  };
+  const closeRecForm = () => {
+    setRecFormOpen(false);
+    setEditingRecId(null);
+    setRecNote('');
+    setRecPhotos([]);
+    setRecDate(new Date().toISOString().slice(0, 10));
+  };
 
   // 写真を追加（複数選択可・最大 MAX_RECORD_PHOTOS 枚まで）
   const onPickRecPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -238,13 +255,27 @@ function SpotDetailBody({
   const saveSpotRecord = () => {
     if (recSaving) return;
     const visitedAt = new Date(`${recDate}T12:00:00`).toISOString();
-    // 1日1投稿：同じ寺社・同じ日にすでに記録があれば追加しない
-    if (hasRecordForSpotOnDate(currentUser.id, spot.id, visitedAt)) {
-      flashToast('この日の記録はすでにあります（1日にひとつ）');
-      return;
-    }
     setRecSaving(true);
     try {
+      // ── 編集（既存の記録を更新）──
+      if (editingRecId) {
+        const ok = updateVisitRecord(currentUser.id, editingRecId, { visitedAt, note: recNote, photos: recPhotos });
+        if (!ok) {
+          flashToast('端末の保存領域がいっぱいで保存できませんでした');
+          return;
+        }
+        refreshRecords();
+        closeRecForm();
+        flashToast('✏️ 記録を更新しました');
+        onChanged?.();
+        return;
+      }
+      // ── 新規追加 ──
+      // 1日1投稿：同じ寺社・同じ日にすでに記録があれば追加しない
+      if (hasRecordForSpotOnDate(currentUser.id, spot.id, visitedAt)) {
+        flashToast('この日の記録はすでにあります（1日にひとつ）');
+        return;
+      }
       const rec = addVisitRecord(currentUser.id, spot, {
         visitedAt,
         note: recNote,
@@ -256,9 +287,7 @@ function SpotDetailBody({
       }
       db.recordVisit(currentUser.id, spot.id); // 探訪バッジ・徳（重複は無視）
       refreshRecords();
-      setRecFormOpen(false);
-      setRecNote('');
-      setRecPhotos([]);
+      closeRecForm();
       flashToast('📔 参拝を記録しました');
       onChanged?.();
     } finally {
@@ -726,10 +755,10 @@ function SpotDetailBody({
               <NotebookPen className="w-4 h-4 text-emerald-600" />
               <h3 className="text-sm font-black text-gray-800">参拝の記録 ({spotRecords.length})</h3>
               <button
-                onClick={() => setRecFormOpen((v) => !v)}
+                onClick={() => (recFormOpen ? closeRecForm() : setRecFormOpen(true))}
                 className="ml-auto flex items-center gap-1 text-[12px] font-black text-white bg-emerald-600 px-3 py-1.5 rounded-full hover:opacity-90 transition-all cursor-pointer"
               >
-                ＋ 記録する
+                {recFormOpen ? '閉じる' : '＋ 記録する'}
               </button>
             </div>
 
@@ -788,11 +817,12 @@ function SpotDetailBody({
                     disabled={recSaving}
                     className="ml-auto text-[12px] font-black text-white bg-emerald-600 px-4 py-1.5 rounded-full hover:opacity-90 disabled:opacity-50 transition-all cursor-pointer"
                   >
-                    {recSaving ? '保存中…' : 'この内容で記録'}
+                    {recSaving ? '保存中…' : editingRecId ? 'この内容で更新' : 'この内容で記録'}
                   </button>
                 </div>
 
-                {/* デジタル御朱印の取得（100m未満でのみ） */}
+                {/* デジタル御朱印の取得（100m未満でのみ・新規記録時のみ表示） */}
+                {!editingRecId && (
                 <button
                   onClick={onGetRecGoshuin}
                   disabled={recHasGoshuin || !recNear}
@@ -807,6 +837,7 @@ function SpotDetailBody({
                   <Stamp className="w-4 h-4" />
                   {recHasGoshuin ? 'デジタル御朱印 取得済み' : recNear ? 'デジタル御朱印を取得' : 'デジタル御朱印を取得（100m未満で取得可）'}
                 </button>
+                )}
               </div>
             )}
 
@@ -831,9 +862,16 @@ function SpotDetailBody({
                           {arr.length - i}回目
                         </span>
                         <button
+                          onClick={() => openRecEdit(rec)}
+                          aria-label="記録を編集"
+                          className="ml-auto text-gray-300 hover:text-blue-500 transition-colors cursor-pointer"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
                           onClick={() => { deleteVisitRecord(currentUser.id, rec.id); refreshRecords(); }}
                           aria-label="記録を削除"
-                          className="ml-auto text-gray-300 hover:text-rose-400 transition-colors cursor-pointer"
+                          className="text-gray-300 hover:text-rose-400 transition-colors cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -1196,7 +1234,7 @@ export default function SpotDetail(props: SpotDetailProps) {
   // transitionend が来ない環境向けに、保険として一定時間後に本体をマウントする。
   useEffect(() => {
     const raf = requestAnimationFrame(() => requestAnimationFrame(() => setEntered(true)));
-    const fallback = setTimeout(() => setBodyReady(true), 420);
+    const fallback = setTimeout(() => setBodyReady(true), 240);
     return () => { cancelAnimationFrame(raf); clearTimeout(fallback); };
   }, []);
 
@@ -1204,7 +1242,7 @@ export default function SpotDetail(props: SpotDetailProps) {
   const handleClose = () => {
     if (leaving) return;
     setLeaving(true);
-    setTimeout(props.onClose, 260);
+    setTimeout(props.onClose, 200);
   };
 
   const heroPhoto = spot.imageUrl || ''; // シェルは DB を読まず spot のみで描く
@@ -1214,7 +1252,7 @@ export default function SpotDetail(props: SpotDetailProps) {
       className="fixed sm:absolute inset-0 z-[3000] bg-[#f5f7fa] will-change-transform"
       style={{
         transform: entered && !leaving ? 'translateX(0)' : 'translateX(100%)',
-        transition: 'transform 300ms cubic-bezier(0.22, 1, 0.36, 1)',
+        transition: 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onTransitionEnd={(e) => {
         if (e.propertyName === 'transform' && entered && !leaving) setBodyReady(true);

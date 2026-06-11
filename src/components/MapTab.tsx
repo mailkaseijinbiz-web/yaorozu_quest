@@ -827,7 +827,7 @@ export default function MapTab({
         //   右に次のカードがチラ見えして「横にめくれる」ことが一目で分かる（近い順）。
         <div
           ref={(el) => { overlayElRef.current = el; cardViewportRef.current = el; }}
-          className="absolute bottom-3 left-3 right-3 z-[1000] overflow-hidden touch-pan-y"
+          className="absolute bottom-3 left-3 right-0 z-[1000] overflow-hidden touch-pan-y"
           onTouchStart={onTrackTouchStart}
           onTouchMove={onTrackTouchMove}
           onTouchEnd={onTrackTouchEnd}
