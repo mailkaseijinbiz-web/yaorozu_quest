@@ -37,6 +37,41 @@ function composeGuideText(step: ChallengeStep): string {
 type GuideMsg = { role: 'spirit' | 'user'; text: string; photo?: string };
 type ShareKind = 'self' | 'scene' | 'photo';
 
+// クエスト中に撮った道中の写真（地図にマーク表示し、タップで振り返る）
+export interface QuestPhoto {
+  id: string;
+  lat: number;
+  lng: number;
+  photo: string;     // 圧縮 dataURL
+  comment?: string;  // 添えたひとこと（プリセット or 自由入力）
+  mood?: string;     // そのときの気分
+  feedback?: string; // 目的地の神のコメント
+  createdAt: string;
+}
+
+// 写真に添えるコメントのプリセット
+const PHOTO_PRESETS = ['きれいな景色', 'おもしろい発見', '歴史を感じる', 'ほっとする場所', '美味しそう', '気になる建物', '季節を感じる'];
+
+// 「今どんな気分？」のプリセット（神が気分も聞いてくれる）
+const MOOD_PRESETS = [
+  { emoji: '😊', label: 'たのしい' },
+  { emoji: '😌', label: 'おだやか' },
+  { emoji: '😮', label: 'おどろき' },
+  { emoji: '🥹', label: '感動' },
+  { emoji: '😪', label: 'おつかれ' },
+  { emoji: '🤔', label: '考え中' },
+];
+
+// 「何を撮る？」のネタ振り（道中で目を向ける先のヒント）。神社/寺院/共通で出し分ける。
+const PHOTO_PROMPTS_SHRINE = ['狛犬の阿吽の表情', '鳥居の形や色あい', '手水舎や灯籠のたたずまい', '境内のご神木・大木', '絵馬や提灯のにぎわい'];
+const PHOTO_PROMPTS_TEMPLE = ['山門や仁王像の迫力', '瓦や彫刻の意匠', '苔むした石畳や石仏', '鐘楼や五重塔の姿', '庭園の静けさ'];
+const PHOTO_PROMPTS_COMMON = ['路地や坂のある風景', '季節の草花や木々', '古い建物と新しい街の対比', '空や光の様子', '気になる看板やお店'];
+function photoPromptFor(category: string | undefined, n: number): string {
+  const base = category === '神社' ? PHOTO_PROMPTS_SHRINE : category ? PHOTO_PROMPTS_TEMPLE : [];
+  const pool = [...base, ...PHOTO_PROMPTS_COMMON];
+  return pool[Math.abs(n) % pool.length];
+}
+
 // 現在のクエスト進捗から、精霊が語ってきた会話ログを再構成する（序章→現在の目的地まで）。
 function buildGuideLog(ch: Challenge, doneIds: Set<string>): GuideMsg[] {
   const msgs: GuideMsg[] = [{ role: 'spirit', text: ch.description }];
@@ -60,6 +95,8 @@ interface MapTabProps {
   onAdvanceChallenge?: (stepId: string, photo?: string | null) => void; // 次の目的地ステップを達成（証拠写真つき）
   onCompleteChallenge?: () => void; // 目的地100m到達＝御朱印取得でクエストを達成扱いにする
   trail?: { lat: number; lng: number }[]; // クエスト中に通ったルートの軌跡（親が保持＝タブ遷移で消えない）
+  questPhotos?: QuestPhoto[]; // クエスト中に撮った道中写真（親が保持）。地図にマーク表示
+  onAddQuestPhoto?: (p: QuestPhoto) => void; // 道中写真を追加
   currentUser: User; // 近くの場カード表示用
   onMapMove?: (center: { lat: number; lng: number }) => void; // 地図を移動させたとき（アクティビティログ用）
   deviceHeading?: number | null; // 端末の向き（方位磁針）。ナビ矢印のコンパス補正と現在地マーカーに使う
@@ -79,6 +116,8 @@ export default function MapTab({
   onAdvanceChallenge,
   onCompleteChallenge,
   trail = [],
+  questPhotos = [],
+  onAddQuestPhoto,
   currentUser,
   onMapMove,
   deviceHeading = null,
@@ -189,6 +228,12 @@ export default function MapTab({
   const [photoComment, setPhotoComment] = useState<string | null>(null);
   const [photoSending, setPhotoSending] = useState(false);
   const photoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 撮影後にコメント（プリセット/自由入力）を添えて送るシート
+  const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
+  const [photoCommentInput, setPhotoCommentInput] = useState('');
+  const [photoMood, setPhotoMood] = useState<string | null>(null);
+  // 地図上の写真マークをタップして振り返るモーダル
+  const [reviewPhoto, setReviewPhoto] = useState<QuestPhoto | null>(null);
   // フキダシのタップで道案内の精霊が次々に新しい話題をくれる（話題替えの種）
   const topicBumpRef = useRef(0);
   // 道案内の精霊との会話（狐アイコンのタップでログ閲覧＋参加）
@@ -387,6 +432,8 @@ export default function MapTab({
   const destAgent = destSpot ? db.getAgentBySpot(destSpot.id) : undefined;
   const destGodName = destSpot?.godName || destAgent?.name || '八百万の神';
   const destGodEmoji = destSpot ? (destSpot.godEmoji || (destSpot.category === '神社' ? '⛩️' : '🙏')) : '⛩️';
+  // 「何を撮る？」のネタ振り。撮った枚数で替わる。
+  const photoPrompt = destSpot ? photoPromptFor(destSpot.category, questPhotos.length) : '';
 
   const activeDist = activeSpot ? distanceKm(userLocation.lat, userLocation.lng, activeSpot.latitude, activeSpot.longitude) : 0;
   const activeNear = activeDist <= 1.0;
@@ -606,6 +653,7 @@ export default function MapTab({
     setChatExtra([]); setChatOpen(false); setChatInput(''); setPendingShareKind(null);
     arrivalDoneRef.current = false; setGoshuinCelebrate(null);
     setPhotoComment(null); if (photoTimerRef.current) clearTimeout(photoTimerRef.current);
+    setPendingPhoto(null); setPhotoCommentInput(''); setPhotoMood(null); setReviewPhoto(null);
     topicBumpRef.current = 0;
   }, [activeChallenge?.id]);
   useEffect(() => () => { if (photoTimerRef.current) clearTimeout(photoTimerRef.current); }, []);
@@ -707,42 +755,53 @@ export default function MapTab({
     setChatOpen(true);
   };
 
-  // 道中の写真：会話画面には入らず、神のひとことを上部フキダシに出してポーン音を鳴らす。
+  // 道中の写真：撮ったらまずコメント（プリセット/自由）を添えるシートを開く。
   const onPickGodPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !destSpot || photoSending) return;
-    setPhotoSending(true);
     let dataUrl = '';
-    try { dataUrl = await compressImage(file, { maxDim: 900, quality: 0.6 }); } catch { setPhotoSending(false); return; }
+    try { dataUrl = await compressImage(file, { maxDim: 900, quality: 0.6 }); } catch { return; }
+    setPhotoCommentInput('');
+    setPhotoMood(null);
+    setPendingPhoto(dataUrl);
+  };
+
+  // コメント・気分を添えて送信：神のひとことを上部フキダシに出し（ポーン音）、地図に写真マークを残す。
+  const sendQuestPhoto = async () => {
+    if (!pendingPhoto || !destSpot || photoSending) return;
+    const photo = pendingPhoto;
+    const comment = photoCommentInput.trim();
+    const mood = photoMood;
+    const userNote = [mood ? `いまの気分は「${mood}」` : '', comment].filter(Boolean).join('。') || undefined;
+    setPhotoSending(true);
+    setPendingPhoto(null);
+    let feedback = 'ほう、よき眺めじゃ。心に残る一枚じゃな。';
     try {
       const res = await fetch('/api/photo-feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ photoDataUrl: dataUrl, context: { spotName: destSpot.name, taskTitle: '気になる風景・もの', godName: destGodName } }),
+        body: JSON.stringify({ photoDataUrl: photo, context: { spotName: destSpot.name, godName: destGodName, casual: true, userNote } }),
         signal: AbortSignal.timeout(12_000),
       });
       const data = await res.json();
-      const fb = data?.feedback || 'ほう、よき眺めじゃ。心に残る一枚じゃな。';
-      setPhotoComment(fb);
-      playChime(); // 神の言葉が出た合図
-      // 徳（1目的地・写真は1日1回まで）
-      if (!db.isTaskDoneToday(destSpot.id, 'wayside-photo')) {
-        db.grantToku(currentUser.id, 5, '寄り道：神に伝える');
-        db.markTaskDoneToday(destSpot.id, 'wayside-photo');
-        setShareToast('徳 +5');
-        setTimeout(() => setShareToast(null), 2200);
-      }
-      // しばらく見せてから、道中ナレーションに戻す
-      if (photoTimerRef.current) clearTimeout(photoTimerRef.current);
-      photoTimerRef.current = setTimeout(() => setPhotoComment(null), 9000);
-    } catch {
-      setPhotoComment('すまぬ、写真がうまく届かなんだ。');
-      if (photoTimerRef.current) clearTimeout(photoTimerRef.current);
-      photoTimerRef.current = setTimeout(() => setPhotoComment(null), 4000);
-    } finally {
-      setPhotoSending(false);
+      feedback = data?.feedback || feedback;
+    } catch { /* 定型文のまま */ }
+    setPhotoComment(feedback);
+    playChime();
+    // 地図に写真マークを残す（現在地）。親が保持＝タブ遷移でも残る。
+    onAddQuestPhoto?.({ id: `qp-${Date.now()}`, lat: userLocation.lat, lng: userLocation.lng, photo, comment: comment || undefined, mood: mood || undefined, feedback, createdAt: new Date().toISOString() });
+    setPhotoMood(null);
+    // 徳（1目的地・写真は1日1回まで）
+    if (!db.isTaskDoneToday(destSpot.id, 'wayside-photo')) {
+      db.grantToku(currentUser.id, 5, '寄り道：神に伝える');
+      db.markTaskDoneToday(destSpot.id, 'wayside-photo');
+      setShareToast('徳 +5');
+      setTimeout(() => setShareToast(null), 2200);
     }
+    if (photoTimerRef.current) clearTimeout(photoTimerRef.current);
+    photoTimerRef.current = setTimeout(() => setPhotoComment(null), 9000);
+    setPhotoSending(false);
   };
 
   return (
@@ -761,6 +820,8 @@ export default function MapTab({
           goal={challengeGoal}
           onGoalTap={() => { const t = destSpot ?? (nextStep?.spotId ? db.getSpot(nextStep.spotId) : null) ?? activeSpot; if (t) onOpenDetail?.(t); }}
           trail={trail}
+          photoMarkers={questPhotos.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, photo: p.photo }))}
+          onPhotoMarkerTap={(id) => setReviewPhoto(questPhotos.find((p) => p.id === id) ?? null)}
           controlsBottom={controlsBottom}
           focusGoalToken={focusGoalToken}
           hideControls={introShowing}
@@ -955,7 +1016,7 @@ export default function MapTab({
                     >
                       <Camera className="w-4 h-4" />{photoSending ? '神が眺めている…' : '気になる風景・ものを撮る'}
                     </button>
-                    <p className="text-center text-[11px] text-gray-400 mt-1.5">道中で見つけたら撮ってみよう。{destGodName}が応えてくれる（任意）</p>
+                    <p className="text-center text-[11px] text-gray-400 mt-1.5">📷 お題：{photoPrompt}｜{destGodName}が応えてくれる（任意）</p>
                   </>
                 ) : nextStep.type === 'goshuin' ? (
                   <button
@@ -1327,6 +1388,71 @@ export default function MapTab({
       {/* 道中の寄り道で徳を授かったときの小トースト */}
       {shareToast && (
         <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[2400] bg-gray-900/90 text-white text-[13px] font-black px-4 py-2 rounded-full shadow-lg celebrate-pop">{shareToast}</div>
+      )}
+
+      {/* 撮影後：気分・ひとことを添えて神に送るシート（ネタ振り付き） */}
+      {pendingPhoto && destSpot && (
+        <div className="absolute inset-0 z-[2350] bg-black/50 flex items-end" onClick={() => !photoSending && setPendingPhoto(null)}>
+          <div className="w-full bg-white rounded-t-3xl flex flex-col max-h-[90%] animate-in" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 pt-3 pb-2 border-b border-black/5">
+              <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5">{destGodEmoji} {destGodName}に伝える</h3>
+              <button onClick={() => setPendingPhoto(null)} aria-label="閉じる" className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-400 cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="px-4 py-3 overflow-y-auto space-y-3.5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={pendingPhoto} alt="撮った写真" className="w-full max-h-52 object-cover rounded-2xl border border-black/5" />
+              <div className="bg-amber-50 rounded-xl px-3 py-2">
+                <p className="text-[11px] font-black text-amber-700">📷 お題：{photoPrompt} を探してみよう</p>
+              </div>
+              <div>
+                <p className="text-[12px] font-black text-gray-600 mb-1.5">いまどんな気分？</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {MOOD_PRESETS.map((m) => (
+                    <button key={m.label} onClick={() => setPhotoMood(photoMood === m.label ? null : m.label)} className={`text-[12px] font-black px-2.5 py-1.5 rounded-full transition-all cursor-pointer ${photoMood === m.label ? 'bg-shrine-red text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{m.emoji} {m.label}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-[12px] font-black text-gray-600 mb-1.5">ひとこと（任意）</p>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {PHOTO_PRESETS.map((p) => (
+                    <button key={p} onClick={() => setPhotoCommentInput(photoCommentInput === p ? '' : p)} className={`text-[12px] font-black px-2.5 py-1.5 rounded-full transition-all cursor-pointer ${photoCommentInput === p ? 'bg-[#2563eb] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{p}</button>
+                  ))}
+                </div>
+                <input value={photoCommentInput} onChange={(e) => setPhotoCommentInput(e.target.value)} placeholder="自由に書いてもOK" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-800 outline-none focus:border-shrine-red" />
+              </div>
+            </div>
+            <div className="px-4 pt-2 border-t border-black/5" style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}>
+              <button onClick={sendQuestPhoto} disabled={photoSending} className="w-full text-[15px] font-black py-3 rounded-full bg-[#2563eb] text-white hover:opacity-90 active:scale-[0.99] transition-all disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2">
+                <Send className="w-4 h-4" />{photoSending ? '送信中…' : 'この一枚を送る'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 地図の写真マークをタップ → 振り返りモーダル */}
+      {reviewPhoto && (
+        <div className="absolute inset-0 z-[2360] bg-black/60 flex items-center justify-center p-4" onClick={() => setReviewPhoto(null)}>
+          <div className="w-full max-w-sm bg-white rounded-3xl overflow-hidden shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={reviewPhoto.photo} alt="道中の写真" className="w-full max-h-72 object-cover" />
+              <button onClick={() => setReviewPhoto(null)} aria-label="閉じる" className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/45 text-white flex items-center justify-center cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-4 space-y-2">
+              {reviewPhoto.mood && <p className="text-[12px] font-bold text-gray-500">いまの気分：{reviewPhoto.mood}</p>}
+              {reviewPhoto.comment && <p className="text-sm font-black text-gray-900">{reviewPhoto.comment}</p>}
+              {reviewPhoto.feedback && (
+                <div className="flex items-start gap-2">
+                  <span className="text-lg flex-shrink-0">{destGodEmoji}</span>
+                  <p className="text-[13px] text-gray-700 bg-gray-50 rounded-2xl px-3 py-2 leading-relaxed">{reviewPhoto.feedback}</p>
+                </div>
+              )}
+              <p className="text-[10px] text-gray-300">{new Date(reviewPhoto.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 目的地100m到達：御朱印を自動授与（OKでクエスト達成・解除） */}

@@ -12,6 +12,8 @@ interface FeedbackContext {
   taskTitle?: string;
   taskAction?: string;
   godName?: string;
+  casual?: boolean;   // 道中の「気になる風景」共有（証拠写真ではない気軽な一枚）
+  userNote?: string;  // 巡礼者が添えたひとこと・気分
 }
 
 // 定型文フォールバック（決定論的に選択。写真は見ていないので内容に踏み込まない）
@@ -36,6 +38,11 @@ function fallbackFeedback(ctx: FeedbackContext): string {
 
 function buildPrompt(ctx: FeedbackContext): string {
   const persona = ctx.godName ? `${ctx.spotName ?? 'この地'}に宿る神「${ctx.godName}」` : '町歩きクエストの案内役「道案内の精霊」';
+  if (ctx.casual) {
+    // 道中の気軽な一枚。証拠写真ではなく「目的地へ向かう巡礼者が見つけた景色」を共有された場面。
+    return `あなたは${persona}です。あなたのもとへ向かって歩いている巡礼者が、道中で見つけた景色やものの写真を送ってくれました。${ctx.userNote ? `巡礼者の言葉：「${ctx.userNote}」。この言葉にも軽く触れてください。` : ''}
+写真に実際に写っているものに必ず1つ具体的に触れ、温かく少し古風でやさしい口調（「〜じゃ」「〜のう」）で1〜2文・80字以内のひとことを返してください。気分が添えられていれば、それに寄り添う一言を入れてもよいです。写っていないものを断定しないこと。説教くさくならず、隣で一緒に眺めているように。`;
+  }
   return `あなたは${persona}です。巡礼者が${ctx.spotName ? `「${ctx.spotName}」で` : ''}ミッション「${ctx.taskTitle ?? '町歩き'}」${ctx.taskAction ? `（${ctx.taskAction}）` : ''}の証拠写真を奉納しました。
 写真に実際に写っているものに必ず1つ具体的に触れて、温かく少し古風な口調（「〜じゃ」「〜ぞ」）で1〜2文・80字以内のひとことを返してください。
 狛犬なら阿吽や表情の個性、鳥居なら形や素材、建物なら意匠、空や緑なら光の様子に触れるとよいです。写っていないものを断定しないこと。`;
