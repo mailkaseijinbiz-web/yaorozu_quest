@@ -9,6 +9,7 @@ import { hasGoShuin, grantGoShuin } from '../lib/goshuin';
 import { playChime } from '../lib/sound';
 import GoshuinCelebrate from './GoshuinCelebrate';
 import { distanceKm, bearingDeg } from '../lib/geo';
+import { formatKm, ttlInfo } from '../lib/quest-ui';
 import { getHeartVoices } from '../data/god-tasks';
 import { composeWalkGuide, nextGuideStage } from '../lib/walk-guide';
 import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
@@ -258,6 +259,7 @@ export default function MapTab({
   const [shareToast, setShareToast] = useState<string | null>(null);
   // 100m到達での御朱印自動授与＝クエスト達成
   const [goshuinCelebrate, setGoshuinCelebrate] = useState<{ spot: Spot; godName: string } | null>(null);
+  const [quitConfirm, setQuitConfirm] = useState(false); // 「中断」確認モーダル
   const arrivalDoneRef = useRef(false);
   // 上部ガイドのフキダシ本文（3行＋スクロール）の自動スクロール用
   const guideScrollRef = useRef<HTMLDivElement | null>(null);
@@ -664,7 +666,7 @@ export default function MapTab({
     arrivalDoneRef.current = false; setGoshuinCelebrate(null);
     setPhotoComment(null); if (photoTimerRef.current) clearTimeout(photoTimerRef.current);
     setPendingPhoto(null); setPhotoCommentInput(''); setPhotoMood(null); setReviewPhoto(null);
-    topicBumpRef.current = 0;
+    topicBumpRef.current = 0; setQuitConfirm(false);
   }, [activeChallenge?.id]);
   useEffect(() => () => { if (photoTimerRef.current) clearTimeout(photoTimerRef.current); }, []);
   // 新着・送信中で最下部へスクロール
@@ -920,21 +922,54 @@ export default function MapTab({
 
       {/* 今挑戦中のチャレンジ（上部バナー・左右端まで・開始時に上からふわっと） */}
       {activeChallenge && !introShowing && (
-        <div className="quest-header-in absolute top-0 left-0 right-0 z-[1100] bg-[#2563eb] text-white shadow-lg px-4 py-3 flex items-center gap-2">
-          <span className="inline-flex items-center gap-1 text-[10px] font-black bg-white/25 px-2 py-0.5 rounded-full flex-shrink-0">
-            <Flag className="w-2.5 h-2.5" />挑戦中
-          </span>
-          <h4 className="flex-1 min-w-0 text-sm font-black truncate">{activeChallenge.title}</h4>
-          <button onClick={onClearChallenge} aria-label="チャレンジを中断" className="flex items-center gap-0.5 text-[11px] font-black bg-white/20 hover:bg-white/30 px-2 py-1 rounded-full flex-shrink-0 cursor-pointer transition-colors">
-            中断<X className="w-3 h-3" />
-          </button>
+        <div className="quest-header-in absolute top-0 left-0 right-0 z-[1100] bg-[#2563eb] text-white shadow-lg px-4 py-2.5 flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 text-[10px] font-black bg-white/25 px-2 py-0.5 rounded-full flex-shrink-0">
+              <Flag className="w-2.5 h-2.5" />挑戦中
+            </span>
+            <h4 className="flex-1 min-w-0 text-sm font-black truncate">{activeChallenge.title}</h4>
+            <button onClick={() => setQuitConfirm(true)} aria-label="チャレンジを中断" className="flex items-center gap-0.5 text-[11px] font-black bg-white/20 hover:bg-white/30 px-2 py-1 rounded-full flex-shrink-0 cursor-pointer transition-colors">
+              中断<X className="w-3 h-3" />
+            </button>
+          </div>
+          {/* 進捗：ステップ丸＋コネクタ／件数／次の目的地までの距離 */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black tabular-nums flex-shrink-0">✓ {chDone?.size ?? 0}/{activeChallenge.tasks.length}</span>
+            <div className="flex-1 flex items-center min-w-0">
+              {activeChallenge.tasks.map((t, i) => {
+                const done = chDone?.has(t.id) ?? false;
+                const current = nextStep?.id === t.id;
+                return (
+                  <React.Fragment key={t.id}>
+                    {i > 0 && <span className={`flex-1 h-0.5 rounded-full transition-colors ${done ? 'bg-white' : 'bg-white/25'}`} />}
+                    <span
+                      className={`flex items-center justify-center rounded-full flex-shrink-0 transition-colors ${
+                        done ? 'celebrate-pop w-4 h-4 bg-white text-[#2563eb]'
+                          : current ? 'w-4 h-4 border-2 border-white bg-white/25 text-[9px] font-black animate-pulse'
+                          : 'w-4 h-4 bg-white/20 text-white/60 text-[9px] font-black'
+                      }`}
+                    >
+                      {done ? <Check className="w-3 h-3" /> : i + 1}
+                    </span>
+                  </React.Fragment>
+                );
+              })}
+            </div>
+            <span className="text-[11px] font-black tabular-nums flex-shrink-0">
+              {chAllDone
+                ? '全ステップ達成！'
+                : nextDist != null
+                ? `あと ${formatKm(nextDist).value}${formatKm(nextDist).unit}`
+                : ''}
+            </span>
+          </div>
         </div>
       )}
 
       {/* 進捗ガイド（上部のフキダシ）。通常は道案内の精霊の道中語り、写真を撮ると目的地の神の
           ひとこと（photoComment）を会話画面に入らずここに表示する。 */}
       {activeChallenge && (showGuide || photoComment) && nextStep && (
-        <div className="absolute top-0 left-0 right-0 z-[1200] px-4 pt-[68px] flex justify-center pointer-events-none">
+        <div className="absolute top-0 left-0 right-0 z-[1200] px-4 pt-[92px] flex justify-center pointer-events-none">
           <div className="w-full max-w-sm flex items-start gap-2">
             <button
               onClick={() => setChatOpen(true)}
@@ -1467,6 +1502,46 @@ export default function MapTab({
           </div>
         </div>
       )}
+
+      {/* チャレンジ中断の確認（達成済みステップは保存・再参加で再開できることを明示） */}
+      {quitConfirm && activeChallenge && (() => {
+        const doneN = chDone?.size ?? 0;
+        const total = activeChallenge.tasks.length;
+        const isCompleted = db.getChallengeProgress().completed.includes(activeChallenge.id);
+        // 未参加に戻る生成クエストの刻限（達成済みステップが無いと TTL 免除を失う）
+        const ttl = doneN === 0 && !isCompleted ? ttlInfo(activeChallenge.createdAt, Date.now()) : null;
+        return (
+          <div className="absolute inset-0 z-[2500] bg-black/50 flex items-center justify-center p-6" onClick={() => setQuitConfirm(false)}>
+            <div className="w-full max-w-[320px] bg-white rounded-3xl p-5 text-left celebrate-pop" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-base font-black text-gray-900 mb-2">チャレンジを中断する？</h3>
+              <p className="text-[13px] text-gray-600 leading-relaxed mb-1">
+                {doneN > 0
+                  ? `達成済みのステップ（${doneN}/${total}）は保存され、また参加すれば続きから再開できます。`
+                  : ttl
+                  ? `中断すると刻限がふたたび進みます（${ttl.text}）。期限が切れるとこのクエストは消えます。`
+                  : activeChallenge.createdAt
+                  ? '刻限を過ぎているため、中断するとこのクエストは消えます。'
+                  : '進捗はまだありません。'}
+              </p>
+              <p className="text-[12px] text-gray-400 leading-relaxed mb-4">道中の写真と軌跡は消えます。</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setQuitConfirm(false)}
+                  className="flex-1 bg-gray-100 text-gray-600 text-sm font-black py-3 rounded-xl hover:bg-gray-200 cursor-pointer"
+                >
+                  続ける
+                </button>
+                <button
+                  onClick={() => { setQuitConfirm(false); onClearChallenge?.(); }}
+                  className="flex-1 bg-rose-600 text-white text-sm font-black py-3 rounded-xl hover:opacity-90 cursor-pointer"
+                >
+                  中断する
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 目的地100m到達：御朱印を自動授与（OKでクエスト達成・解除） */}
       {goshuinCelebrate && (
