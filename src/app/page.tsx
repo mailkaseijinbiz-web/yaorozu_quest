@@ -21,8 +21,8 @@ import OnboardingFlow from '../components/OnboardingFlow';
 import AltruismDividendCelebrate from '../components/AltruismDividendCelebrate';
 import { isDebugEnabled, getDebugLocation, setDebugLocation, type DebugLatLng } from '../lib/debug';
 import { getLevelInfo } from '../data/levels';
-import { getBadgeStates, godAvatarEmoji, type BadgeState } from '../data/badges';
-import { Challenge, AVATAR_QUEST } from '../data/challenges';
+import { getBadgeStates, type BadgeState } from '../data/badges';
+import { Challenge, AVATAR_QUEST, CONCERNS_QUEST, GOOD_QUEST, CONCERN_PRESETS, RECENT_GOOD_PRESETS } from '../data/challenges';
 import { uploadImage } from '../lib/upload';
 import type { Quest } from '../data/tasks';
 import { subscribePush } from '../lib/push-client';
@@ -88,6 +88,13 @@ export default function HomePage() {
   const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
   const [avatarQuestOpen, setAvatarQuestOpen] = useState(false); // 移動なしクエスト：アバター設定モーダル
   const [avatarUploading, setAvatarUploading] = useState(false);
+  // 移動不要セルフクエスト：煩悩／最近良かったこと（プリセット選択）モーダル
+  const [concernsQuestOpen, setConcernsQuestOpen] = useState(false);
+  const [goodQuestOpen, setGoodQuestOpen] = useState(false);
+  const [concernSel, setConcernSel] = useState<{ health: string[]; life: string[]; work: string[] }>({ health: [], life: [], work: [] });
+  const [concernFree, setConcernFree] = useState('');
+  const [goodSel, setGoodSel] = useState<string[]>([]);
+  const [goodFree, setGoodFree] = useState('');
   // クエスト中に通ったルートの軌跡。MapTab ではなくここ（常時マウント）で保持し、タブ遷移でも消えない。
   const [questTrail, setQuestTrail] = useState<{ lat: number; lng: number }[]>([]);
   const questTrailRef = useRef<{ lat: number; lng: number }[]>([]);
@@ -765,6 +772,20 @@ export default function HomePage() {
                 onStartChallenge={(cid) => {
                   // 移動をともなわないクエスト（アバター設定）は地図に行かず、その場で設定モーダルを開く
                   if (cid === AVATAR_QUEST.id) { setAvatarQuestOpen(true); return; }
+                  // 移動不要セルフクエスト：プリセット選択モーダルを開く（既存の回答があれば初期表示）
+                  if (cid === CONCERNS_QUEST.id) {
+                    const c = currentUser?.concerns;
+                    setConcernSel({ health: c?.health ?? [], life: c?.life ?? [], work: c?.work ?? [] });
+                    setConcernFree(c?.freeText ?? '');
+                    setConcernsQuestOpen(true);
+                    return;
+                  }
+                  if (cid === GOOD_QUEST.id) {
+                    setGoodSel(currentUser?.recentGood ?? []);
+                    setGoodFree(currentUser?.recentGoodFreeText ?? '');
+                    setGoodQuestOpen(true);
+                    return;
+                  }
                   // クエスト参加を機に通知購読（以降サーバ自動プッシュが届く）。
                   // 拒否されても旅は続けられることを明示し、「無視された/壊れた」という不安を残さない。
                   subscribePush().then((r) => {
@@ -913,8 +934,14 @@ export default function HomePage() {
                       const pct = Math.round(lvInfo.progress * 100);
                       return (
                         <>
-                          {/* メダリオン（アバター＋装飾フレーム＋PILGRIMリボン） */}
-                          <div className="relative w-36 h-36 mt-5">
+                          {/* メダリオン（アバター＋装飾フレーム） */}
+                          <div
+                            onClick={() => setAvatarQuestOpen(true)}
+                            role="button"
+                            tabIndex={0}
+                            aria-label="アカウントのアイコンを編集"
+                            className="relative w-36 h-36 mt-5 cursor-pointer group"
+                          >
                             {/* 回転ハロー */}
                             <div
                               className="absolute -inset-1 rounded-full opacity-40 blur-md animate-halo-rotate"
@@ -926,13 +953,14 @@ export default function HomePage() {
                               style={{ clipPath: MEDALLION_FRAME, background: 'conic-gradient(from 210deg, #e60012, #ff7a00, #f5c542, #60a5fa, #2563eb, #60a5fa, #e60012)' }}
                             />
                             <div className="absolute inset-[5px] bg-white" style={{ clipPath: MEDALLION_FRAME }} />
-                            {/* アバター本体 */}
+                            {/* アバター本体（アカウントのアイコン画像） */}
                             <div className="absolute inset-[12px] rounded-full bg-gradient-to-br from-sky-50 via-white to-amber-50 flex items-center justify-center shadow-inner overflow-hidden">
-                              <span className="text-[64px] leading-none drop-shadow-sm">{godAvatarEmoji(currentUser.id)}</span>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={currentUser.avatarUrl} alt="アカウントのアイコン" className="w-full h-full object-cover" />
                             </div>
-                            {/* PILGRIM リボン（レベルは XP シールドに集約・重複表示を削除） */}
-                            <div className="absolute -bottom-2.5 left-1/2 -translate-x-1/2 flex items-center bg-gradient-to-r from-sky-500 to-blue-600 text-white px-4 py-1.5 rounded-full shadow-md border-2 border-white">
-                              <span className="text-[11px] font-black tracking-[0.2em]">PILGRIM</span>
+                            {/* 編集バッジ（タップで画像を変更） */}
+                            <div className="absolute bottom-1 right-1 w-9 h-9 rounded-full bg-shrine-red text-white border-2 border-white shadow-md flex items-center justify-center group-hover:scale-105 transition-transform">
+                              <Camera className="w-4 h-4" />
                             </div>
                           </div>
 
@@ -1031,11 +1059,14 @@ export default function HomePage() {
                     <button
                       onClick={async () => {
                         const res = await subscribePush();
-                        if (res === 'subscribed') {
-                          setPushNotice('神々からの呼びかけを許可しました');
-                        } else {
-                          setPushNotice('通知の許可が拒否されたか、ブラウザが未対応です');
-                        }
+                        // 失敗理由を取り違えないよう、結果ごとに正確な文言を出す
+                        setPushNotice(
+                          res === 'subscribed' ? '神々からの呼びかけを許可しました'
+                          : res === 'denied' ? '通知が許可されませんでした（ブラウザ設定から許可できます）'
+                          : res === 'unconfigured' ? '通知はまだ準備中です（サーバの通知設定が未完了）'
+                          : res === 'unsupported' ? 'お使いの環境は通知に未対応です'
+                          : '通知の登録に失敗しました。時間をおいてお試しください'
+                        );
                         setTimeout(() => setPushNotice(null), 3000);
                       }}
                       className="font-black text-shrine-red bg-red-50 px-4 py-2 rounded-full border border-red-100 hover:bg-red-100 cursor-pointer transition-colors"
@@ -1258,6 +1289,111 @@ export default function HomePage() {
                 />
               </label>
               <p className="text-[11px] text-gray-400 mt-2">設定すると「{AVATAR_QUEST.badgeName}」バッジと徳がもらえます</p>
+            </div>
+          </div>
+        )}
+
+        {/* ── 移動不要セルフクエスト：煩悩（健康/生活/仕事）をプリセット選択 ── */}
+        {concernsQuestOpen && currentUser && (
+          <div className="absolute inset-0 z-[4200] bg-black/50 flex items-center justify-center p-5" onClick={() => setConcernsQuestOpen(false)}>
+            <div className="relative w-full max-w-[360px] max-h-[85vh] overflow-y-auto bg-white rounded-3xl shadow-2xl px-5 py-6" onClick={(e) => e.stopPropagation()}>
+              <button onClick={() => setConcernsQuestOpen(false)} aria-label="閉じる" className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/5 hover:bg-black/10 flex items-center justify-center text-gray-500 cursor-pointer"><X className="w-4 h-4" /></button>
+              <div className="text-center">
+                <div className="text-4xl mb-2">🍃</div>
+                <h3 className="text-lg font-black text-gray-900 leading-tight">{CONCERNS_QUEST.title}</h3>
+                <p className="text-[12px] text-gray-500 mt-1.5 leading-snug">あてはまるものを選んでね（複数可・あとから変えられる）。神様が会話でそっと寄り添ってくれる。</p>
+              </div>
+              {([['health', '健康面'], ['life', '生活面'], ['work', '仕事面']] as const).map(([cat, label]) => (
+                <div key={cat} className="mt-4">
+                  <p className="text-[13px] font-black text-gray-700 mb-1.5">{label}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {CONCERN_PRESETS[cat].map((opt) => {
+                      const on = concernSel[cat].includes(opt);
+                      return (
+                        <button
+                          key={opt}
+                          onClick={() => setConcernSel((prev) => ({ ...prev, [cat]: on ? prev[cat].filter((x) => x !== opt) : [...prev[cat], opt] }))}
+                          className={`text-[12px] font-black px-3 py-1.5 rounded-full border transition-all cursor-pointer ${on ? 'bg-shrine-red text-white border-shrine-red' : 'bg-gray-100 text-gray-600 border-gray-200 hover:border-shrine-red/40'}`}
+                        >
+                          {opt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              <textarea
+                value={concernFree}
+                onChange={(e) => setConcernFree(e.target.value)}
+                rows={2}
+                maxLength={200}
+                placeholder="その他・自由に書く（任意）"
+                className="mt-4 w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-shrine-red resize-none"
+              />
+              <button
+                onClick={() => {
+                  db.setUserConcerns(currentUser.id, { ...concernSel, freeText: concernFree });
+                  db.completeChallenge(currentUser.id, CONCERNS_QUEST.id);
+                  refreshDatabaseStates();
+                  setProfileSaved(true);
+                  setTimeout(() => setProfileSaved(false), 2000);
+                  setConcernsQuestOpen(false);
+                }}
+                className="mt-5 w-full inline-flex items-center justify-center gap-2 text-[15px] font-black py-3 rounded-full bg-shrine-red text-white hover:opacity-90 active:scale-[0.99] cursor-pointer transition-all"
+              >
+                <Check className="w-4 h-4" />神に伝える
+              </button>
+              <p className="text-[11px] text-gray-400 mt-2 text-center">伝えると「{CONCERNS_QUEST.badgeName}」バッジと徳がもらえます</p>
+            </div>
+          </div>
+        )}
+
+        {/* ── 移動不要セルフクエスト：最近良かったことをプリセット選択 ── */}
+        {goodQuestOpen && currentUser && (
+          <div className="absolute inset-0 z-[4200] bg-black/50 flex items-center justify-center p-5" onClick={() => setGoodQuestOpen(false)}>
+            <div className="relative w-full max-w-[360px] max-h-[85vh] overflow-y-auto bg-white rounded-3xl shadow-2xl px-5 py-6" onClick={(e) => e.stopPropagation()}>
+              <button onClick={() => setGoodQuestOpen(false)} aria-label="閉じる" className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/5 hover:bg-black/10 flex items-center justify-center text-gray-500 cursor-pointer"><X className="w-4 h-4" /></button>
+              <div className="text-center">
+                <div className="text-4xl mb-2">🌸</div>
+                <h3 className="text-lg font-black text-gray-900 leading-tight">{GOOD_QUEST.title}</h3>
+                <p className="text-[12px] text-gray-500 mt-1.5 leading-snug">最近うれしかったことを選んでね（複数可・あとから変えられる）。神様が一緒に喜んでくれる。</p>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-1.5">
+                {RECENT_GOOD_PRESETS.map((opt) => {
+                  const on = goodSel.includes(opt);
+                  return (
+                    <button
+                      key={opt}
+                      onClick={() => setGoodSel((prev) => on ? prev.filter((x) => x !== opt) : [...prev, opt])}
+                      className={`text-[12px] font-black px-3 py-1.5 rounded-full border transition-all cursor-pointer ${on ? 'bg-shrine-red text-white border-shrine-red' : 'bg-gray-100 text-gray-600 border-gray-200 hover:border-shrine-red/40'}`}
+                    >
+                      {opt}
+                    </button>
+                  );
+                })}
+              </div>
+              <textarea
+                value={goodFree}
+                onChange={(e) => setGoodFree(e.target.value)}
+                rows={2}
+                maxLength={200}
+                placeholder="その他・自由に書く（任意）"
+                className="mt-4 w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-shrine-red resize-none"
+              />
+              <button
+                onClick={() => {
+                  db.setUserRecentGood(currentUser.id, goodSel, goodFree);
+                  db.completeChallenge(currentUser.id, GOOD_QUEST.id);
+                  refreshDatabaseStates();
+                  setProfileSaved(true);
+                  setTimeout(() => setProfileSaved(false), 2000);
+                  setGoodQuestOpen(false);
+                }}
+                className="mt-5 w-full inline-flex items-center justify-center gap-2 text-[15px] font-black py-3 rounded-full bg-shrine-red text-white hover:opacity-90 active:scale-[0.99] cursor-pointer transition-all"
+              >
+                <Check className="w-4 h-4" />神に伝える
+              </button>
+              <p className="text-[11px] text-gray-400 mt-2 text-center">伝えると「{GOOD_QUEST.badgeName}」バッジと徳がもらえます</p>
             </div>
           </div>
         )}

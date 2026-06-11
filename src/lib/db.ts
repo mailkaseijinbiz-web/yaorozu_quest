@@ -15,6 +15,10 @@ export interface User {
   currentTitle: string;
   avatarFrameColor?: string; // Special visual indicator for Creators
   pendingDividends?: { amount: number; message: string }[]; // 未受領の利他の配当（他者が自分のUGCに起因するクエストをクリアした時の報酬）
+  // ── 移動不要セルフクエストで集める“今の心境”。神（AI）の会話・サジェスト・初回あいさつの参照に使う ──
+  concerns?: { health: string[]; life: string[]; work: string[]; freeText?: string }; // 煩悩（健康/生活/仕事）
+  recentGood?: string[];        // 最近良かったこと（プリセット選択）
+  recentGoodFreeText?: string;  // 最近良かったこと（自由記述）
 }
 
 export interface Spot {
@@ -1083,6 +1087,32 @@ class MockDatabase {
     const index = users.findIndex(u => u.id === userId);
     if (index === -1) return undefined;
     users[index].avatarUrl = url;
+    this.save(KEYS.USERS, users);
+    return users[index];
+  }
+
+  /** 移動不要クエスト：煩悩（健康/生活/仕事＋任意の自由記述）を保存。自由記述は200字キャップ。 */
+  setUserConcerns(userId: string, concerns: { health: string[]; life: string[]; work: string[]; freeText?: string }): User | undefined {
+    const users = this.getUsers();
+    const index = users.findIndex(u => u.id === userId);
+    if (index === -1) return undefined;
+    users[index].concerns = {
+      health: concerns.health.slice(0, 12),
+      life: concerns.life.slice(0, 12),
+      work: concerns.work.slice(0, 12),
+      freeText: concerns.freeText?.slice(0, 200) || undefined,
+    };
+    this.save(KEYS.USERS, users);
+    return users[index];
+  }
+
+  /** 移動不要クエスト：最近良かったこと（プリセット＋任意の自由記述）を保存。自由記述は200字キャップ。 */
+  setUserRecentGood(userId: string, items: string[], freeText?: string): User | undefined {
+    const users = this.getUsers();
+    const index = users.findIndex(u => u.id === userId);
+    if (index === -1) return undefined;
+    users[index].recentGood = items.slice(0, 12);
+    users[index].recentGoodFreeText = freeText?.slice(0, 200) || undefined;
     this.save(KEYS.USERS, users);
     return users[index];
   }

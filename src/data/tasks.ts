@@ -46,7 +46,10 @@ export type TaskType =
   | 'verify' // understand（場）— 集まった情報の正しさを確かめる
   | 'donate' // act（場）— お賽銭・寄進をする＝場へ働きかける
   | 'guide' // act（場）— 道案内をして他の巡礼者を助ける
-  | 'meditate'; // act（人間）— 瞑想して心を鎮め、煩悩を一つ手放す（覚り+1）
+  | 'meditate' // act（人間）— 瞑想して心を鎮め、煩悩を一つ手放す（覚り+1）
+  // ── 移動不要のセルフクエスト（場所に紐づかず、プリセット選択で自身のことを神に伝える） ──
+  | 'concerns_self' // sense（人間）— 自身の煩悩（健康/生活/仕事）を打ち明ける → 神の会話の参照に
+  | 'recent_good_self'; // sense（人間）— 最近良かったことを共有する → 神の会話の参照に
 
 /** resolveIssue タスクが参照する課題 */
 export interface IssueRef {
@@ -320,6 +323,22 @@ export const TASK_CATALOG: Record<TaskType, CatalogTask> = {
     call: (p) => `${p}を背に、そなた自身の姿を一枚撮っておくれ。それがそなたの巡礼者としての顔（アバター）になる。`,
     murmur: 'そなた自身の姿を、一枚撮ってみぬか…',
   },
+  concerns_self: {
+    type: 'concerns_self',
+    kind: 'sense',
+    icon: '🍃',
+    label: '煩悩をきかせる',
+    title: 'あなたの煩悩をきかせて',
+    reward: 20,
+  },
+  recent_good_self: {
+    type: 'recent_good_self',
+    kind: 'sense',
+    icon: '🌸',
+    label: '良かったことを話す',
+    title: 'あなたの最近良かったことをきかせて',
+    reward: 20,
+  },
   goshuin: {
     type: 'goshuin',
     kind: 'sense',
@@ -445,6 +464,7 @@ export const TASK_TARGET: Record<TaskType, TaskTarget> = {
   // 人間の覚り（徳・煩悩）に働く
   bonnou_ask: 'human', bonnou_resolve: 'human', walk: 'human', avatar_photo: 'human', goshuin: 'human',
   wish: 'human', gratitude: 'human', meditate: 'human',
+  concerns_self: 'human', recent_good_self: 'human',
 };
 
 /** タスク種別ごとのテーマ色（Tailwind 用） */
@@ -468,6 +488,8 @@ export const TASK_TONE: Record<TaskType, { text: string; bg: string; border: str
   walk: { text: 'text-lime-600', bg: 'bg-lime-50', border: 'border-lime-200' },
   cleanup: { text: 'text-teal-600', bg: 'bg-teal-50', border: 'border-teal-200' },
   avatar_photo: { text: 'text-pink-600', bg: 'bg-pink-50', border: 'border-pink-200' },
+  concerns_self: { text: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
+  recent_good_self: { text: 'text-pink-600', bg: 'bg-pink-50', border: 'border-pink-200' },
   goshuin: { text: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200' },
   weather: { text: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-200' },
   discover: { text: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200' },

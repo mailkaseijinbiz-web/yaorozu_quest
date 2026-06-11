@@ -41,6 +41,8 @@ interface UserContext {
   questClearsHere?: number;
   lastVisitedSpotName?: string;
   pastMemories?: string[];
+  concerns?: string[];   // 移動不要クエストで打ち明けた煩悩（健康/生活/仕事＋自由記述）
+  recentGood?: string[]; // 移動不要クエストで共有した最近良かったこと
 }
 
 // spot 情報に基づく動的フォールバック（個別Agent未登録のスポット用）
@@ -267,10 +269,18 @@ export async function POST(request: Request) {
       ? `\n- 過去の参拝時の記憶/願い: ${uc.pastMemories.join(', ')}（「あの時の願いはどうなった？」など、長期記憶として過去の話を振ること）`
       : '';
 
+    const concernsSection = uc?.concerns && uc.concerns.length > 0
+      ? `\n- 巡礼者が打ち明けた煩悩: ${uc.concerns.join('、')}（説教や解決の押し付けはせず、まず静かに受け止めて労うこと。会話に自然に寄り添わせ、もし近隣のクエストや依頼がこの悩みをやわらげそうなら、その文脈でそっと薦めてよい）`
+      : '';
+
+    const recentGoodSection = uc?.recentGood && uc.recentGood.length > 0
+      ? `\n- 巡礼者の最近良かったこと: ${uc.recentGood.join('、')}（一緒に喜び、さりげなく言及して心を明るくすること。良い流れを次の小さな一歩（近くの場・クエスト）へつなげてもよい）`
+      : '';
+
     const userContextSection = uc
       ? `\n\nThe pilgrim's journey so far (real data; weave it into conversation naturally and with respect, when relevant):
 - 巡った場所: ${uc.visitCount ?? 0}カ所 / 徳: ${uc.totalToku ?? 0} / 称号: ${uc.levelTitle ?? '見習い巡礼者'}
-- 御朱印: ${uc.goshuinCount ?? 0}体 / 果たしたクエスト: ${uc.questClears ?? 0}個${uc.questClearsHere ? `（この場では${uc.questClearsHere}個）` : ''}${networkSection}${memorySection}
+- 御朱印: ${uc.goshuinCount ?? 0}体 / 果たしたクエスト: ${uc.questClears ?? 0}個${uc.questClearsHere ? `（この場では${uc.questClearsHere}個）` : ''}${networkSection}${memorySection}${concernsSection}${recentGoodSection}
 - 今の季節と天気: ${season}の${weather}（「今日は${weather}で気持ちが良いな」「${season}の風が心地よい」など、季節や天候に言及して会話に現実感を持たせること）`
       : '';
 

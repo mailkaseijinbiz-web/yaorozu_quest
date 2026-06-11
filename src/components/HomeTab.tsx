@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Trophy, Flag, Clock, X, Check, Hourglass } from 'lucide-react';
 import { User, db } from '../lib/db';
-import { difficultyLabel, terrainLabel, Challenge, AVATAR_QUEST, isStationaryQuest } from '../data/challenges';
+import { difficultyLabel, terrainLabel, Challenge, AVATAR_QUEST, CONCERNS_QUEST, GOOD_QUEST, isStationaryQuest } from '../data/challenges';
 import { getLevelInfo } from '../data/levels';
 import { distanceKm } from '../lib/geo';
 import { ttlInfo } from '../lib/quest-ui';
@@ -62,7 +62,7 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
   };
 
   // フィルタ → 場ごとにクラスタリング（場は近い順、場内は距離順）。移動なしクエストも候補に含める。
-  const scored = [...db.getAllQuests(), AVATAR_QUEST]
+  const scored = [...db.getAllQuests(), AVATAR_QUEST, CONCERNS_QUEST, GOOD_QUEST]
     .filter((ch) => {
       const completed = progress.completed.includes(ch.id);
       const ok = userLevel >= ch.minLevel;

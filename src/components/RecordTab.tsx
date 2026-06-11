@@ -21,7 +21,7 @@ import {
   MAX_RECORD_PHOTOS,
   VisitRecord,
 } from '../lib/visit-records';
-import { getGoShuinList, addPhotoGoshuin, deleteGoshuin, setGoshuinPhoto, grantGoShuin, hasGoShuin, Goshuin } from '../lib/goshuin';
+import { getGoShuinList, deleteGoshuin, setGoshuinPhoto, grantGoShuin, hasGoShuin, Goshuin } from '../lib/goshuin';
 import { prefectureOf, PREFECTURES } from '../data/prefectures';
 import { compressImage } from '../lib/upload';
 
@@ -80,6 +80,7 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
   // 記録追加フォーム
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Spot | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false); // 寺社検索バーの開閉（未操作時は丸アイコン・マップと同様）
   const [date, setDate] = useState(todayInput());
   const [note, setNote] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
@@ -194,6 +195,7 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
   const resetForm = () => {
     setSelected(null);
     setQuery('');
+    setSearchOpen(false);
     setNote('');
     setPhotos([]);
     setGoshuinMsg(null);
@@ -243,10 +245,9 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
     }
   };
 
-  // ── 御朱印（撮影して保存）──
+  // ── 御朱印コレクション ──
   const [goshuinList, setGoshuinList] = useState<Goshuin[]>(() => getGoShuinList(currentUser.id));
   const refreshGoshuin = () => setGoshuinList(getGoShuinList(currentUser.id));
-  const [gFormOpen, setGFormOpen] = useState(false);
   const [goshuinSort, setGoshuinSort] = useState<'place' | 'date'>('place'); // 御朱印の並び替え（場所別=既定／日時順）
   const [reviewGoshuin, setReviewGoshuin] = useState<Goshuin | null>(null); // タップで開く御朱印モーダル
   const reviewGoshuinPhotoRef = useRef<HTMLInputElement | null>(null);
@@ -352,61 +353,6 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
       alert('画像の読み込みに失敗しました。');
     }
   };
-  const [gQuery, setGQuery] = useState('');
-  const [gSelected, setGSelected] = useState<Spot | null>(null);
-  const [gName, setGName] = useState('');
-  const [gPhoto, setGPhoto] = useState<string | null>(null);
-  const [gSaving, setGSaving] = useState(false);
-
-  const gq = gQuery.trim().toLowerCase();
-  const gMatches = useMemo(() => {
-    if (!gq) return [];
-    return [...spots]
-      .filter((s) => [s.name, s.godName, s.category].some((t) => t && t.toLowerCase().includes(gq)))
-      .slice(0, 6);
-  }, [gq, spots]);
-
-  const onPickGoshuinPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    e.target.value = '';
-    if (!f) return;
-    try {
-      setGPhoto(await compressImage(f, { maxDim: 1100, quality: 0.7 }));
-    } catch {
-      /* 読み込み失敗は無視 */
-    }
-  };
-
-  const resetGForm = () => { setGFormOpen(false); setGQuery(''); setGSelected(null); setGName(''); setGPhoto(null); };
-
-  const saveGoshuinPhoto = () => {
-    if (!gPhoto || gSaving) return;
-    const name = (gSelected?.name || gName).trim();
-    if (!name) return;
-    setGSaving(true);
-    try {
-      const saved = addPhotoGoshuin(currentUser.id, {
-        spotId: gSelected?.id,
-        spotName: name,
-        category: gSelected?.category,
-        godName: gSelected?.godName,
-        godEmoji: gSelected?.godEmoji,
-        latitude: gSelected?.latitude,
-        longitude: gSelected?.longitude,
-        photo: gPhoto,
-      });
-      if (!saved) {
-        alert('端末の保存容量が一杯のため、御朱印を保存できませんでした。');
-        return;
-      }
-      refreshGoshuin();
-      onChanged?.();
-      resetGForm();
-    } finally {
-      setGSaving(false);
-    }
-  };
-
   return (
     <div className="h-full overflow-y-auto bg-[#f5f7fa] pb-6">
       {/* 上部タブ（メインタブとして単独表示するときは隠す） */}
@@ -434,26 +380,41 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
         <div className="p-4 space-y-6">
           {/* 新しい記録を追加 */}
           <section>
-            <h3 className="text-base font-black text-gray-900 mb-2">新しい記録を追加</h3>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-base font-black text-gray-900">新しい記録を追加</h3>
+              {/* 未操作時は丸い検索アイコン（マップと同様）。押すと検索バーが開く */}
+              {!searchOpen && !selected && !query && (
+                <button
+                  onClick={() => setSearchOpen(true)}
+                  aria-label="寺社を検索"
+                  title="寺社を検索"
+                  className="w-10 h-10 rounded-full bg-white shadow-sm border border-shrine-red/20 flex items-center justify-center text-shrine-red hover:bg-shrine-red hover:text-white transition-colors cursor-pointer flex-shrink-0"
+                >
+                  <Search className="w-5 h-5" />
+                </button>
+              )}
+            </div>
 
-            {/* 寺社を検索して選択 */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                value={selected ? selected.name : query}
-                onChange={(e) => { setQuery(e.target.value); setSelected(null); }}
-                placeholder="寺社を選択"
-                className="w-full bg-white border border-gray-200 rounded-2xl pl-9 pr-9 py-3 text-sm text-gray-800 focus:outline-none focus:border-shrine-red shadow-sm"
-              />
-              {(selected || query) && (
+            {/* 寺社を検索して選択（丸アイコンを押すと展開） */}
+            {(searchOpen || selected || query) && (
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  value={selected ? selected.name : query}
+                  onChange={(e) => { setQuery(e.target.value); setSelected(null); }}
+                  placeholder="寺社を選択"
+                  autoFocus={searchOpen}
+                  className="w-full bg-white border border-gray-200 rounded-2xl pl-9 pr-9 py-3 text-sm text-gray-800 focus:outline-none focus:border-shrine-red shadow-sm"
+                />
                 <button
                   onClick={resetForm}
+                  aria-label="検索を閉じる"
                   className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-400 cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
-              )}
-            </div>
+              </div>
+            )}
 
             {/* 検索候補 */}
             {!selected && matches.length > 0 && (
@@ -499,15 +460,7 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                     className="ml-auto bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-sm text-gray-800 focus:outline-none focus:border-shrine-red"
                   />
                 </label>
-                <textarea
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  rows={2}
-                  maxLength={140}
-                  placeholder="ひとことメモ（任意）"
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-shrine-red resize-none"
-                />
-                {/* 写真（最大 MAX_RECORD_PHOTOS 枚）。複数選択して追加できる */}
+                {/* 写真（最大 MAX_RECORD_PHOTOS 枚）。複数選択して追加できる。メモより上に置く。 */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="text-[12px] font-bold text-gray-500">写真（任意・最大{MAX_RECORD_PHOTOS}枚）</span>
@@ -536,6 +489,14 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                     </label>
                   )}
                 </div>
+                <textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  rows={2}
+                  maxLength={140}
+                  placeholder="ひとことメモ（任意）"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-shrine-red resize-none"
+                />
 
                 {/* デジタル御朱印の取得（100m未満でのみ） */}
                 <div>
@@ -690,75 +651,11 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
       ) : (
         /* 御朱印コレクション（対話で授かった御朱印＋撮影して保存した御朱印） */
         <div className="p-4 space-y-4">
-          {/* 撮影して追加 */}
-          {gFormOpen ? (
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-black text-gray-900">御朱印を撮影して保存</h3>
-                <button onClick={resetGForm} className="w-7 h-7 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-400 cursor-pointer"><X className="w-4 h-4" /></button>
-              </div>
-
-              {/* 寺社を選ぶ（任意）／自由入力 */}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  value={gSelected ? gSelected.name : gQuery}
-                  onChange={(e) => { setGQuery(e.target.value); setGSelected(null); setGName(e.target.value); }}
-                  placeholder="寺社名（選択または入力）"
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-9 pr-3 py-2.5 text-sm text-gray-800 focus:outline-none focus:border-shrine-red"
-                />
-              </div>
-              {!gSelected && gMatches.length > 0 && (
-                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden -mt-1">
-                  {gMatches.map((s) => (
-                    <button
-                      key={s.id}
-                      onClick={() => { setGSelected(s); setGQuery(''); setGName(s.name); }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-0"
-                    >
-                      <span className="text-xl">{catEmoji(s)}</span>
-                      <span className="flex-1 min-w-0 text-sm font-black text-gray-900 truncate">{s.name}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* 写真 */}
-              {gPhoto ? (
-                <div className="relative rounded-xl overflow-hidden border border-gray-200">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={gPhoto} alt="御朱印" className="w-full max-h-64 object-cover" />
-                  <button onClick={() => setGPhoto(null)} className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/50 text-white flex items-center justify-center cursor-pointer"><X className="w-4 h-4" /></button>
-                </div>
-              ) : (
-                <label className="flex items-center justify-center gap-1.5 bg-gray-100 text-gray-600 text-[13px] font-black py-3 rounded-xl cursor-pointer hover:bg-gray-200 transition-all">
-                  <Camera className="w-4 h-4" />御朱印を撮影 / 選択
-                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickGoshuinPhoto} />
-                </label>
-              )}
-
-              <button
-                onClick={saveGoshuinPhoto}
-                disabled={gSaving || !gPhoto || !(gSelected?.name || gName).trim()}
-                className="w-full flex items-center justify-center gap-1.5 bg-shrine-red text-white text-sm font-black py-3 rounded-xl hover:opacity-90 active:scale-[0.99] transition-all disabled:opacity-50 cursor-pointer"
-              >
-                <Check className="w-4 h-4" />御朱印を保存
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setGFormOpen(true)}
-              className="w-full flex items-center justify-center gap-1.5 bg-shrine-red text-white text-sm font-black py-3 rounded-2xl shadow-sm hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer"
-            >
-              <Camera className="w-4 h-4" />御朱印を撮影して保存
-            </button>
-          )}
-
           {/* コレクション */}
           {goshuinList.length === 0 ? (
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 text-center">
               <div className="text-4xl mb-2">🧧</div>
-              <p className="text-[13px] text-gray-500 leading-relaxed">まだ御朱印がありません。<br />上のボタンで御朱印を撮影するか、マップで神と対話すると授かれます。</p>
+              <p className="text-[13px] text-gray-500 leading-relaxed">まだ御朱印がありません。<br />マップで神と対話すると授かれます。</p>
             </div>
           ) : (
             <>
