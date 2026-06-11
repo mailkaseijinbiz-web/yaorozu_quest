@@ -370,11 +370,13 @@ export default function MapTab({
   // マーカータップ/スワイプで activeSpot が変わり、それに追従してカードと地図ハイライトが更新される。
   const cardSpot = activeSpot ?? nearSpotList[0] ?? null;
   const cardIdx = cardSpot ? nearSpotList.findIndex((s) => s.id === cardSpot.id) : -1;
-  // ── 指に追従する横スワイプ・カルーセル ──
-  // カードはビューポートにぴったり収める（次カードの「チラ見せ」は右端が切れて
-  // 見えるためやめた）。GAP=カード間の間隔。実カード幅は計測で決める。
+  // ── 指に追従する横スワイプ・カルーセル（次のカードが右にチラ見えする） ──
+  // ビューポートは画面端まで広げ（left-0 right-0）、覗いた次カードが「画面の端」で
+  // 自然に切れるようにする（コンテナが画面端の12px手前で切ると不自然なため）。
+  // EDGE_PAD=先頭カードの左余白、PEEK=右に覗かせる次カードの幅+間隔、GAP=カード間隔。
   const CARD_GAP = 10;
-  const CARD_PEEK = 0;
+  const CARD_PEEK = 34; // 右に約 (PEEK-GAP)=24px 次カードを覗かせる
+  const CARD_EDGE_PAD = 12;
   const cardViewportRef = useRef<HTMLDivElement | null>(null);
   const cardTrackRef = useRef<HTMLDivElement | null>(null);
   const [slideW, setSlideW] = useState(0);
@@ -392,7 +394,7 @@ export default function MapTab({
   useEffect(() => {
     const el = cardViewportRef.current;
     if (!el) return;
-    const measure = () => { const w = Math.max(0, el.clientWidth - CARD_PEEK); slideWRef.current = w; setSlideW(w); };
+    const measure = () => { const w = Math.max(0, el.clientWidth - CARD_EDGE_PAD - CARD_PEEK); slideWRef.current = w; setSlideW(w); };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -844,9 +846,10 @@ export default function MapTab({
       ) : !activeChallenge && !celebrate && cardSpot ? (
         // ▼ インタラクティブカード（Interactive Card）：指に追従するスワイプ・カルーセル。
         //   右に次のカードがチラ見えして「横にめくれる」ことが一目で分かる（近い順）。
+        //   ビューポートは画面端まで（left-0 right-0）。覗きは画面の端で自然に切れる。
         <div
           ref={(el) => { overlayElRef.current = el; cardViewportRef.current = el; }}
-          className="absolute bottom-3 left-3 right-3 z-[1000] overflow-hidden touch-pan-y"
+          className="absolute bottom-3 left-0 right-0 z-[1000] overflow-hidden touch-pan-y"
           onTouchStart={onTrackTouchStart}
           onTouchMove={onTrackTouchMove}
           onTouchEnd={onTrackTouchEnd}
@@ -856,6 +859,7 @@ export default function MapTab({
             className="flex items-stretch will-change-transform"
             style={{
               gap: `${CARD_GAP}px`,
+              paddingLeft: `${CARD_EDGE_PAD}px`,
               // 計測前（slideW=0）はオフセットを掛けない＝見切れたカードを出さない
               transform: `translateX(${slideW ? cardBaseFor(cardIdx < 0 ? 0 : cardIdx) : 0}px)`,
               transition: slideW ? 'transform .3s cubic-bezier(.22,.61,.36,1)' : 'none',
