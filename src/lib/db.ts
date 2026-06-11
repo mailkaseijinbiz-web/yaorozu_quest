@@ -1635,6 +1635,23 @@ class MockDatabase {
     return p;
   }
 
+  /**
+   * 御朱印取得＝クエスト即時完了。残りタスクは問わず completed に入れ、活動中を解除する。
+   * （目的地100m到達で着地＝達成とする新フロー用。done の各ステップは見ない）
+   */
+  completeChallenge(userId: string, challengeId: string): ChallengeProgress {
+    const p = this.getChallengeProgress();
+    if (!p.completed.includes(challengeId)) {
+      p.completed.push(challengeId);
+      this.rewardToku(userId, 100); // 制覇ボーナス（completeChallengeStep と同額）
+      this.adjustFollow(userId, 30, 0);
+      this.logActivity({ type: 'quest_complete', userId, challengeId, reward: 100 });
+    }
+    if (p.activeId === challengeId) p.activeId = null; // 活動中を解除
+    this.save(KEYS.CHALLENGE, p);
+    return p;
+  }
+
   /** チャレンジの証拠写真（達成の振り返り用）。challengeId→stepId→dataURL */
   getChallengePhotos(challengeId: string): { [stepId: string]: string } {
     const all = this.load<{ [cid: string]: { [sid: string]: string } }>(KEYS.CHALLENGE_PHOTOS, {});

@@ -419,8 +419,9 @@ export function questStep(s: {
   };
 }
 
-/** 共通タスク種別（管理画面未設定時の既定。神は場所のコンテキスト収集を依頼する） */
-export const COMMON_TASK_TYPES: TaskType[] = ['context', 'photo', 'evaluate', 'event', 'review', 'sns'];
+/** 共通タスク種別（管理画面未設定時の既定。神は場所のコンテキスト収集を依頼する）
+ *  ※ SNS投稿(sns)は道中フローに含めない方針のため既定から除外 */
+export const COMMON_TASK_TYPES: TaskType[] = ['context', 'photo', 'evaluate', 'event', 'review'];
 
 /** 神の3機能（管理画面のグルーピング表示用） */
 export const GOD_FUNCTIONS: { key: TaskKind; icon: string; label: string; desc: string; tasks: TaskType[] }[] = [

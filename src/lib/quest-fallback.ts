@@ -35,7 +35,6 @@ function precinctScopes(category: string): WalkScope[] {
 
 export function buildFallbackQuest(spot: FallbackSpotInput, count: number, ts: number): Quest[] {
   const enjoy = spot.enjoyments ?? [];
-  const issues = spot.issues ?? [];
   const seed = spot.id ?? spot.name;
   const at = () => (spot.latitude != null && spot.longitude != null ? { lat: spot.latitude, lng: spot.longitude } : {});
   const mk = (type: TaskType, i: number, over: Partial<Task> = {}): Task => {
@@ -50,7 +49,6 @@ export function buildFallbackQuest(spot: FallbackSpotInput, count: number, ts: n
   const quests: Quest[] = [];
   for (let n = 0; n < count; n++) {
     const enjoyment = enjoy.length ? enjoy[n % enjoy.length] : '';
-    const issue = issues.length ? issues[n % issues.length] : '';
     // 道中1 + 境内1 の観察ミッションを決定論的に選ぶ
     const street = pickWalkMissions(seed, spot.category, n * 2, 1, ['street'])[0];
     const precinct = pickWalkMissions(seed, spot.category, n * 2 + 1, 1, precinctScopes(spot.category))[0];
@@ -78,14 +76,8 @@ export function buildFallbackQuest(spot: FallbackSpotInput, count: number, ts: n
       enjoyment
         ? mk('photo', 2, { title: clip(`「${enjoyment}」を一枚に`, 40), action: `${enjoyment}を、あなたの目線で写真に収めよう。`, ...at() })
         : mk('review', 2, { action: `${spot.name}で観察して気づいたことを、後から来る巡礼者へ言伝てよう。` }),
-      // 操作: 課題を動かす or 価値を外へ広げる
-      issue
-        ? mk('resolveIssue', 3, {
-            title: clip(`課題を動かす：${issue}`, 40),
-            action: `${spot.name}の課題「${issue}」を、あなたの手で少し動かそう。`,
-            issueRef: { issueIndex: n % issues.length, issueText: issue },
-          })
-        : mk('sns', 3, { action: `${spot.name}で見つけたものを、外の世界にも広めよう。` }),
+      // 結び: 目的地に着いたら感謝を捧げる（課題の解決・SNS投稿はフローに含めない）
+      mk('gratitude', 3, { title: clip(`${spot.name}に祈る`, 40), action: `${spot.name}に着いたら、心をしずめてひとつ感謝を捧げよう。`, ...at() }),
     ];
 
     quests.push({
