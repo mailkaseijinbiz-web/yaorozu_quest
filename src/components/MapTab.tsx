@@ -624,7 +624,7 @@ export default function MapTab({
     arrivalDoneRef.current = true; // 一度きり
     grantGoShuin(
       currentUser.id,
-      { id: destSpot.id, name: destSpot.name, category: destSpot.category, godEmoji: destGodEmoji },
+      { id: destSpot.id, name: destSpot.name, category: destSpot.category, godEmoji: destGodEmoji, latitude: destSpot.latitude, longitude: destSpot.longitude },
       destGodName,
     ); // 既取得時は null。授与可否に関わらず達成へ進む
     const target = destSpot;
