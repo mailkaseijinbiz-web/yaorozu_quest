@@ -37,6 +37,8 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
   const [topTab, setTopTab] = useState<'visits' | 'goshuin'>('visits');
   const [records, setRecords] = useState<VisitRecord[]>(() => getVisitRecords(currentUser.id));
   const refresh = () => setRecords(getVisitRecords(currentUser.id));
+  // タップで開く「記録の詳細」（写真を大きく・メモ全文・寺社詳細への導線）
+  const [recDetail, setRecDetail] = useState<VisitRecord | null>(null);
 
   // 記録追加フォーム
   const [query, setQuery] = useState('');
@@ -362,22 +364,25 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
               <div className="space-y-2">
                 {sortedRecords.map((rec) => (
                   <div key={rec.id} className="flex gap-3 bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
-                    {rec.photo ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={rec.photo} alt={rec.spotName} className="w-16 h-16 rounded-xl object-cover flex-shrink-0" />
-                    ) : (
-                      <div className="w-16 h-16 rounded-xl flex items-center justify-center text-3xl flex-shrink-0 bg-gradient-to-br from-blue-50 to-amber-50">{rec.godEmoji}</div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] font-black text-emerald-600">{ordinalOf(rec)}回目の記録</span>
+                    {/* カード本体のタップで詳細を開く（削除は右の独立ボタン） */}
+                    <button onClick={() => setRecDetail(rec)} className="flex gap-3 flex-1 min-w-0 text-left cursor-pointer">
+                      {rec.photo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={rec.photo} alt={rec.spotName} className="w-16 h-16 rounded-xl object-cover flex-shrink-0" />
+                      ) : (
+                        <div className="w-16 h-16 rounded-xl flex items-center justify-center text-3xl flex-shrink-0 bg-gradient-to-br from-blue-50 to-amber-50">{rec.godEmoji}</div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-black text-emerald-600">{ordinalOf(rec)}回目の記録</span>
+                        </div>
+                        <p className="text-sm font-black text-gray-900 truncate">{rec.spotName}</p>
+                        <p className="text-[11px] text-gray-400 flex items-center gap-1 mt-0.5">
+                          <CalendarDays className="w-3 h-3" />{fmtDate(rec.visitedAt)} 参拝
+                        </p>
+                        {rec.note && <p className="text-[12px] text-gray-600 mt-1 line-clamp-2">{rec.note}</p>}
                       </div>
-                      <p className="text-sm font-black text-gray-900 truncate">{rec.spotName}</p>
-                      <p className="text-[11px] text-gray-400 flex items-center gap-1 mt-0.5">
-                        <CalendarDays className="w-3 h-3" />{fmtDate(rec.visitedAt)} 参拝
-                      </p>
-                      {rec.note && <p className="text-[12px] text-gray-600 mt-1 line-clamp-2">{rec.note}</p>}
-                    </div>
+                    </button>
                     <button
                       onClick={() => { deleteVisitRecord(currentUser.id, rec.id); refresh(); }}
                       className="self-start w-7 h-7 rounded-full hover:bg-rose-50 flex items-center justify-center text-gray-300 hover:text-rose-500 transition-all cursor-pointer"
@@ -505,6 +510,68 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
           )}
         </div>
       )}
+
+      {/* ── 記録の詳細（写真を大きく・メモ全文・寺社詳細への導線） ── */}
+      {recDetail && (() => {
+        const detailSpot = spots.find((s) => s.id === recDetail.spotId) ?? null;
+        return (
+          <div className="fixed inset-0 z-[3500] flex items-center justify-center p-5">
+            <div className="absolute inset-0 bg-black/55" onClick={() => setRecDetail(null)} />
+            <div className="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden max-h-[85vh] flex flex-col">
+              {/* 写真（あれば大きく） */}
+              {recDetail.photo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={recDetail.photo} alt={recDetail.spotName} className="w-full h-56 object-cover flex-shrink-0" />
+              ) : (
+                <div className="w-full h-32 flex items-center justify-center text-6xl bg-gradient-to-br from-blue-50 to-amber-50 flex-shrink-0">
+                  {recDetail.godEmoji}
+                </div>
+              )}
+              <button
+                onClick={() => setRecDetail(null)}
+                aria-label="閉じる"
+                className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              <div className="p-4 overflow-y-auto">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                    {ordinalOf(recDetail)}回目の記録
+                  </span>
+                  <span className="text-[11px] text-gray-400 flex items-center gap-1">
+                    <CalendarDays className="w-3 h-3" />{fmtDate(recDetail.visitedAt)} 参拝
+                  </span>
+                </div>
+                <h3 className="text-lg font-black text-gray-900 mt-1.5">{recDetail.godEmoji} {recDetail.spotName}</h3>
+                {recDetail.note ? (
+                  <p className="text-[14px] text-gray-700 leading-relaxed mt-2 whitespace-pre-wrap">{recDetail.note}</p>
+                ) : (
+                  <p className="text-[13px] text-gray-300 mt-2">メモはありません</p>
+                )}
+
+                <div className="flex items-center gap-2 mt-4">
+                  {detailSpot && (
+                    <button
+                      onClick={() => { setRecDetail(null); onOpenDetail?.(detailSpot); }}
+                      className="flex-1 flex items-center justify-center gap-1.5 bg-shrine-red text-white text-[13px] font-black py-2.5 rounded-xl hover:opacity-90 active:scale-[0.99] transition-all cursor-pointer"
+                    >
+                      <MapPin className="w-4 h-4" />この寺社の詳細を開く
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { deleteVisitRecord(currentUser.id, recDetail.id); refresh(); setRecDetail(null); }}
+                    className="flex items-center justify-center gap-1 text-[13px] font-black text-rose-500 bg-rose-50 px-3.5 py-2.5 rounded-xl hover:bg-rose-100 transition-all cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />削除
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
