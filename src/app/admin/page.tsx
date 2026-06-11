@@ -10,7 +10,7 @@ import { YaorozuGods } from '../../components/admin/YaorozuGods';
 import { ActivityManager } from '../../components/admin/ActivityManager';
 import { SpotsManager } from '../../components/admin/SpotsManager';
 import { ChallengesManager } from '../../components/admin/ChallengesManager';
-import { UsersManager } from '../../components/admin/UsersManager';
+import { UsersManager, DEMO_USER_IDS } from '../../components/admin/UsersManager';
 import { SystemPanel } from '../../components/admin/SystemPanel';
 
 // 認証はサーバー側（/api/admin/login + HttpOnly Cookie）で行う。パスワードはクライアントに持たない。
@@ -27,13 +27,43 @@ const TABS: { key: AdminTab; label: string; icon: React.ComponentType<{ classNam
   { key: 'system', label: 'システム', icon: Settings },
 ];
 
+const DEFAULT_TAB: AdminTab = 'blueprint';
+const TAB_KEYS = TABS.map(t => t.key);
+
+const isAdminTab = (v: string | null): v is AdminTab => !!v && (TAB_KEYS as string[]).includes(v);
+
+// URL の ?tab=... から現在のタブを読む。不正値・未指定はデフォルト。
+const readTabFromUrl = (): AdminTab => {
+  if (typeof window === 'undefined') return DEFAULT_TAB;
+  const t = new URLSearchParams(window.location.search).get('tab');
+  return isAdminTab(t) ? t : DEFAULT_TAB;
+};
+
 export default function AdminPage() {
   const [authed, setAuthed] = useState(false);
   const [checking, setChecking] = useState(true);
   const [pw, setPw] = useState('');
   const [pwError, setPwError] = useState(false);
 
-  const [tab, setTab] = useState<AdminTab>('blueprint');
+  const [tab, setTabState] = useState<AdminTab>(DEFAULT_TAB);
+
+  // タブ切り替え時に URL（?tab=...）を更新する。同一タブなら何もしない。
+  const setTab = (next: AdminTab) => {
+    setTabState(next);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', next);
+      window.history.pushState(null, '', url);
+    }
+  };
+
+  // 初期表示・ブラウザの戻る/進む（popstate）で URL ↔ タブを同期。
+  useEffect(() => {
+    setTabState(readTabFromUrl());
+    const onPop = () => setTabState(readTabFromUrl());
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   // Data
   const [spots, setSpots] = useState<Spot[]>([]);
@@ -166,7 +196,7 @@ export default function AdminPage() {
         {TABS.map(({ key, label, icon: Icon }) => {
           const counts: Record<AdminTab, number | null> = {
             blueprint: null, analytics: null, gods: agentCount, activity: db.getActivities().length,
-            spots: spots.length, users: users.length,
+            spots: spots.length, users: users.filter(u => !DEMO_USER_IDS.has(u.id)).length,
             challenges: db.getAllQuests().length, // 生成クエストを含む実数（CHALLENGES は静的・空）
             system: null,
           };
