@@ -320,22 +320,53 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
                 <span>🏆 {confirmCh.badgeName}</span>
               </div>
 
-              {/* クエスト詳細：タスク一覧 */}
-              {confirmCh.tasks.length > 0 && (
-                <div className="mt-4 text-left">
-                  <p className="text-[11px] font-black text-gray-500 mb-1.5">クエストの内容（全{confirmCh.tasks.length}タスク）</p>
-                  <div className="space-y-1.5">
-                    {confirmCh.tasks.map((t, i) => (
-                      <div key={t.id} className="flex items-center gap-2 bg-gray-50 rounded-xl px-2.5 py-2">
-                        <span className="w-5 h-5 rounded-full bg-shrine-red text-white text-[11px] font-black flex items-center justify-center flex-shrink-0">{i + 1}</span>
-                        <span className="text-base flex-shrink-0">{t.icon}</span>
-                        <span className="flex-1 min-w-0 text-[12px] font-bold text-gray-800 truncate">{t.title}</span>
-                        <span className="text-[11px] font-black text-amber-600 flex-shrink-0">+{t.reward}徳</span>
-                      </div>
-                    ))}
+              {/* クエスト詳細：タスク一覧（移動距離・徒歩時間つきのタイムライン） */}
+              {confirmCh.tasks.length > 0 && (() => {
+                // 移動レグ：現在地→最初の地点、以降は「直前の座標つきタスク→次の座標つきタスク」。
+                // 徒歩時間は 80m/分（不動産表記の標準）で概算。同じ場所のタスク間（<50m）は表示しない。
+                const fmtKm = (km: number) => (km < 1 ? `${Math.max(10, Math.round((km * 1000) / 10) * 10)}m` : `${km.toFixed(1)}km`);
+                let prev: { lat: number; lng: number } | null = userLocation;
+                const rows = confirmCh.tasks.map((t, i) => {
+                  let leg: { km: number; min: number; fromHere: boolean } | null = null;
+                  if (t.lat != null && t.lng != null && prev) {
+                    const km = distanceKm(prev.lat, prev.lng, t.lat, t.lng);
+                    if (km >= 0.05) leg = { km, min: Math.max(1, Math.ceil((km * 1000) / 80)), fromHere: prev === userLocation };
+                  }
+                  if (t.lat != null && t.lng != null) prev = { lat: t.lat, lng: t.lng };
+                  return { t, i, leg };
+                });
+                const totalKm = rows.reduce((sum, r) => sum + (r.leg?.km ?? 0), 0);
+                return (
+                  <div className="mt-4 text-left">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-[11px] font-black text-gray-500">クエストの内容（全{confirmCh.tasks.length}タスク）</p>
+                      {totalKm >= 0.05 && (
+                        <span className="text-[10px] font-black text-gray-400">🚶 合計 {fmtKm(totalKm)}</span>
+                      )}
+                    </div>
+                    <div>
+                      {rows.map(({ t, i, leg }) => (
+                        <React.Fragment key={t.id}>
+                          {leg && (
+                            <div className="flex items-center gap-1.5 py-1 pl-2">
+                              <span className="w-px h-4 bg-gray-300 ml-[9px] flex-shrink-0" />
+                              <span className="text-[10px] font-bold text-gray-400">
+                                🚶 {leg.fromHere ? '現在地から' : '移動'} {fmtKm(leg.km)}・徒歩 約{leg.min}分
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-2.5 py-2">
+                            <span className="w-5 h-5 rounded-full bg-shrine-red text-white text-[11px] font-black flex items-center justify-center flex-shrink-0">{i + 1}</span>
+                            <span className="text-base flex-shrink-0">{t.icon}</span>
+                            <span className="flex-1 min-w-0 text-[12px] font-bold text-gray-800 truncate">{t.title}</span>
+                            <span className="text-[11px] font-black text-amber-600 flex-shrink-0">+{t.reward}徳</span>
+                          </div>
+                        </React.Fragment>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               <div className="mt-4">
                 {isActive ? (
