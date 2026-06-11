@@ -781,6 +781,11 @@ export default function HomePage() {
                     if (currentUser) db.logActivity({ type: 'map_move', userId: currentUser.id, source: 'human' });
                     generateSpotNearby(center.lat, center.lng);
                   }}
+                  onSearchArea={async (center) => {
+                    // 「この場所で再検索」：地図中心の周辺（近・中・遠）に実在の寺社を生成
+                    await generateVariedSpots(center.lat, center.lng, true);
+                    refreshDatabaseStates();
+                  }}
                   onAdvanceChallenge={(stepId, photo) => {
                     if (!activeChallengeId || !currentUser) return;
                     const ch = db.getQuest(activeChallengeId);

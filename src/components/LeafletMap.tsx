@@ -42,6 +42,7 @@ interface LeafletMapProps {
   focusGoalToken?: number; // 値が変わると目的地を地図中央へ寄せる
   hideControls?: boolean; // 導入表示中は現在地ボタンを隠し、解除時にふわっと出す
   onMapMove?: (center: { lat: number; lng: number }) => void; // ユーザーが地図を移動させたとき（スロットル済み）
+  onCenterChange?: (center: { lat: number; lng: number }) => void; // 移動・ズーム完了のたびに中心座標を通知（「この場所で再検索」用）
   cardFocus?: { lat: number; lng: number } | null; // インタラクティブカードが指す場所
   cardFocusToken?: number; // 値が変わるとカードの場所へ地図を寄せる（スワイプ連動）
   searchPin?: { lat: number; lng: number; name: string; token: number } | null; // 場所検索の結果（token が変わると再フォーカス）
@@ -61,6 +62,7 @@ export default function LeafletMap({
   focusGoalToken,
   hideControls = false,
   onMapMove,
+  onCenterChange,
   cardFocus,
   cardFocusToken,
   searchPin = null,
@@ -79,6 +81,8 @@ export default function LeafletMap({
   // onMapMove を ref 化してクロージャ内から最新コールバックを呼べるようにする
   const onMapMoveRef = useRef(onMapMove);
   onMapMoveRef.current = onMapMove;
+  const onCenterChangeRef = useRef(onCenterChange);
+  onCenterChangeRef.current = onCenterChange;
   // 選択中の場を再タップしたときの詳細表示コールバック（マーカー生成クロージャから最新を呼ぶ）
   const onOpenDetailRef = useRef(onOpenDetail);
   onOpenDetailRef.current = onOpenDetail;
@@ -112,6 +116,12 @@ export default function LeafletMap({
     map.on('moveend', bump);
     map.on('zoomend', bump);
     setMapVersion((v) => v + 1);
+
+    // 移動完了のたびに中心座標を親へ通知（「この場所で再検索」ボタンの表示判定用）
+    map.on('moveend', () => {
+      const c = map.getCenter();
+      onCenterChangeRef.current?.({ lat: c.lat, lng: c.lng });
+    });
 
     // 地図移動をアクティビティログへ（60秒スロットル）
     let lastMoveLog = 0;

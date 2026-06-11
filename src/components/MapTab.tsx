@@ -58,6 +58,7 @@ interface MapTabProps {
   onAdvanceChallenge?: (stepId: string, photo?: string | null) => void; // 次の目的地ステップを達成（証拠写真つき）
   currentUser: User; // 近くの場カード表示用
   onMapMove?: (center: { lat: number; lng: number }) => void; // 地図を移動させたとき（アクティビティログ用）
+  onSearchArea?: (center: { lat: number; lng: number }) => Promise<void> | void; // 「この場所で再検索」：地図中心の周辺に場を生成する
   deviceHeading?: number | null; // 端末の向き（方位磁針）。ナビ矢印のコンパス補正と現在地マーカーに使う
 }
 
@@ -75,6 +76,7 @@ export default function MapTab({
   onAdvanceChallenge,
   currentUser,
   onMapMove,
+  onSearchArea,
   deviceHeading = null,
 }: MapTabProps) {
   const displaySpots = spots;
@@ -162,6 +164,23 @@ export default function MapTab({
     closeSearch();
   };
 
+  // ── 「この場所で再検索」──
+  // 地図の中心が前回の検索地点（初期値＝現在地）から離れたらボタンを出す。
+  // 押すと地図中心の周辺に実在の寺社を生成（onSearchArea → generateVariedSpots）。
+  const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number } | null>(null);
+  const lastAreaSearchRef = useRef<{ lat: number; lng: number }>(userLocation);
+  const [areaSearching, setAreaSearching] = useState(false);
+  const runAreaSearch = async () => {
+    if (!mapCenter || areaSearching) return;
+    setAreaSearching(true);
+    lastAreaSearchRef.current = mapCenter;
+    try {
+      await onSearchArea?.(mapCenter);
+    } finally {
+      setAreaSearching(false);
+    }
+  };
+
   // ── 心の声（神のつぶやき）を下部オーバーレイで：一文字ずつ・タスク交互 ──
   const [typed, setTyped] = useState('');
   const [msgIdx, setMsgIdx] = useState(0);
@@ -179,6 +198,14 @@ export default function MapTab({
   const [celebrate, setCelebrate] = useState<
     { title: string; icon: string; complete: boolean; trivia?: string; triviaCategory?: TriviaCategory; stepId?: string; feedback?: string } | null
   >(null);
+  // 「この場所で再検索」の表示判定（celebrate 宣言後に導出する）
+  const showAreaSearch =
+    !!onSearchArea &&
+    !activeChallenge &&
+    !celebrate &&
+    !searchOpen &&
+    !!mapCenter &&
+    distanceKm(mapCenter.lat, mapCenter.lng, lastAreaSearchRef.current.lat, lastAreaSearchRef.current.lng) > 0.8;
   // 導入（プロローグ）を見せたチャレンジID。タブ切替でアンマウントされても消えないよう localStorage に永続化。
   const [introSeenId, setIntroSeenId] = useState<string | null>(() => {
     try { return localStorage.getItem('yaorozu_intro_seen'); } catch { return null; }
@@ -583,10 +610,31 @@ export default function MapTab({
           focusGoalToken={focusGoalToken}
           hideControls={introShowing}
           onMapMove={onMapMove}
+          onCenterChange={setMapCenter}
           searchPin={searchPin}
           deviceHeading={deviceHeading}
         />
       </div>
+
+      {/* この場所で再検索：地図を動かしたら中央上に出るピル（Googleマップ風） */}
+      {(showAreaSearch || areaSearching) && (
+        <button
+          onClick={runAreaSearch}
+          disabled={areaSearching}
+          style={{ top: 'calc(env(safe-area-inset-top, 0px) + 60px)' }}
+          className="absolute left-1/2 -translate-x-1/2 z-[1200] flex items-center gap-1.5 bg-white text-[#2563eb] text-[13px] font-black px-4 py-2 rounded-full shadow-xl border border-black/5 active:scale-95 transition-all cursor-pointer disabled:opacity-70"
+        >
+          {areaSearching ? (
+            <>
+              <Compass className="w-4 h-4 animate-spin" />この場所を探索中…
+            </>
+          ) : (
+            <>
+              <Search className="w-4 h-4" />この場所で再検索
+            </>
+          )}
+        </button>
+      )}
 
       {/* 場所検索（クエスト中・演出中は隠す）：右上のボタン ⇄ 検索バー＋候補リスト */}
       {!activeChallenge && !celebrate && (
