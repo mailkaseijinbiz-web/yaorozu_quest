@@ -34,8 +34,8 @@ async function importWith(ls: ReturnType<typeof makeLocalStorage>) {
 const SPOT = { id: 'tk-1', name: 'テスト社', category: '神社', latitude: 35.6, longitude: 139.7, godEmoji: '⛩️' };
 
 describe('参拝記録（visit-records）', () => {
-  beforeEach(() => vi.resetModules());
-  afterEach(() => vi.unstubAllGlobals());
+  beforeEach(() => { vi.resetModules(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
 
   it('hasRecordForSpotOnDate: 同じ寺社・同じ日は1投稿のみ（別日は可）', async () => {
     const ls = makeLocalStorage();
