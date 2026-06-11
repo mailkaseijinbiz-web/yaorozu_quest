@@ -41,6 +41,28 @@ const fmtDate = (iso: string) => {
 };
 const catEmoji = (s: { godEmoji?: string; category?: string }) => s.godEmoji || (s.category === '神社' ? '⛩️' : '🙏');
 
+// クエスト達成時の軌跡を小さなSVGの地図として描く（緑=出発, 赤=到着）。容量ゼロ・オフライン可。
+function TrailMini({ points }: { points: { lat: number; lng: number }[] }) {
+  if (!points || points.length < 2) return null;
+  const lats = points.map((p) => p.lat);
+  const lngs = points.map((p) => p.lng);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+  const W = 150, H = 80, pad = 8;
+  const spanLat = maxLat - minLat || 1e-6, spanLng = maxLng - minLng || 1e-6;
+  const px = (lng: number) => pad + ((lng - minLng) / spanLng) * (W - 2 * pad);
+  const py = (lat: number) => H - pad - ((lat - minLat) / spanLat) * (H - 2 * pad); // 北が上
+  const d = points.map((p, i) => `${i ? 'L' : 'M'}${px(p.lng).toFixed(1)} ${py(p.lat).toFixed(1)}`).join(' ');
+  const a = points[0], b = points[points.length - 1];
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto rounded-lg bg-gray-50 border border-gray-100">
+      <path d={d} fill="none" stroke="#2563eb" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" opacity={0.85} />
+      <circle cx={px(a.lng)} cy={py(a.lat)} r={3.5} fill="#10b981" />
+      <circle cx={px(b.lng)} cy={py(b.lat)} r={3.5} fill="#ef4444" />
+    </svg>
+  );
+}
+
 export default function RecordTab({ currentUser, userLocation, spots, onOpenDetail, onChanged, section }: RecordTabProps) {
   const [topTab, setTopTab] = useState<'visits' | 'goshuin'>(section ?? 'visits');
   // section 固定時は内部の切替に追従させる（メインタブとして単独表示するため）
@@ -520,6 +542,12 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                         <CalendarDays className="w-3 h-3" />{fmtDate(rec.visitedAt)} 参拝
                       </p>
                       {rec.note && <p className="text-[12px] text-gray-600 mt-1 line-clamp-2">{rec.note}</p>}
+                      {rec.trail && rec.trail.length > 1 && (
+                        <div className="mt-1.5 w-[150px] max-w-full">
+                          <TrailMini points={rec.trail} />
+                          <p className="text-[10px] text-gray-400 mt-0.5">🛤️ 当日歩いた道のり</p>
+                        </div>
+                      )}
                     </div>
                     <div className="self-start flex flex-col items-center gap-1">
                       <button

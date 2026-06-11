@@ -20,6 +20,7 @@ export interface VisitRecord {
   note?: string;
   photo?: string; // 旧データ（1枚）。後方互換のため読み取り専用で残す
   photos?: string[]; // 圧縮 dataURL（最大 MAX_RECORD_PHOTOS 枚・任意・容量超過時は写真なしで保存）
+  trail?: { lat: number; lng: number }[]; // クエスト達成時に通ったルートの軌跡（任意）
   createdAt: string; // ISO 8601（記録を作った日時）
 }
 
@@ -72,10 +73,14 @@ function write(userId: string, list: VisitRecord[]): boolean {
 export function addVisitRecord(
   userId: string,
   spot: { id: string; name: string; category: string; latitude: number; longitude: number; godEmoji?: string },
-  input?: { visitedAt?: string; note?: string; photos?: string[] }
+  input?: { visitedAt?: string; note?: string; photos?: string[]; trail?: { lat: number; lng: number }[] }
 ): VisitRecord | null {
   const now = new Date().toISOString();
   const photos = (input?.photos || []).slice(0, MAX_RECORD_PHOTOS);
+  // 軌跡は最大200点に間引いて保存（容量対策）
+  const trail = input?.trail && input.trail.length > 1
+    ? (input.trail.length > 200 ? input.trail.filter((_, i) => i % Math.ceil(input!.trail!.length / 200) === 0) : input.trail)
+    : undefined;
   const rec: VisitRecord = {
     id: `${spot.id}_${Date.now()}`,
     spotId: spot.id,
@@ -87,6 +92,7 @@ export function addVisitRecord(
     visitedAt: input?.visitedAt || now,
     note: input?.note?.trim() || undefined,
     photos: photos.length ? photos : undefined,
+    trail,
     createdAt: now,
   };
   const list = getVisitRecords(userId);

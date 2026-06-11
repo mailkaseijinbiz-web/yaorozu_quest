@@ -6,7 +6,7 @@
 // 型は ./tasks.ts に統合。Challenge / ChallengeStep は Quest / Task のエイリアス。
 // -----------------------------------------------------------------------------
 
-import { questStep, type Quest, type TriviaCategory } from './tasks';
+import { questStep, TASK_CATALOG, type Quest, type TriviaCategory } from './tasks';
 
 // ── 後方互換エイリアス ──
 export type { Quest, Task, TriviaCategory } from './tasks';
@@ -44,6 +44,40 @@ export const TRIVIA_ICON: Record<TriviaCategory, string> = {
 
 // リセット済み — 管理画面から神を追加するとクエストが生成されます
 export const CHALLENGES: Quest[] = [];
+
+// ── 移動をともなわないクエスト（バリエーション） ──
+// アバター画像を設定するだけのクエスト。場所に紐づかず、いつでもどこでも達成できる。
+// getAllQuests() には混ぜず（場の自動生成判定を壊さない）、表示・開始は UI 側で個別に扱う。
+export const AVATAR_QUEST: Quest = {
+  id: 'avatar-self',
+  title: 'あなたの分身をつくる',
+  description: '巡礼の相棒となるアバター画像を設定しよう。場所は問わない、いつでもどこでも。',
+  difficulty: 1,
+  minLevel: 0,
+  estMinutes: 1,
+  badgeIcon: '🤳',
+  badgeName: 'アバター設定者',
+  goalName: 'アバター設定',
+  goalLat: 0,
+  goalLng: 0,
+  tasks: [
+    {
+      id: 's0',
+      type: 'avatar_photo',
+      kind: TASK_CATALOG.avatar_photo.kind,
+      icon: TASK_CATALOG.avatar_photo.icon,
+      label: TASK_CATALOG.avatar_photo.label,
+      title: TASK_CATALOG.avatar_photo.title,
+      reward: TASK_CATALOG.avatar_photo.reward,
+    },
+  ],
+  source: 'static',
+};
+
+/** 移動をともなわないクエスト（現状はアバター設定クエスト）か。距離表示・地図遷移を出さない判定に使う。 */
+export function isStationaryQuest(q: Quest): boolean {
+  return q.tasks.length === 1 && q.tasks[0].type === 'avatar_photo';
+}
 
 export function getChallenge(id: string): Quest | undefined {
   return CHALLENGES.find((c) => c.id === id);
