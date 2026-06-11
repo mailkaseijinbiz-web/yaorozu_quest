@@ -10,7 +10,7 @@ import { YaorozuGods } from '../../components/admin/YaorozuGods';
 import { ActivityManager } from '../../components/admin/ActivityManager';
 import { SpotsManager } from '../../components/admin/SpotsManager';
 import { ChallengesManager } from '../../components/admin/ChallengesManager';
-import { UsersManager } from '../../components/admin/UsersManager';
+import { UsersManager, DEMO_USER_IDS } from '../../components/admin/UsersManager';
 import { SystemPanel } from '../../components/admin/SystemPanel';
 
 // 認証はサーバー側（/api/admin/login + HttpOnly Cookie）で行う。パスワードはクライアントに持たない。
@@ -196,7 +196,7 @@ export default function AdminPage() {
         {TABS.map(({ key, label, icon: Icon }) => {
           const counts: Record<AdminTab, number | null> = {
             blueprint: null, analytics: null, gods: agentCount, activity: db.getActivities().length,
-            spots: spots.length, users: users.length,
+            spots: spots.length, users: users.filter(u => !DEMO_USER_IDS.has(u.id)).length,
             challenges: db.getAllQuests().length, // 生成クエストを含む実数（CHALLENGES は静的・空）
             system: null,
           };
