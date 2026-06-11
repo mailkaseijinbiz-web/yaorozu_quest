@@ -30,6 +30,20 @@ describe('TOKYO_TRIVIA（データ整合性）', () => {
       expect(t.walkTips.length, t.id).toBeGreaterThan(0);
     }
   });
+
+  it('都心だけでなく城西・城南・城北・多摩方面のエリアもカバーする', () => {
+    const areas = new Set(TOKYO_TRIVIA.map((t) => t.area));
+    for (const a of ['新宿', '中野・高円寺', '下北沢・世田谷', '品川', '目黒', '池袋・雑司が谷', '王子・赤羽', '吉祥寺・三鷹', '両国・深川', '千住'] as const) {
+      expect(areas.has(a), a).toBe(true);
+    }
+  });
+
+  it('全エントリが座標を持つ（近傍検索 getTriviaNear の素材になる）', () => {
+    for (const t of TOKYO_TRIVIA) {
+      expect(t.latitude, t.id).not.toBeNull();
+      expect(t.longitude, t.id).not.toBeNull();
+    }
+  });
 });
 
 describe('getTriviaNear（座標近傍の素材取得）', () => {
