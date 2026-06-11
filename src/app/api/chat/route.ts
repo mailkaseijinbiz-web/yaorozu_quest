@@ -209,9 +209,39 @@ function getGuideFallbackResponse(message: string, spot?: SpotContext): string {
 }
 
 export async function POST(request: Request) {
+  // ボディは一度だけ読む。catch でも参照するため try の外で確保する
+  // （request.clone() はボディ消費後だと失敗し、graceful fallback が壊れるため）。
+  let body: Record<string, unknown> = {};
   try {
-    const { message, history, spotId, agent, ugc, affiliates, userName, spot, localTime, userContext, location } = await request.json();
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+  const {
+    message = '',
+    history = [],
+    agent,
+    ugc = [],
+    affiliates = [],
+    userName,
+    spot,
+    localTime,
+    userContext,
+    location,
+  } = body as {
+    message?: string;
+    history?: { sender: 'user' | 'agent'; text: string }[];
+    agent: Agent & { id?: string };
+    ugc?: UgcPost[];
+    affiliates?: AffiliateLink[];
+    userName?: string;
+    spot?: SpotContext;
+    localTime?: string;
+    userContext?: UserContext;
+    location?: { lat?: number; lng?: number };
+  };
 
+  try {
     const apiKey = process.env.OPENAI_API_KEY;
     const geminiKey = process.env.GEMINI_API_KEY;
 
@@ -287,7 +317,7 @@ export async function POST(request: Request) {
     // 土地の実在豆知識（半径2km）。事実として会話に使ってよい素材を渡す
     const loc =
       location && typeof location.lat === 'number' && typeof location.lng === 'number'
-        ? location
+        ? { lat: location.lat, lng: location.lng }
         : spot && typeof spot.latitude === 'number' && typeof spot.longitude === 'number'
         ? { lat: spot.latitude, lng: spot.longitude }
         : null;
@@ -389,26 +419,27 @@ Consider the current local time in your response if appropriate (e.g. greeting t
     }
 
     const data = await openaiResponse.json();
-    const responseText = data.choices[0].message.content.trim();
+    const responseText = data?.choices?.[0]?.message?.content?.trim();
+    if (!responseText) throw new Error('OpenAI returned empty response');
 
     return NextResponse.json({ response: responseText, mode: 'openai' });
   } catch (error) {
     console.error('Error in chat API:', error);
-    
-    // In case of error (e.g. invalid key, timeout), fallback gracefully
-    const body = await request.clone().json();
-    const bodySynthetic = typeof body.agent?.id === 'string' && body.agent.id.startsWith('agent-synthetic-');
-    const bodyGuide = body.agent?.id === 'agent-guide-spirit';
+
+    // In case of error (e.g. invalid key, timeout), fallback gracefully.
+    // ボディは冒頭で読んだ値を再利用する（request.clone() はここでは失敗するため）。
+    const bodySynthetic = typeof agent?.id === 'string' && agent.id.startsWith('agent-synthetic-');
+    const bodyGuide = agent?.id === 'agent-guide-spirit';
     const responseText = bodyGuide
-      ? getGuideFallbackResponse(body.message, body.spot)
-      : (bodySynthetic && body.spot)
-      ? getSpotFallbackResponse(body.message, body.spot, body.ugc, body.affiliates, body.agent?.name || body.spot.name)
+      ? getGuideFallbackResponse(message, spot)
+      : (bodySynthetic && spot)
+      ? getSpotFallbackResponse(message, spot, ugc, affiliates, agent?.name || spot.name)
       : getFallbackResponse(
-          body.message,
-          body.agent,
-          body.ugc,
-          body.affiliates,
-          body.userName || '巡礼者'
+          message,
+          agent,
+          ugc,
+          affiliates,
+          userName || '巡礼者'
         );
     
     return NextResponse.json({ 

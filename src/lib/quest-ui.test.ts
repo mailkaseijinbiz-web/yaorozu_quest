@@ -113,4 +113,11 @@ describe('formatKm', () => {
     expect(formatKm(1.0)).toEqual({ value: '1.0', unit: 'km' });
     expect(formatKm(2.34)).toEqual({ value: '2.3', unit: 'km' });
   });
+
+  it('1km 直前（丸めで 1000m になる値）は「1000m」ではなく km 表記', () => {
+    expect(formatKm(0.9999)).toEqual({ value: '1.0', unit: 'km' });
+    expect(formatKm(0.9995)).toEqual({ value: '1.0', unit: 'km' });
+    // 丸めても 1000m に達しない値は m 表記のまま
+    expect(formatKm(0.9994)).toEqual({ value: '999', unit: 'm' });
+  });
 });

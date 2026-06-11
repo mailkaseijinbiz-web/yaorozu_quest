@@ -173,7 +173,7 @@ export default function LeafletMap({
       window.removeEventListener('pageshow', refresh);
       document.removeEventListener('visibilitychange', onVisible);
       if (mapRef.current) {
-        mapRef.current.off('move', bump);
+        mapRef.current.off('moveend', bump);
         mapRef.current.off('zoomend', bump);
         mapRef.current.remove();
         mapRef.current = null;
