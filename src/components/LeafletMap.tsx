@@ -229,15 +229,15 @@ export default function LeafletMap({
         <!-- Pulsing Accuracy Halo -->
         <div style="position:absolute;left:22px;top:22px;transform:translate(-50%,-50%);width:24px;height:24px;border-radius:50%;background:rgba(26,115,232,0.22);animation:gmap-pulse 2s infinite ease-out;pointer-events:none;"></div>
         
-        <!-- Direction Beam -->
-        <svg style="position:absolute;left:0;top:0;width:44px;height:44px;transform:rotate(${heading}deg);transform-origin:22px 22px;pointer-events:none;" viewBox="0 0 44 44">
+        <!-- Direction Beam（現在地の向き。視認性のため大きめに。SVG中心(40,40)をドット中心(22,22)に重ねる） -->
+        <svg style="position:absolute;left:-18px;top:-18px;width:80px;height:80px;transform:rotate(${heading}deg);transform-origin:40px 40px;pointer-events:none;" viewBox="0 0 80 80">
           <defs>
             <radialGradient id="beam-grad" cx="50%" cy="50%" r="50%">
               <stop offset="0%" stop-color="#1a73e8" stop-opacity="0.6"/>
               <stop offset="100%" stop-color="#1a73e8" stop-opacity="0"/>
             </radialGradient>
           </defs>
-          <path d="M 22 22 L 11 2.95 A 22 22 0 0 1 33 2.95 Z" fill="url(#beam-grad)"/>
+          <path d="M 40 40 L 18 9 A 38 38 0 0 1 62 9 Z" fill="url(#beam-grad)"/>
         </svg>
 
         <!-- Blue Dot -->

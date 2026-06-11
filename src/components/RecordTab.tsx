@@ -139,16 +139,6 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
   );
   const [nearbyShown, setNearbyShown] = useState(3);
 
-  // すぐ入力できるよう、最寄りの寺社のフォームを初回に自動で開く（その後の手動操作は妨げない）。
-  const autoSelectedRef = useRef(false);
-  useEffect(() => {
-    if (effectiveTab !== 'visits' || autoSelectedRef.current) return;
-    if (!selected && !query && nearby.length > 0) {
-      setSelected(nearby[0].s);
-      autoSelectedRef.current = true;
-    }
-  }, [effectiveTab, nearby, selected, query]);
-
   // 検索（名前・神名・カテゴリ）。近い順に最大6件。
   const q = query.trim().toLowerCase();
   const matches = useMemo(() => {
@@ -570,7 +560,7 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                   {nearby.length > nearbyShown && (
                     <button
                       onClick={() => setNearbyShown((n) => n + 5)}
-                      className="w-full text-[13px] font-black text-gray-500 bg-white border border-gray-100 shadow-sm rounded-2xl py-2.5 hover:bg-gray-50 transition-all cursor-pointer"
+                      className="block mx-auto text-[13px] font-black text-shrine-red underline underline-offset-2 py-1.5 hover:opacity-80 transition-opacity cursor-pointer"
                     >
                       もっと見る
                     </button>

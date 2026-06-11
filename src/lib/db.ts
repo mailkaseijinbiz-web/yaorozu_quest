@@ -4,7 +4,7 @@ import { generateTokyoSpots } from '../data/tokyo-spots';
 import { schedulePush } from './cloud-sync';
 import { distanceKm } from './geo';
 import type { Quest } from '../data/tasks';
-import { CHALLENGES } from '../data/challenges';
+import { CHALLENGES, buildGoshuinQuest } from '../data/challenges';
 import { hasGoShuin } from './goshuin';
 
 export interface User {
@@ -830,7 +830,14 @@ class MockDatabase {
 
   /** id で生成・静的を横断して1件取得。 */
   getQuest(id: string): Quest | undefined {
-    return this.getAllQuests().find((q) => q.id === id);
+    const found = this.getAllQuests().find((q) => q.id === id);
+    if (found) return found;
+    // 合成の「御朱印を授かる」クエスト（goshuin-<spotId>）は、その場から都度組み立てて解決する。
+    if (id.startsWith('goshuin-')) {
+      const spot = this.getSpot(id.slice('goshuin-'.length));
+      if (spot) return buildGoshuinQuest(spot);
+    }
+    return undefined;
   }
 
   /** クエスト生成ルール（方針）。未設定なら既定値。 */

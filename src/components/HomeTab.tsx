@@ -3,10 +3,33 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Trophy, Flag, Clock, X, Check, Hourglass } from 'lucide-react';
 import { User, db } from '../lib/db';
-import { difficultyLabel, terrainLabel, Challenge, AVATAR_QUEST, CONCERNS_QUEST, GOOD_QUEST, isStationaryQuest } from '../data/challenges';
+import { difficultyLabel, terrainLabel, Challenge, AVATAR_QUEST, CONCERNS_QUEST, GOOD_QUEST, isStationaryQuest, buildGoshuinQuest } from '../data/challenges';
+import { hasGoShuin } from '../lib/goshuin';
 import { getLevelInfo } from '../data/levels';
 import { distanceKm } from '../lib/geo';
 import { ttlInfo } from '../lib/quest-ui';
+
+// 座標を持つタスク（巡る場）を現在地から順に結んだ経路。2地点以上を「周遊」とみなし、
+// 各区間距離（タスクid→km）と合計距離を返す。1地点以下なら null（従来の直線距離を使う）。
+function questPath(userLoc: { lat: number; lng: number }, ch: Challenge): { total: number; legKm: Map<string, number> } | null {
+  const pts = ch.tasks.filter((t) => typeof t.lat === 'number' && typeof t.lng === 'number');
+  if (pts.length < 2) return null;
+  let cur = userLoc;
+  let total = 0;
+  const legKm = new Map<string, number>();
+  for (const t of pts) {
+    const d = distanceKm(cur.lat, cur.lng, t.lat as number, t.lng as number);
+    total += d;
+    legKm.set(t.id, d);
+    cur = { lat: t.lat as number, lng: t.lng as number };
+  }
+  return { total, legKm };
+}
+
+/** 距離(km)を「123m」「1.2km」表記にする。 */
+function fmtDist(km: number): string {
+  return km < 1 ? `${Math.round(km * 1000)}m` : `${km.toFixed(1)}km`;
+}
 
 interface HomeTabProps {
   currentUser: User;
@@ -62,7 +85,14 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
   };
 
   // フィルタ → 場ごとにクラスタリング（場は近い順、場内は距離順）。移動なしクエストも候補に含める。
-  const scored = [...db.getAllQuests(), AVATAR_QUEST, CONCERNS_QUEST, GOOD_QUEST]
+  // 御朱印が未取得の近くの場には「御朱印を授かる」シンプルクエストを用意（最寄り8件まで）。
+  const goshuinQuests = db.getSpots()
+    .filter((s) => !hasGoShuin(currentUser.id, s.id))
+    .map((s) => ({ s, d: distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude) }))
+    .sort((a, b) => a.d - b.d)
+    .slice(0, 8)
+    .map((x) => buildGoshuinQuest(x.s));
+  const scored = [...db.getAllQuests(), ...goshuinQuests, AVATAR_QUEST, CONCERNS_QUEST, GOOD_QUEST]
     .filter((ch) => {
       const completed = progress.completed.includes(ch.id);
       const ok = userLevel >= ch.minLevel;
@@ -83,8 +113,8 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
     if (arr) arr.push(it); else placeMap.set(k, [it]);
   }
   const nearChallenges = [...placeMap.values()]
-    .map((items) => ({ items, anyOk: items.some((i) => i.ok), minD: Math.min(...items.map((i) => i.d)) }))
-    .sort((a, b) => (a.anyOk !== b.anyOk ? (a.anyOk ? -1 : 1) : a.minD - b.minD))
+    .map((items) => ({ items, minD: Math.min(...items.map((i) => i.d)) }))
+    .sort((a, b) => a.minD - b.minD) // 現在地から近い場のクエストを上に
     .flatMap((g) => g.items.sort((a, b) => a.d - b.d).map((i) => i.ch))
     .slice(0, 20);
   // 場の自動生成判定は「移動をともなう実クエスト」の有無で行う（アバター等の常設クエストで隠さない）
@@ -222,7 +252,9 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
             const ter = terRaw && terRaw.label !== '平坦' ? terRaw : null; // 「平坦」は情報量が少ないので出さない
             const completed = progress.completed.includes(ch.id);
             const active = progress.activeId === ch.id; // 現在挑戦中
-            const distToGoal = distanceKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng);
+            // 複数の場を巡るクエストは経路の合計距離、単一なら従来の直線距離
+            const chPath = questPath(userLocation, ch);
+            const distToGoal = chPath ? chPath.total : distanceKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng);
             const distValue = distToGoal < 1 ? `${Math.round(distToGoal * 1000)}` : `${distToGoal.toFixed(1)}`;
             const distUnit = distToGoal < 1 ? 'm' : 'km';
             const levelOk = userLevel >= ch.minLevel; // 必須レベルを満たすか
@@ -366,6 +398,8 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
         const mTotal = confirmCh.tasks.length;
         // 未参加クエストの刻限（参加・達成済みは恒久保持なので出さない）
         const mTtl = !isActive && !progress.completed.includes(confirmCh.id) ? ttlInfo(confirmCh.createdAt, nowTick) : null;
+        // 複数の場を巡るクエストの経路（区間距離＋合計）。単一なら null。
+        const mPath = questPath(userLocation, confirmCh);
         return (
           <div
             className="fixed inset-0 z-[4000] bg-black/40 flex items-center justify-center px-6"
@@ -385,6 +419,12 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
               <p className="text-[13px] text-gray-500 mt-1 leading-relaxed">{confirmCh.description}</p>
               <div className="flex items-center justify-center gap-2 mt-3 text-[13px] text-gray-500">
                 <span className="flex items-center gap-0.5"><Clock className="w-3 h-3" />約{confirmCh.estMinutes}分</span>
+                {mPath && (
+                  <>
+                    <span>・</span>
+                    <span className="flex items-center gap-0.5"><MapPin className="w-3 h-3" />計{fmtDist(mPath.total)}</span>
+                  </>
+                )}
                 <span>・</span>
                 <span>🏆 {confirmCh.badgeName}</span>
               </div>
@@ -399,7 +439,9 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
                         <span className="w-5 h-5 rounded-full bg-shrine-red text-white text-[11px] font-black flex items-center justify-center flex-shrink-0">{i + 1}</span>
                         <span className="text-base flex-shrink-0">{t.icon}</span>
                         <span className="flex-1 min-w-0 text-[12px] font-bold text-gray-800 truncate">{t.title}</span>
-                        <span className="text-[11px] font-black text-amber-600 flex-shrink-0">+{t.reward}徳</span>
+                        {mPath?.legKm.has(t.id) && (
+                          <span className="text-[11px] font-black text-[#2563eb] flex-shrink-0 flex items-center gap-0.5"><MapPin className="w-3 h-3" />{fmtDist(mPath.legKm.get(t.id)!)}</span>
+                        )}
                       </div>
                     ))}
                   </div>

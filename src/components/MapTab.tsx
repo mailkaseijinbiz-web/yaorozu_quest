@@ -9,7 +9,7 @@ import { hasGoShuin, grantGoShuin } from '../lib/goshuin';
 import { playChime } from '../lib/sound';
 import GoshuinCelebrate from './GoshuinCelebrate';
 import { distanceKm, bearingDeg } from '../lib/geo';
-import { formatKm, ttlInfo } from '../lib/quest-ui';
+import { ttlInfo } from '../lib/quest-ui';
 import { getHeartVoices } from '../data/god-tasks';
 import { composeWalkGuide, nextGuideStage } from '../lib/walk-guide';
 import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
@@ -81,6 +81,7 @@ interface MapTabProps {
   creatorProfiles: { [userId: string]: User };
   onNavigateTab?: (tab: 'map' | 'chat' | 'ar' | 'quest') => void; // Parent navigation hook
   onOpenDetail?: (spot: Spot) => void; // タップで寺の詳細ページを開く
+  onRecordVisit?: (spot: Spot) => void; // カードの「行った」：参拝記録を残す
   activeChallenge?: Challenge | null; // 今挑戦中のチャレンジ（上部バナー＋ゴール表示）
   onClearChallenge?: () => void;
   onAdvanceChallenge?: (stepId: string, photo?: string | null) => void; // 次の目的地ステップを達成（証拠写真つき）
@@ -102,6 +103,7 @@ export default function MapTab({
   setUserLocation,
   onNavigateTab,
   onOpenDetail,
+  onRecordVisit,
   activeChallenge,
   onClearChallenge,
   onAdvanceChallenge,
@@ -444,11 +446,21 @@ export default function MapTab({
   // ── インタラクティブカード（Interactive Card） ──
   // マップ下部に出る「近くの場」カードの領域。クエスト未参加時に表示し、
   // 横スワイプで隣の場へ切替、タップでその場の詳細を開く（近い順）。
-  const nearSpotList = [...spots]
-    .map((s) => ({ s, d: distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude) }))
-    .sort((a, b) => a.d - b.d)
-    .slice(0, 10)
-    .map((x) => x.s);
+  const nearSpotList = (() => {
+    const scored = [...spots]
+      .map((s) => ({ s, d: distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude) }))
+      .sort((a, b) => a.d - b.d);
+    const top = scored.slice(0, 10);
+    // 選択中の場(activeSpot)が最寄り10件の圏外でも、必ずカードに含める。
+    // こうしないと cardIdx=-1 となり、選択マーカー/フキダシ(activeSpot)とカードがズレる。
+    if (activeSpot && !top.some((x) => x.s.id === activeSpot.id)) {
+      const found = scored.find((x) => x.s.id === activeSpot.id);
+      const d = found ? found.d : distanceKm(userLocation.lat, userLocation.lng, activeSpot.latitude, activeSpot.longitude);
+      top.push({ s: found ? found.s : activeSpot, d });
+      top.sort((a, b) => a.d - b.d);
+    }
+    return top.map((x) => x.s);
+  })();
   // カードが指す場：選択中(activeSpot)があればそれ、無ければ最寄り。
   // マーカータップ/スワイプで activeSpot が変わり、それに追従してカードと地図ハイライトが更新される。
   const cardSpot = activeSpot ?? nearSpotList[0] ?? null;
@@ -940,7 +952,7 @@ export default function MapTab({
 
       {/* 今挑戦中のチャレンジ（上部バナー・左右端まで・開始時に上からふわっと） */}
       {activeChallenge && !introShowing && (
-        <div className="quest-header-in absolute top-0 left-0 right-0 z-[1100] bg-[#2563eb] text-white shadow-lg px-4 py-2.5 flex flex-col gap-1.5">
+        <div className="quest-header-in absolute top-0 left-0 right-0 z-[1100] bg-[#2563eb] text-white shadow-lg px-4 py-2.5">
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center gap-1 text-[10px] font-black bg-white/25 px-2 py-0.5 rounded-full flex-shrink-0">
               <Flag className="w-2.5 h-2.5" />挑戦中
@@ -949,37 +961,6 @@ export default function MapTab({
             <button onClick={() => setQuitConfirm(true)} aria-label="チャレンジを中断" className="flex items-center gap-0.5 text-[11px] font-black bg-white/20 hover:bg-white/30 px-2 py-1 rounded-full flex-shrink-0 cursor-pointer transition-colors">
               中断<X className="w-3 h-3" />
             </button>
-          </div>
-          {/* 進捗：ステップ丸＋コネクタ／件数／次の目的地までの距離 */}
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-black tabular-nums flex-shrink-0">✓ {chDone?.size ?? 0}/{activeChallenge.tasks.length}</span>
-            <div className="flex-1 flex items-center min-w-0">
-              {activeChallenge.tasks.map((t, i) => {
-                const done = chDone?.has(t.id) ?? false;
-                const current = nextStep?.id === t.id;
-                return (
-                  <React.Fragment key={t.id}>
-                    {i > 0 && <span className={`flex-1 h-0.5 rounded-full transition-colors ${done ? 'bg-white' : 'bg-white/25'}`} />}
-                    <span
-                      className={`flex items-center justify-center rounded-full flex-shrink-0 transition-colors ${
-                        done ? 'celebrate-pop w-4 h-4 bg-white text-[#2563eb]'
-                          : current ? 'w-4 h-4 border-2 border-white bg-white/25 text-[9px] font-black animate-pulse'
-                          : 'w-4 h-4 bg-white/20 text-white/60 text-[9px] font-black'
-                      }`}
-                    >
-                      {done ? <Check className="w-3 h-3" /> : i + 1}
-                    </span>
-                  </React.Fragment>
-                );
-              })}
-            </div>
-            <span className="text-[11px] font-black tabular-nums flex-shrink-0">
-              {chAllDone
-                ? '全ステップ達成！'
-                : nextDist != null
-                ? `あと ${formatKm(nextDist).value}${formatKm(nextDist).unit}`
-                : ''}
-            </span>
           </div>
         </div>
       )}
@@ -1140,15 +1121,18 @@ export default function MapTab({
               return (
                 <div
                   key={s.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => { if (swipedRef.current) { swipedRef.current = false; return; } onSelectSpot(s); onOpenDetail?.(s); }}
                   style={{ width: slideW || '100%', flexShrink: 0 }}
-                  className="text-left bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-black/5 overflow-hidden cursor-pointer"
+                  className="text-left bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-black/5 overflow-hidden"
                 >
-                  <div className="flex items-stretch gap-3">
+                  {/* 上部：タップでその場を選択（地図でフキダシ表示） */}
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => { if (swipedRef.current) { swipedRef.current = false; return; } onSelectSpot(s); }}
+                    className="flex items-stretch gap-3 cursor-pointer"
+                  >
                     {/* 左：その場の写真（奉納写真→代表写真の順）。無ければ神の絵文字 */}
-                    <div className="w-20 self-stretch rounded-l-2xl flex items-center justify-center text-4xl flex-shrink-0 bg-gradient-to-br from-blue-100 to-amber-100 relative overflow-hidden">
+                    <div className="w-20 self-stretch rounded-tl-2xl flex items-center justify-center text-4xl flex-shrink-0 bg-gradient-to-br from-blue-100 to-amber-100 relative overflow-hidden">
                       {cardPhoto ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={cardPhoto} alt={s.name} className="absolute inset-0 w-full h-full object-cover" />
@@ -1156,8 +1140,7 @@ export default function MapTab({
                         godEmoji
                       )}
                     </div>
-                    <div className="flex-1 min-w-0 py-3">
-                      {/* めくれることは右の覗きカードで伝わるため、ラベル・スワイプ表記は出さない */}
+                    <div className="flex-1 min-w-0 py-3 pr-3">
                       <h4 className="text-sm font-black text-gray-900 truncate">{s.name}</h4>
                       {s.godName && (
                         <p className="text-[11px] font-bold text-gray-400 truncate mt-0.5">
@@ -1173,7 +1156,21 @@ export default function MapTab({
                         {ugc > 0 && <span className="text-[13px] flex items-center gap-0.5 text-gray-400"><Camera className="w-3 h-3" />{ugc}</span>}
                       </div>
                     </div>
-                    <div className="self-center pr-3 flex-shrink-0 text-[#2563eb]"><ChevronRight className="w-5 h-5" /></div>
+                  </div>
+                  {/* 下部：2ボタン（行った／詳細を見る） */}
+                  <div className="flex border-t border-black/5">
+                    <button
+                      onClick={() => { onSelectSpot(s); onRecordVisit?.(s); }}
+                      className="flex-1 py-2.5 text-[13px] font-black text-emerald-700 hover:bg-emerald-50 active:bg-emerald-100 flex items-center justify-center gap-1 cursor-pointer border-r border-black/5"
+                    >
+                      <Check className="w-4 h-4" />行った
+                    </button>
+                    <button
+                      onClick={() => { onSelectSpot(s); onOpenDetail?.(s); }}
+                      className="flex-1 py-2.5 text-[13px] font-black text-[#2563eb] hover:bg-blue-50 active:bg-blue-100 flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      詳細を見る<ChevronRight className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
               );
