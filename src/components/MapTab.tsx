@@ -185,6 +185,12 @@ export default function MapTab({
   const [farNotice, setFarNotice] = useState(false);
   // 上部ガイド（語り部）の読み上げが終わったか。終わってから下部オーバーレイを出す
   const [guideDone, setGuideDone] = useState(false);
+  // 道中の写真への神のひとこと（会話画面に入らず、上部フキダシに表示してポーン音を鳴らす）
+  const [photoComment, setPhotoComment] = useState<string | null>(null);
+  const [photoSending, setPhotoSending] = useState(false);
+  const photoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // フキダシのタップで道案内の精霊が次々に新しい話題をくれる（話題替えの種）
+  const topicBumpRef = useRef(0);
   // 道案内の精霊との会話（狐アイコンのタップでログ閲覧＋参加）
   const [chatOpen, setChatOpen] = useState(false);
   const [chatExtra, setChatExtra] = useState<GuideMsg[]>([]); // 参加（ユーザー⇄精霊）の追加分
@@ -569,6 +575,18 @@ export default function MapTab({
     if (el) el.scrollTop = el.scrollHeight;
   }, [briefTyped]);
 
+  // フキダシをタップ → 道案内の精霊が次の話題をくれる（ポーン音つき）。写真コメント中はそれを解除。
+  const nextTopic = () => {
+    if (!activeChallenge || !nextStep) return;
+    if (photoComment) { setPhotoComment(null); if (photoTimerRef.current) clearTimeout(photoTimerRef.current); }
+    const bump = topicBumpRef.current + 1;
+    topicBumpRef.current = bump;
+    const stage = guideMsg?.stage ?? nextGuideStage(nextDist, null);
+    const text = to3Lines(composeWalkGuide({ questId: activeChallenge.id, step: nextStep, stage, distKm: nextDist, user: userLocation, nonce: bump }));
+    setGuideMsg({ stepId: nextStep.id, stage, text });
+    playChime();
+  };
+
   // 「近づいてください」注意は、目的地が変わったとき/圏内に入ったときに消す
   useEffect(() => { setFarNotice(false); }, [nextStep?.id]);
   useEffect(() => { if (!tooFar) setFarNotice(false); }, [tooFar]);
@@ -587,7 +605,10 @@ export default function MapTab({
   useEffect(() => {
     setChatExtra([]); setChatOpen(false); setChatInput(''); setPendingShareKind(null);
     arrivalDoneRef.current = false; setGoshuinCelebrate(null);
+    setPhotoComment(null); if (photoTimerRef.current) clearTimeout(photoTimerRef.current);
+    topicBumpRef.current = 0;
   }, [activeChallenge?.id]);
+  useEffect(() => () => { if (photoTimerRef.current) clearTimeout(photoTimerRef.current); }, []);
   // 新着・送信中で最下部へスクロール
   useEffect(() => {
     if (!chatOpen) return;
@@ -686,16 +707,14 @@ export default function MapTab({
     setChatOpen(true);
   };
 
-  // 寄り道チップ（写真）：撮った写真の内容に目的地の神がコメント（vision）
+  // 道中の写真：会話画面には入らず、神のひとことを上部フキダシに出してポーン音を鳴らす。
   const onPickGodPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file || !destSpot || chatSending) return;
-    setChatOpen(true);
-    setChatSending(true);
+    if (!file || !destSpot || photoSending) return;
+    setPhotoSending(true);
     let dataUrl = '';
-    try { dataUrl = await compressImage(file, { maxDim: 900, quality: 0.6 }); } catch { setChatSending(false); return; }
-    setChatExtra((prev) => [...prev, { role: 'user', text: '（気になる風景を撮って奉納した）', photo: dataUrl }]);
+    try { dataUrl = await compressImage(file, { maxDim: 900, quality: 0.6 }); } catch { setPhotoSending(false); return; }
     try {
       const res = await fetch('/api/photo-feedback', {
         method: 'POST',
@@ -704,12 +723,25 @@ export default function MapTab({
         signal: AbortSignal.timeout(12_000),
       });
       const data = await res.json();
-      setChatExtra((prev) => [...prev, { role: 'spirit', text: data?.feedback || 'ほう、よき眺めじゃ。心に残る一枚じゃな。' }]);
-      finalizeGodReply('photo');
+      const fb = data?.feedback || 'ほう、よき眺めじゃ。心に残る一枚じゃな。';
+      setPhotoComment(fb);
+      playChime(); // 神の言葉が出た合図
+      // 徳（1目的地・写真は1日1回まで）
+      if (!db.isTaskDoneToday(destSpot.id, 'wayside-photo')) {
+        db.grantToku(currentUser.id, 5, '寄り道：神に伝える');
+        db.markTaskDoneToday(destSpot.id, 'wayside-photo');
+        setShareToast('徳 +5');
+        setTimeout(() => setShareToast(null), 2200);
+      }
+      // しばらく見せてから、道中ナレーションに戻す
+      if (photoTimerRef.current) clearTimeout(photoTimerRef.current);
+      photoTimerRef.current = setTimeout(() => setPhotoComment(null), 9000);
     } catch {
-      setChatExtra((prev) => [...prev, { role: 'spirit', text: 'すまぬ、写真がうまく届かなんだ。' }]);
+      setPhotoComment('すまぬ、写真がうまく届かなんだ。');
+      if (photoTimerRef.current) clearTimeout(photoTimerRef.current);
+      photoTimerRef.current = setTimeout(() => setPhotoComment(null), 4000);
     } finally {
-      setChatSending(false);
+      setPhotoSending(false);
     }
   };
 
@@ -825,25 +857,36 @@ export default function MapTab({
         </div>
       )}
 
-      {/* 進捗ガイド（複数ステップ：上部に精霊のフキダシを常時表示し、次のすべきことを案内） */}
-      {activeChallenge && showGuide && nextStep && (
+      {/* 進捗ガイド（上部のフキダシ）。通常は道案内の精霊の道中語り、写真を撮ると目的地の神の
+          ひとこと（photoComment）を会話画面に入らずここに表示する。 */}
+      {activeChallenge && (showGuide || photoComment) && nextStep && (
         <div className="absolute top-0 left-0 right-0 z-[1200] px-4 pt-[68px] flex justify-center pointer-events-none">
           <div className="w-full max-w-sm flex items-start gap-2">
             <button
               onClick={() => setChatOpen(true)}
-              aria-label="道案内の精霊と話す"
+              aria-label={destSpot ? `${destGodName}と話す` : '道案内の精霊と話す'}
               className="relative w-12 h-12 rounded-full bg-gradient-to-br from-amber-100 to-orange-50 border-2 border-white shadow-lg flex items-center justify-center text-2xl flex-shrink-0 pointer-events-auto cursor-pointer active:scale-95 transition-transform"
             >
-              🦊
+              {photoComment ? destGodEmoji : '🦊'}
               <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#2563eb] border-2 border-white flex items-center justify-center">
                 <MessageCircle className="w-2.5 h-2.5 text-white" />
               </span>
             </button>
-            <div className="relative flex-1 bg-white rounded-2xl rounded-tl-sm shadow-xl px-4 py-3">
-              <p className="text-[11px] font-black tracking-wider text-amber-600">道案内の精霊</p>
-              <div ref={guideScrollRef} className="mt-0.5 max-h-[4.4rem] overflow-y-auto pointer-events-auto pr-1">
-                <p className="text-sm text-gray-800 leading-relaxed">{briefTyped}<span className="animate-pulse text-amber-500">▌</span></p>
+            <div
+              onClick={nextTopic}
+              role="button"
+              aria-label="道案内の精霊に次の話題を聞く"
+              className="relative flex-1 bg-white rounded-2xl rounded-tl-sm shadow-xl px-4 py-3 pointer-events-auto cursor-pointer active:scale-[0.99] transition-transform"
+            >
+              <p className={`text-[11px] font-black tracking-wider ${photoComment ? 'text-shrine-red' : 'text-amber-600'}`}>{photoComment ? destGodName : '道案内の精霊'}</p>
+              <div ref={guideScrollRef} className="mt-0.5 max-h-[4.4rem] overflow-y-auto pr-1">
+                {photoComment ? (
+                  <p className="text-sm text-gray-800 leading-relaxed">{photoComment}</p>
+                ) : (
+                  <p className="text-sm text-gray-800 leading-relaxed">{briefTyped}<span className="animate-pulse text-amber-500">▌</span></p>
+                )}
               </div>
+              {!photoComment && <p className="text-[10px] font-black text-gray-300 mt-1 text-right">タップで次の話題 ›</p>}
             </div>
           </div>
         </div>
@@ -907,10 +950,10 @@ export default function MapTab({
                   <>
                     <button
                       onClick={() => godPhotoInputRef.current?.click()}
-                      disabled={chatSending}
-                      className="w-full text-[15px] font-black py-3 rounded-full transition-all cursor-pointer flex items-center justify-center gap-2 bg-[#2563eb] text-white hover:opacity-90 active:scale-[0.99] disabled:opacity-50"
+                      disabled={photoSending}
+                      className="w-full text-[15px] font-black py-3 rounded-full transition-all cursor-pointer flex items-center justify-center gap-2 bg-[#2563eb] text-white hover:opacity-90 active:scale-[0.99] disabled:opacity-60"
                     >
-                      <Camera className="w-4 h-4" />気になる風景・ものを撮る
+                      <Camera className="w-4 h-4" />{photoSending ? '神が眺めている…' : '気になる風景・ものを撮る'}
                     </button>
                     <p className="text-center text-[11px] text-gray-400 mt-1.5">道中で見つけたら撮ってみよう。{destGodName}が応えてくれる（任意）</p>
                   </>
@@ -1262,7 +1305,6 @@ export default function MapTab({
               <div className="px-3 pt-2.5 flex items-center gap-2 overflow-x-auto scrollbar-none">
                 <button onClick={() => startGodShare('self')} disabled={chatSending} className="flex-shrink-0 text-[12px] font-black text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-full disabled:opacity-40 cursor-pointer">⛩️ あなたのこと</button>
                 <button onClick={() => startGodShare('scene')} disabled={chatSending} className="flex-shrink-0 text-[12px] font-black text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-full disabled:opacity-40 cursor-pointer">👀 気になる風景</button>
-                <button onClick={() => godPhotoInputRef.current?.click()} disabled={chatSending} className="flex-shrink-0 text-[12px] font-black text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-full disabled:opacity-40 cursor-pointer flex items-center gap-1"><Camera className="w-3.5 h-3.5" />写真を撮る</button>
               </div>
             )}
             {/* 入力（会話に参加） */}
