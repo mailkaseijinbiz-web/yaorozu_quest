@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, NotebookPen, CalendarDays, Stamp } from 'lucide-react';
+import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark, Crown, NotebookPen, CalendarDays, Volume2, Stamp } from 'lucide-react';
 import { Spot, Agent, User, db, isVerifiedSpot, isQuotaError, type UgcVisibility } from '../lib/db';
 import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
@@ -13,6 +13,9 @@ import { grantGoShuin, hasGoShuin, getGoShuinList } from '../lib/goshuin';
 import { getLevelInfo } from '../data/levels';
 import YaorozuSpirit from './YaorozuSpirit';
 import GoshuinCelebrate from './GoshuinCelebrate';
+import KataribePlayer from './KataribePlayer';
+import MeditationQuest from './MeditationQuest';
+import VintageCameraOverlay from './VintageCameraOverlay';
 
 interface Message {
   id: string;
@@ -91,6 +94,9 @@ function SpotDetailBody({
   // 詳細ページは「記録」（参拝の記録）がメイン。開いた直後は記録タブを表示する
   const [tab, setTab] = useState<'chat' | 'requests' | 'photos' | 'records'>('records');
   const [agent] = useState<Agent>(() => resolveAgent(spot));
+  const [isKataribeOpen, setIsKataribeOpen] = useState(false);
+  const [activeMeditation, setActiveMeditation] = useState<GodTask | null>(null);
+  const [isVintageCameraOpen, setIsVintageCameraOpen] = useState(false);
 
   // UGCで変化する状態（写真・楽しみ方）は db から都度読む
   const [photos, setPhotos] = useState<string[]>(() => db.getSpotPhotos(spot.id));
@@ -122,6 +128,10 @@ function SpotDetailBody({
   // クエスト写真の評価タスク
   const [evaluating, setEvaluating] = useState(false);
   const [evalIdx, setEvalIdx] = useState(0);
+
+  // 創世主設定
+  const [isCreatorModalOpen, setIsCreatorModalOpen] = useState(false);
+  const [creatorFirstMessage, setCreatorFirstMessage] = useState(agent.firstMessage || '');
 
   // チャット。会話履歴はスポット毎に localStorage で保持し、再訪時に続きから話せる
   // （純ローカル・直近20件。キーがスポット毎に動的なため SYNC_KEYS（クラウド同期）には含めない）。
@@ -412,8 +422,11 @@ function SpotDetailBody({
       flashToast(result === 'copied' ? `🔗 リンクをコピー！ +${task.reward}徳` : `📣 シェアしました！ +${task.reward}徳`);
       onChanged?.();
       return;
-    } else if (task.type === 'walk' || task.type === 'meditate') {
-      // 散歩／瞑想：その場で達成し、未解決の煩悩を一つ手放す（覚り+1）
+    } else if (task.type === 'meditate') {
+      setActiveMeditation(task);
+      return;
+    } else if (task.type === 'walk') {
+      // 散歩：その場で達成し、未解決の煩悩を一つ手放す（覚り+1）
       const released = db.resolveBonnou(currentUser.id);
       db.completeGodTask(currentUser.id, spot.id, task.reward);
       db.recordTaskDone(currentUser.id, task.type, spot.id, task.reward);
@@ -434,6 +447,18 @@ function SpotDetailBody({
       onChanged?.();
     }
     markDone(task);
+  };
+
+  const handleMeditationComplete = () => {
+    if (!activeMeditation) return;
+    const task = activeMeditation;
+    setActiveMeditation(null);
+    const released = db.resolveBonnou(currentUser.id);
+    db.completeGodTask(currentUser.id, spot.id, task.reward);
+    db.recordTaskDone(currentUser.id, task.type, spot.id, task.reward);
+    markDone(task);
+    flashToast(released ? `${task.icon} 煩悩を一つ手放した！ +${task.reward}徳` : `${task.icon} 深き静寂を得た！ +${task.reward}徳`);
+    onChanged?.();
   };
 
   // 投稿モーダルの送信（テキストまたは写真で投稿。タスク種別ごとに世界の値を調整する）
@@ -594,6 +619,9 @@ function SpotDetailBody({
       const data = await res.json();
       db.trackApiCall('ai_chat');
       setMessages((prev) => [...prev, { id: `a-${Date.now()}`, sender: 'agent', text: data.response, createdAt: new Date().toISOString(), mode: data.mode }]);
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate([15]); // 返信が届いた軽いトントンという感触
+      }
     } catch {
       setMessages((prev) => [...prev, { id: `err-${Date.now()}`, sender: 'agent', text: '神聖なる通信に乱れが生じた。しばし時をおいて、再び問いかけてくれ。', createdAt: new Date().toISOString() }]);
     } finally {
@@ -648,6 +676,15 @@ function SpotDetailBody({
               <MapPin className="w-3 h-3" />
               <span className="text-[13px]">{address}</span>
             </div>
+          )}
+          {ugc.length > 0 && (
+            <button
+              onClick={() => setIsKataribeOpen(true)}
+              className="mt-2 flex items-center gap-1.5 text-[12px] font-black bg-white/20 backdrop-blur-md px-3 py-1.5 rounded-full hover:bg-white/30 transition-all cursor-pointer shadow-sm border border-white/30"
+            >
+              <Volume2 className="w-3.5 h-3.5" />
+              <span>語り部に耳を澄ます ({ugc.length})</span>
+            </button>
           )}
         </div>
       </div>
@@ -718,13 +755,19 @@ function SpotDetailBody({
                 <div className="flex items-center gap-2">
                   {recPhotos.length < MAX_RECORD_PHOTOS && (
                     <button
-                      onClick={() => recPhotoInputRef.current?.click()}
+                      onClick={() => {
+                        if (spot.vintagePhotoUrl) {
+                          setIsVintageCameraOpen(true);
+                        } else {
+                          recPhotoInputRef.current?.click();
+                        }
+                      }}
                       className="flex items-center gap-1 text-[12px] font-black text-gray-600 bg-white border border-black/10 px-3 py-1.5 rounded-full cursor-pointer"
                     >
                       <Camera className="w-3.5 h-3.5" />写真を添える（{recPhotos.length}/{MAX_RECORD_PHOTOS}）
                     </button>
                   )}
-                  <input ref={recPhotoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={onPickRecPhoto} />
+                  <input ref={recPhotoInputRef} type="file" accept="image/*" multiple capture="environment" className="hidden" onChange={onPickRecPhoto} />
                   <button
                     onClick={saveSpotRecord}
                     disabled={recSaving}
@@ -798,6 +841,13 @@ function SpotDetailBody({
               </ul>
             )}
           </div>
+          {spot.creatorId === currentUser.id && (
+            <div className="mt-4 p-4 bg-amber-50/50 border border-gold/30 rounded-2xl">
+              <h4 className="text-[13px] font-black text-amber-800 flex items-center gap-1.5"><Crown className="w-4 h-4 text-gold"/>あなたは創世主です</h4>
+              <p className="text-[11px] text-amber-700/80 mt-1 mb-3 leading-relaxed">この地に宿る神の振る舞いを設定し、訪れる巡礼者を導きましょう。</p>
+              <button onClick={() => setIsCreatorModalOpen(true)} className="w-full bg-gold text-white text-xs font-black py-2.5 rounded-xl shadow-sm hover:opacity-90 transition-all cursor-pointer">神をカスタマイズする</button>
+            </div>
+          )}
         </div>
       ) : tab === 'photos' ? (
         /* ── みんなの写真（タブ） ── */
@@ -1074,6 +1124,34 @@ function SpotDetailBody({
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[3100] bg-gray-900 text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-lg animate-in">
           {toast}
         </div>
+      )}
+
+      {/* ── 語り部プレーヤー（オーバーレイ） ── */}
+      {isKataribeOpen && (
+        <KataribePlayer ugcList={ugc} onClose={() => setIsKataribeOpen(false)} />
+      )}
+
+      {/* ── 沈黙の祈りクエスト（オーバーレイ） ── */}
+      {activeMeditation && (
+        <MeditationQuest
+          godName={agent.name}
+          godEmoji={godEmoji}
+          requiredSeconds={20} // プロトタイプのため20秒
+          onComplete={handleMeditationComplete}
+          onCancel={() => setActiveMeditation(null)}
+        />
+      )}
+
+      {/* ── AR透かしカメラ（オーバーレイ） ── */}
+      {isVintageCameraOpen && (
+        <VintageCameraOverlay
+          vintageImageUrl={spot.vintagePhotoUrl}
+          onCapture={(base64) => {
+            setRecPhoto(base64);
+            setIsVintageCameraOpen(false);
+          }}
+          onCancel={() => setIsVintageCameraOpen(false)}
+        />
       )}
     </div>
   );

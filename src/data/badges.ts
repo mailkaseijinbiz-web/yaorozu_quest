@@ -18,7 +18,7 @@ export interface BadgeDef {
   /** 達成に必要な値 */
   target: number;
   /** カテゴリ（表示グルーピング用） */
-  group: '訪問' | '写真' | '点検' | 'フォロワー' | '徳' | '日参';
+  group: '訪問' | '写真' | '点検' | 'フォロワー' | '徳' | '日参' | 'コンプリート';
 }
 
 export const BADGES: BadgeDef[] = [
@@ -46,6 +46,31 @@ export const BADGES: BadgeDef[] = [
   // ── 日参（参拝ストリーク。最長記録で判定するので、途切れても獲得済みバッジは戻らない） ──
   { id: 'streak-7', icon: '🔥', name: '七日詣', desc: '7日連続で徳を積んだ', group: '日参', target: 7, current: () => db.getStreakInfo().longest },
   { id: 'streak-30', icon: '⛩️', name: '月参り', desc: '30日連続で徳を積んだ', group: '日参', target: 30, current: () => db.getStreakInfo().longest },
+
+  // ── コンプリート ──
+  { 
+    id: 'comp-tokyo10', 
+    icon: '🌸', 
+    name: '東京十社の覇者', 
+    desc: '東京十社をすべて参拝した', 
+    group: 'コンプリート', 
+    target: 10, 
+    current: (s) => {
+      const visitedNames = s.visitedSpotIds.map(id => db.getSpot(id)?.name || '');
+      let count = 0;
+      if (visitedNames.some(n => n.includes('根津'))) count++;
+      if (visitedNames.some(n => n.includes('芝大神宮'))) count++;
+      if (visitedNames.some(n => n.includes('神田'))) count++; // 神田明神 / 神田神社
+      if (visitedNames.some(n => n.includes('日枝'))) count++; // 赤坂日枝神社など
+      if (visitedNames.some(n => n.includes('亀戸天神'))) count++;
+      if (visitedNames.some(n => n.includes('白山神社'))) count++;
+      if (visitedNames.some(n => n.includes('品川神社'))) count++;
+      if (visitedNames.some(n => n.includes('富岡八幡'))) count++;
+      if (visitedNames.some(n => n.includes('赤坂氷川'))) count++;
+      if (visitedNames.some(n => n.includes('王子神社'))) count++;
+      return count;
+    }
+  },
 ];
 
 export interface BadgeState extends BadgeDef {

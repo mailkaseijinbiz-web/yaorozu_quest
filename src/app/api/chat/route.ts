@@ -207,7 +207,7 @@ function getGuideFallbackResponse(message: string, spot?: SpotContext): string {
 
 export async function POST(request: Request) {
   try {
-    const { message, history, spotId, agent, ugc, affiliates, userName, spot, userContext, location } = await request.json();
+    const { message, history, spotId, agent, ugc, affiliates, userName, spot, localTime, userContext, location } = await request.json();
 
     const apiKey = process.env.OPENAI_API_KEY;
     const geminiKey = process.env.GEMINI_API_KEY;
@@ -282,15 +282,18 @@ ${nearbyTrivia.map((t) => `- ${t.title} — ${t.body}`).join('\n')}`
 
     const fullSystemPrompt = `${baseSystemPrompt}
 
-Below is the visitor-contributed local knowledge (UGC) for your spot. You must use this information to answer questions where appropriate:
+Below is the visitor-contributed local knowledge (UGC) for your spot. This is the collective memory of past pilgrims. 
+Whenever possible, use this information not just to answer questions, but to inspire the current user to look closer. For example, say things like "A past pilgrim named [Name] noticed [Detail]. Can you find it too?" or use it as a hint for their exploration.
 ${ugcContext || 'No UGC posts yet.'}
 
 Below are relevant local affiliate recommendations. If the user asks about food, restaurants, hotels, accommodation, experiences, or activities in the area, naturally suggest ONE appropriate recommendation from this list in your persona:
 ${affiliateContext || 'No affiliate offers available.'}${userContextSection}${triviaSection}${topicSection}
 
 User's display name: ${userName || '巡礼者'}
+Current local time: ${localTime || '不明'}
 
-Remember: Answer in character. Aim for about 200 Japanese characters — keep a conversational tempo, go deep on ONE topic rather than listing many, and when natural, end with a short question or invitation that keeps the walk going. Embed affiliate URLs naturally in your persona style.`;
+Remember: Answer in character. Aim for about 200 Japanese characters — keep a conversational tempo, go deep on ONE topic rather than listing many, and when natural, end with a short question or invitation that keeps the walk going. Embed affiliate URLs naturally in your persona style.
+Consider the current local time in your response if appropriate (e.g. greeting them for morning/evening, or commenting on the night).`;
 
     // ── Gemini を優先（GEMINI_API_KEY がある場合）──
     if (geminiKey) {

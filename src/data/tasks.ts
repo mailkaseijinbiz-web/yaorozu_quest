@@ -92,6 +92,9 @@ export interface Task {
 
   /** resolveIssue 用。参照する課題 */
   issueRef?: IssueRef;
+
+  /** UGCから派生したタスクの場合、その元となったUGCのID（利他の配当用） */
+  sourceUgcId?: string;
 }
 
 /** クエスト = タスクの集まり（旧 Challenge）。 */
@@ -131,20 +134,20 @@ export const TASK_CATALOG: Record<TaskType, CatalogTask> = {
     kind: 'sense',
     icon: '🌡️',
     label: '今の様子を伝える',
-    title: '場所のコンテキストを集める',
+    title: 'この場の空気を観察する',
     reward: 25,
-    call: (p) => `今の${p}の様子はどうじゃ？　混み具合・雰囲気・営業の様子を、わしに教えておくれ。`,
-    murmur: 'のう、今この場の様子を教えておくれ…',
+    call: (p) => `今の${p}はどうじゃ？　目に見えるもの、聞こえる音、肌で感じる空気を、ありのままに教えておくれ。`,
+    murmur: 'のう、この場の空気を教えておくれ…',
   },
   photo: {
     type: 'photo',
     kind: 'sense',
     icon: '📸',
-    label: '写真を投稿',
-    title: '佳き一枚を奉納',
+    label: '光景を切り取る',
+    title: '誰も気付かぬ一枚を奉納',
     reward: 30,
-    call: (p) => `おお、旅の者よ。${p}の佳き景色を一枚、撮って奉納してはくれぬか。`,
-    murmur: 'そなたよ、佳き一枚を撮っておくれ…',
+    call: (p) => `おお、旅の者よ。${p}でそなたの心を動かした「見落とされがちな光景」を一枚、切り取って奉納してはくれぬか。`,
+    murmur: 'そなたよ、この地の隠れた姿を切り取っておくれ…',
   },
   evaluate: {
     type: 'evaluate',
@@ -220,11 +223,11 @@ export const TASK_CATALOG: Record<TaskType, CatalogTask> = {
     type: 'visit',
     kind: 'sense',
     icon: '📍',
-    label: 'この地を訪れる',
-    title: '現地に立つ',
+    label: 'この地に立つ',
+    title: 'その場の空気を味わう',
     reward: 10,
-    call: (p) => `まずは${p}へ足を運び、この地の気を肌で感じておくれ。`,
-    murmur: 'まずは、この地へ足を運んでおくれ…',
+    call: (p) => `まずは${p}へ足を運び、ただ静かに深呼吸をして、そこにある気配を肌で感じておくれ。`,
+    murmur: 'まずは、この地に立ち深呼吸をしておくれ…',
   },
   resolveIssue: {
     type: 'resolveIssue',
@@ -334,9 +337,9 @@ export const TASK_CATALOG: Record<TaskType, CatalogTask> = {
     murmur: 'のう、今の天気を教えておくれ…',
   },
   discover: {
-    type: 'discover', kind: 'sense', icon: '🔎', label: '魅力を発見', title: '隠れた魅力を見つける', reward: 35,
-    call: (p) => `${p}で、まだ知られておらぬ隠れた魅力を一つ見つけて報せておくれ。それが新たな価値となる。`,
-    murmur: 'のう、隠れた魅力を見つけておくれ…',
+    type: 'discover', kind: 'sense', icon: '🔎', label: '秘密を発見', title: '誰も気付かぬ秘密を見つける', reward: 35,
+    call: (p) => `看板の裏、建物の隙間、足元の石…誰も気付かぬ${p}の秘密を一つ見つけて報せておくれ。それが新たな価値となる。`,
+    murmur: 'のう、この地の隠れた秘密を見つけておくれ…',
   },
   wish: {
     type: 'wish', kind: 'sense', icon: '🎋', label: '願いを書く', title: '願いを書いて奉納する', reward: 20,

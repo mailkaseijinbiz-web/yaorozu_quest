@@ -87,6 +87,10 @@ export default function ChatTab({
           greeting = `私はこのスポットを守護する「${agent.name}」です。何が知りたいですか？`;
       }
 
+      if (agent.firstMessage && agent.firstMessage.trim().length > 0) {
+        greeting = agent.firstMessage;
+      }
+
       setMessages((prev) => ({
         ...prev,
         [activeSpotId]: [
@@ -140,6 +144,7 @@ export default function ChatTab({
           ugc,
           affiliates,
           userName: currentUser.displayName,
+          localTime: new Date().toLocaleString('ja-JP', { hour12: false, month: 'short', day: 'numeric', hour: 'numeric', minute: 'numeric' })
         }),
       });
 

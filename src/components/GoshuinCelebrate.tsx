@@ -9,7 +9,7 @@
 // オンボーディングは全画面なので 'fixed'。
 // -----------------------------------------------------------------------------
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import YaorozuSpirit from './YaorozuSpirit';
 
 export type GoshuinVariant = 'near' | 'far' | 'origin';

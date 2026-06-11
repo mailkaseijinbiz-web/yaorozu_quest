@@ -45,6 +45,7 @@ interface LeafletMapProps {
   cardFocus?: { lat: number; lng: number } | null; // インタラクティブカードが指す場所
   cardFocusToken?: number; // 値が変わるとカードの場所へ地図を寄せる（スワイプ連動）
   searchPin?: { lat: number; lng: number; name: string; token: number } | null; // 場所検索の結果（token が変わると再フォーカス）
+  onMapLongPress?: (loc: { lat: number; lng: number }) => void; // マップの長押し
   deviceHeading?: number | null; // 端末の向き（方位磁針, 北=0時計回り）。親で取得して配る
 }
 
@@ -64,6 +65,7 @@ export default function LeafletMap({
   cardFocus,
   cardFocusToken,
   searchPin = null,
+  onMapLongPress,
   deviceHeading = null,
 }: LeafletMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -79,6 +81,8 @@ export default function LeafletMap({
   // onMapMove を ref 化してクロージャ内から最新コールバックを呼べるようにする
   const onMapMoveRef = useRef(onMapMove);
   onMapMoveRef.current = onMapMove;
+  const onMapLongPressRef = useRef(onMapLongPress);
+  onMapLongPressRef.current = onMapLongPress;
   // 選択中の場を再タップしたときの詳細表示コールバック（マーカー生成クロージャから最新を呼ぶ）
   const onOpenDetailRef = useRef(onOpenDetail);
   onOpenDetailRef.current = onOpenDetail;
@@ -122,6 +126,11 @@ export default function LeafletMap({
         const c = map.getCenter();
         onMapMoveRef.current?.({ lat: c.lat, lng: c.lng });
       }
+    });
+
+    // 長押し（PCの右クリック、スマホの長押し）で任意の場所を処理する
+    map.on('contextmenu', (e: L.LeafletMouseEvent) => {
+      onMapLongPressRef.current?.({ lat: e.latlng.lat, lng: e.latlng.lng });
     });
 
     // コンテナの実寸が確定/変化したら投影をやり直す。
@@ -402,8 +411,18 @@ export default function LeafletMap({
       }
       const borderCls = isActive ? 'border-[#2563eb]' : 'border-[#2563eb]/40';
 
+      // ── UGCによるオーラ演出（他人の貢献の可視化） ──
+      const ugc = ugcCounts[spot.id] || 0;
+      // 貢献度に応じてオーラの強さ（ぼかし幅）と色（少し赤みを帯びた黄金色）を計算
+      const auraShadow = ugc > 0 
+        ? `filter: drop-shadow(0 0 ${Math.min(4 + ugc * 3, 24)}px rgba(234, 179, 8, ${Math.min(0.5 + ugc * 0.1, 1)}));` 
+        : '';
+      const auraCircleShadow = ugc > 0
+        ? `box-shadow: 0 0 ${Math.min(8 + ugc * 4, 30)}px rgba(234, 179, 8, ${Math.min(0.6 + ugc * 0.1, 1)}), 0 2px 10px rgba(37,99,235,.55);`
+        : `box-shadow: 0 2px 10px rgba(37,99,235,.55);`;
+
       const activeCircleHtml = `
-          <div style="width:40px;height:40px;border-radius:9999px;background:#2563eb;border:3px solid #fff;box-shadow:0 2px 10px rgba(37,99,235,.55);display:flex;align-items:center;justify-content:center;font-size:21px;line-height:1;">${iconEmoji}</div>
+          <div style="width:40px;height:40px;border-radius:9999px;background:#2563eb;border:3px solid #fff;${auraCircleShadow}display:flex;align-items:center;justify-content:center;font-size:21px;line-height:1;transition:box-shadow 0.3s ease;">${iconEmoji}</div>
           <span class="map-spot-name map-spot-name-active" style="margin-top:3px;">${spot.name}</span>`;
 
       const spotHtml = isActive && showBubble
@@ -431,13 +450,15 @@ export default function LeafletMap({
             <span class="spot-voice text-[11px] font-bold leading-snug text-gray-800" data-spotid="${spot.id}" data-vi="${voiceIdx}" style="word-break:break-word;transition:opacity 0.3s ease;">${voice}</span>
           </div>
           <div class="${isActive ? 'border-r-2 border-b-2' : 'border-r border-b'} ${borderCls} -mt-1.5 rotate-45" style="width:10px;height:10px;background:#ffffff;margin-bottom:20px;"></div>
-          <span class="map-spot-name ${isActive ? 'map-spot-name-active' : ''}">${spot.name}</span>
+          <div style="${auraShadow}transition:filter 0.3s ease;">
+            <span class="map-spot-name ${isActive ? 'map-spot-name-active' : ''}">${spot.name}</span>
+          </div>
         </div>
       `
         : `
         <div class="relative flex flex-col items-center">
-          <div style="font-size:19px;line-height:1;filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.5));">${catEmoji}</div>
-          <span class="map-spot-name">${spot.name}</span>
+          <div style="font-size:19px;line-height:1;${auraShadow}transition:filter 0.3s ease;">${catEmoji}</div>
+          <span class="map-spot-name" style="${auraShadow}">${spot.name}</span>
         </div>
       `;
 
