@@ -9,7 +9,7 @@ import { pullSnapshot, setSyncUser } from '../lib/cloud-sync';
 import { isAuthConfigured, getSupabaseBrowser, signInWithProvider, signOutAuth, profileFromUser, type AuthProfile } from '../lib/supabase-browser';
 import { distanceKm, destinationPoint } from '../lib/geo';
 import HomeTab from '../components/HomeTab';
-import MapTab from '../components/MapTab';
+import MapTab, { type QuestPhoto } from '../components/MapTab';
 import RecordTab from '../components/RecordTab';
 import SpotDetail from '../components/SpotDetail';
 import GoshuinBookModal from '../components/GoshuinBookModal';
@@ -90,6 +90,8 @@ export default function HomePage() {
   // クエスト中に通ったルートの軌跡。MapTab ではなくここ（常時マウント）で保持し、タブ遷移でも消えない。
   const [questTrail, setQuestTrail] = useState<{ lat: number; lng: number }[]>([]);
   const questTrailRef = useRef<{ lat: number; lng: number }[]>([]);
+  // クエスト中に撮った道中写真（地図にマーク・タブ遷移でも保持）
+  const [questPhotos, setQuestPhotos] = useState<QuestPhoto[]>([]);
   const deviceHeading = useDeviceHeading(); // 端末の向き（方位磁針）。地図のナビ矢印・現在地マーカーで共有
 
   // 詳細ページをブラウザの「戻る」で閉じられるように履歴に積む
@@ -113,7 +115,7 @@ export default function HomePage() {
   const [creatorProfiles, setCreatorProfiles] = useState<{ [userId: string]: UserType }>({});
   const [userLocation, setUserLocation] = useState({ lat: 35.6580, lng: 139.7514 });
   // クエスト開始/切替で軌跡をリセット。クエスト中は現在地が約8m以上動くたびに点を足す。
-  useEffect(() => { questTrailRef.current = []; setQuestTrail([]); }, [activeChallengeId]);
+  useEffect(() => { questTrailRef.current = []; setQuestTrail([]); setQuestPhotos([]); }, [activeChallengeId]);
   useEffect(() => {
     if (!activeChallengeId) return;
     const pts = questTrailRef.current;
@@ -831,6 +833,8 @@ export default function HomePage() {
                     refreshDatabaseStates();
                   }}
                   trail={questTrail}
+                  questPhotos={questPhotos}
+                  onAddQuestPhoto={(p) => setQuestPhotos((prev) => [...prev, p])}
                   onCompleteChallenge={() => {
                     if (!activeChallengeId || !currentUser) return;
                     const ch = db.getQuest(activeChallengeId);

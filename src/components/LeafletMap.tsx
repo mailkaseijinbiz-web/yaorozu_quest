@@ -40,6 +40,8 @@ interface LeafletMapProps {
   goal?: { lat: number; lng: number; name: string; godEmoji?: string } | null; // チャレンジのゴール（godEmoji=挑戦中の神のアイコン）
   onGoalTap?: () => void; // クエスト中、目的地アイコンのタップ（目的地の詳細を開く）
   trail?: { lat: number; lng: number }[]; // クエスト中に通ったルートの軌跡（ポリラインで描く）
+  photoMarkers?: { id: string; lat: number; lng: number; photo: string }[]; // クエスト中に撮った写真のマーク
+  onPhotoMarkerTap?: (id: string) => void; // 写真マークのタップ（振り返り）
   controlsBottom?: number; // 現在地ボタンの下端からの位置（下部オーバーレイの上端+余白）
   focusGoalToken?: number; // 値が変わると目的地を地図中央へ寄せる
   hideControls?: boolean; // 導入表示中は現在地ボタンを隠し、解除時にふわっと出す
@@ -62,6 +64,8 @@ export default function LeafletMap({
   goal,
   onGoalTap,
   trail,
+  photoMarkers,
+  onPhotoMarkerTap,
   controlsBottom = 210,
   focusGoalToken,
   hideControls = false,
@@ -78,6 +82,9 @@ export default function LeafletMap({
   const markersRef = useRef<{ [spotId: string]: L.Marker }>({});
   const goalMarkerRef = useRef<L.Marker | null>(null);
   const trailLayerRef = useRef<L.Polyline | null>(null);
+  const photoLayerRef = useRef<L.LayerGroup | null>(null);
+  const onPhotoMarkerTapRef = useRef(onPhotoMarkerTap);
+  onPhotoMarkerTapRef.current = onPhotoMarkerTap;
   // フキダシのつぶやきを動的に切り替えるため、スポット毎の声リストを保持
   const voicesRef = useRef<{ [spotId: string]: string[] }>({});
   // 最新の現在地を参照（再生成を避けつつ、ゴール演出で使う）
@@ -319,6 +326,24 @@ export default function LeafletMap({
       trailLayerRef.current.setLatLngs(pts);
     }
   }, [trail]);
+
+  // 2.7 クエスト中に撮った写真のマーク（サムネのピン。タップで振り返り）
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!photoLayerRef.current) photoLayerRef.current = L.layerGroup().addTo(map);
+    const layer = photoLayerRef.current;
+    layer.clearLayers();
+    for (const p of photoMarkers ?? []) {
+      const html = `<div style="width:38px;height:38px;border-radius:10px;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4);overflow:hidden;background:#fff;cursor:pointer;">
+        <img src="${p.photo}" style="width:100%;height:100%;object-fit:cover;" />
+      </div>`;
+      L.marker([p.lat, p.lng], {
+        icon: L.divIcon({ html, className: 'custom-photo-icon', iconSize: [38, 38], iconAnchor: [19, 19] }),
+        zIndexOffset: 1000,
+      }).addTo(layer).on('click', () => onPhotoMarkerTapRef.current?.(p.id));
+    }
+  }, [photoMarkers]);
 
   // 「次の目的地」タップ：目的地を地図中央へ寄せる（初回トークンは無視）
   const focusInitRef = useRef(true);
