@@ -227,7 +227,7 @@ export default function LeafletMap({
         </svg>
 
         <!-- Blue Dot -->
-        <div style="position:absolute;left:22px;top:22px;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:#1a73e8;border:2px solid #ffffff;box-shadow:0 1px 4px rgba(0,0,0,0.3);z-index:2;pointer-events:none;"></div>
+        <div style="position:absolute;left:22px;top:22px;transform:translate(-50%,-50%);width:20px;height:20px;border-radius:50%;background:#1a73e8;border:3px solid #ffffff;box-shadow:0 1px 4px rgba(0,0,0,0.3);z-index:2;pointer-events:none;"></div>
       </div>
     `;
 

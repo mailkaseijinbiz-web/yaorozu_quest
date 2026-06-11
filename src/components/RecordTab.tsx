@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Search, MapPin, Camera, CalendarDays, Trash2, Check, Stamp, NotebookPen, X, Pencil } from 'lucide-react';
 import { Spot, User as UserType, db } from '../lib/db';
 import { distanceKm } from '../lib/geo';
@@ -108,6 +108,16 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
     [spots, userLocation.lat, userLocation.lng]
   );
   const [nearbyShown, setNearbyShown] = useState(3);
+
+  // すぐ入力できるよう、最寄りの寺社のフォームを初回に自動で開く（その後の手動操作は妨げない）。
+  const autoSelectedRef = useRef(false);
+  useEffect(() => {
+    if (effectiveTab !== 'visits' || autoSelectedRef.current) return;
+    if (!selected && !query && nearby.length > 0) {
+      setSelected(nearby[0].s);
+      autoSelectedRef.current = true;
+    }
+  }, [effectiveTab, nearby, selected, query]);
 
   // 検索（名前・神名・カテゴリ）。近い順に最大6件。
   const q = query.trim().toLowerCase();
@@ -653,7 +663,7 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
       {editingRec && (
         <div className="fixed inset-0 z-[4000] bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setEditingRec(null)}>
           <div
-            className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-xl max-h-[88vh] overflow-y-auto"
+            className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-xl max-h-[88%] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between p-4 border-b border-black/5 sticky top-0 bg-white">

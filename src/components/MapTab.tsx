@@ -842,7 +842,7 @@ export default function MapTab({
               transition: slideW ? 'transform .3s cubic-bezier(.22,.61,.36,1)' : 'none',
             }}
           >
-            {nearSpotList.map((s, i) => {
+            {nearSpotList.map((s) => {
               const d = distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude);
               const distVal = d < 1 ? `${Math.round(d * 1000)}` : d.toFixed(1);
               const distUnit = d < 1 ? 'm' : 'km';
@@ -871,7 +871,7 @@ export default function MapTab({
                       )}
                     </div>
                     <div className="flex-1 min-w-0 py-3">
-                      {/* めくれることはドットインジケータと右の覗きカードで伝わるため、ラベル・スワイプ表記は出さない */}
+                      {/* めくれることは右の覗きカードで伝わるため、ラベル・スワイプ表記は出さない */}
                       <h4 className="text-sm font-black text-gray-900 truncate">{s.name}</h4>
                       {s.godName && (
                         <p className="text-[11px] font-bold text-gray-400 truncate mt-0.5">
@@ -886,14 +886,6 @@ export default function MapTab({
                         {held && <span className="text-[13px] font-black text-shrine-red flex items-center gap-0.5">🔴 御朱印</span>}
                         {ugc > 0 && <span className="text-[13px] flex items-center gap-0.5 text-gray-400"><Camera className="w-3 h-3" />{ugc}</span>}
                       </div>
-                      {/* ページインジケータ（ドット） */}
-                      {nearSpotList.length > 1 && (
-                        <div className="flex items-center gap-1 mt-1.5">
-                          {nearSpotList.map((_, j) => (
-                            <span key={j} className={`h-1 rounded-full transition-all ${j === i ? 'w-3 bg-[#2563eb]' : 'w-1 bg-gray-300'}`} />
-                          ))}
-                        </div>
-                      )}
                     </div>
                     <div className="self-center pr-3 flex-shrink-0 text-[#2563eb]"><ChevronRight className="w-5 h-5" /></div>
                   </div>

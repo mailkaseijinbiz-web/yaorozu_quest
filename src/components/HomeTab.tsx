@@ -203,7 +203,8 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
           {renderItems.map(({ ch, entering, exiting }) => {
             const diff = difficultyLabel(ch.difficulty);
             const qSpot = ch.spotId ? db.getSpot(ch.spotId) : null; // 神名＋地形バッジ用
-            const ter = qSpot ? terrainLabel(qSpot.terrain) : null;
+            const terRaw = qSpot ? terrainLabel(qSpot.terrain) : null;
+            const ter = terRaw && terRaw.label !== '平坦' ? terRaw : null; // 「平坦」は情報量が少ないので出さない
             const completed = progress.completed.includes(ch.id);
             const active = progress.activeId === ch.id; // 現在挑戦中
             const distToGoal = distanceKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng);

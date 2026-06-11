@@ -1228,14 +1228,14 @@ export default function SpotDetail(props: SpotDetailProps) {
   const { spot } = props;
   const [entered, setEntered] = useState(false);   // スライドイン開始フラグ
   const [leaving, setLeaving] = useState(false);   // スライドアウト中
-  const [bodyReady, setBodyReady] = useState(false); // 重い本体をマウントしてよいか
+  // ファーストビュー（記録タブ）を瞬時に出すため、本体は最初からマウントする。
+  // スライドは transform のみ（コンポジタ処理）なので、本体と同時でも滑らかに動く。
+  const [bodyReady, setBodyReady] = useState(true);
 
   // マウント後に2フレーム待ってからスライド開始（初期 translateX(100%) を確実に描画させる）。
-  // transitionend が来ない環境向けに、保険として一定時間後に本体をマウントする。
   useEffect(() => {
     const raf = requestAnimationFrame(() => requestAnimationFrame(() => setEntered(true)));
-    const fallback = setTimeout(() => setBodyReady(true), 240);
-    return () => { cancelAnimationFrame(raf); clearTimeout(fallback); };
+    return () => { cancelAnimationFrame(raf); };
   }, []);
 
   // 右へスライドアウトしてから実際に閉じる（onClose は履歴 back 連動）
