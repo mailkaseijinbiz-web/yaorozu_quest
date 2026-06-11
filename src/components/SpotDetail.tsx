@@ -169,8 +169,10 @@ function SpotDetailBody({
   };
   const evalTarget = Math.min(3, evalPhotos.length);
 
-  // このスポットに最も近い未制覇クエスト（会話で能動的に挑戦を促す）
+  // このスポットに最も近い未制覇クエスト（会話で能動的に挑戦を促す）。
+  // 全クエストの読み出し＋距離ソートは初期表示には不要なので、会話タブを開いてから計算する
   const nearbyChallenge = useMemo(() => {
+    if (tab !== 'chat') return null;
     const prog = db.getChallengeProgress();
     const completed = new Set(prog.completed);
     return db.getAllQuests()
@@ -178,7 +180,7 @@ function SpotDetailBody({
       .map((c) => ({ c, d: distanceKm(spot.latitude, spot.longitude, c.goalLat, c.goalLng) }))
       .sort((a, b) => a.d - b.d)[0]?.c ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spot.id]);
+  }, [spot.id, tab]);
   const heroPhoto = photos[0] || spot.imageUrl || '';
 
   // 写真のモーダル拡大表示（ヒーロー・みんなの写真・記録の写真で共用）
@@ -1041,12 +1043,21 @@ export default function SpotDetail(props: SpotDetailProps) {
   const [bodyReady, setBodyReady] = useState(false); // 重い本体をマウントしてよいか
 
   // マウント後に2フレーム待ってからスライド開始（初期 translateX(100%) を確実に描画させる）。
-  // transitionend が来ない環境向けに、保険として一定時間後に本体をマウントする。
   useEffect(() => {
     const raf = requestAnimationFrame(() => requestAnimationFrame(() => setEntered(true)));
-    const fallback = setTimeout(() => setBodyReady(true), 420);
-    return () => { cancelAnimationFrame(raf); clearTimeout(fallback); };
+    return () => cancelAnimationFrame(raf);
   }, []);
+
+  // 本体はスライド開始の次フレームでマウントする。スライドは transform のみ＝
+  // コンポジタ駆動なので、本体構築の JS と並行しても遷移は止まらない。
+  // （以前は transitionend（約300ms後）まで待っていたが、スポットのキャッシュ化・
+  //   評価写真の遅延収集で本体が軽くなったため、滑り出しと同時に組み立てて
+  //   コンテンツが見えるまでの時間を短縮する）
+  useEffect(() => {
+    if (!entered) return;
+    const raf = requestAnimationFrame(() => setBodyReady(true));
+    return () => cancelAnimationFrame(raf);
+  }, [entered]);
 
   // 右へスライドアウトしてから実際に閉じる（onClose は履歴 back 連動）
   const handleClose = () => {
@@ -1063,9 +1074,6 @@ export default function SpotDetail(props: SpotDetailProps) {
       style={{
         transform: entered && !leaving ? 'translateX(0)' : 'translateX(100%)',
         transition: 'transform 300ms cubic-bezier(0.22, 1, 0.36, 1)',
-      }}
-      onTransitionEnd={(e) => {
-        if (e.propertyName === 'transform' && entered && !leaving) setBodyReady(true);
       }}
     >
       {bodyReady ? (
