@@ -135,7 +135,7 @@ export default function MapTab({
   // ── 場所検索：登録スポットの即時検索＋任意の場所のジオコーディング（Nominatim） ──
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState('');
-  const [geoResults, setGeoResults] = useState<{ name: string; detail: string; lat: number; lng: number }[]>([]);
+  const [geoResults, setGeoResults] = useState<{ name: string; detail: string; lat: number; lng: number; d: number }[]>([]);
   const [geoLoading, setGeoLoading] = useState(false);
   // 検索結果の任意地点に立てる赤ピン（token で同じ場所への再フォーカスも可能に）
   const [searchPin, setSearchPin] = useState<{ lat: number; lng: number; name: string; token: number } | null>(null);
@@ -158,25 +158,35 @@ export default function MapTab({
     const ctrl = new AbortController();
     const id = setTimeout(async () => {
       try {
+        // 現在地まわりの viewbox を渡して「近い場所」を優先（bounded=0=範囲外も必要なら返す）
+        const { lat, lng } = userLocation;
+        const box = `${lng - 0.35},${lat + 0.35},${lng + 0.35},${lat - 0.35}`;
         const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=jsonv2&accept-language=ja&countrycodes=jp&limit=5&q=${encodeURIComponent(text)}`,
+          `https://nominatim.openstreetmap.org/search?format=jsonv2&accept-language=ja&countrycodes=jp&limit=12&viewbox=${box}&bounded=0&q=${encodeURIComponent(text)}`,
           { signal: ctrl.signal },
         );
         const data = await res.json();
-        setGeoResults(
-          (Array.isArray(data) ? data : []).map((r: { name?: string; display_name: string; lat: string; lon: string }) => ({
+        const mapped = (Array.isArray(data) ? data : []).map((r: { name?: string; display_name: string; lat: string; lon: string }) => {
+          const la = parseFloat(r.lat), ln = parseFloat(r.lon);
+          return {
             name: r.name || r.display_name.split(',')[0],
             detail: r.display_name,
-            lat: parseFloat(r.lat),
-            lng: parseFloat(r.lon),
-          })),
-        );
+            lat: la,
+            lng: ln,
+            d: distanceKm(userLocation.lat, userLocation.lng, la, ln),
+          };
+        });
+        // 近い順に並べ、上位6件の候補を出す
+        mapped.sort((a, b) => a.d - b.d);
+        setGeoResults(mapped.slice(0, 6));
         setGeoLoading(false);
       } catch {
         if (!ctrl.signal.aborted) { setGeoResults([]); setGeoLoading(false); }
       }
     }, 450);
     return () => { clearTimeout(id); ctrl.abort(); };
+    // 現在地は入力時点の値を使う（GPS更新ごとの再検索は避ける）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQ]);
 
   const closeSearch = () => { setSearchOpen(false); setSearchQ(''); setGeoResults([]); };
@@ -880,6 +890,9 @@ export default function MapTab({
                       <span className="flex-1 min-w-0">
                         <span className="block text-[13px] font-bold text-gray-800 truncate">{r.name}</span>
                         <span className="block text-[11px] text-gray-400 truncate">{r.detail}</span>
+                      </span>
+                      <span className="text-[11px] font-bold text-rose-500 tabular-nums flex-shrink-0">
+                        {r.d < 1 ? `${Math.round(r.d * 1000)}m` : `${r.d.toFixed(1)}km`}
                       </span>
                     </button>
                   ))}
