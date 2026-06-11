@@ -17,7 +17,10 @@ export function getSupabaseBrowser(): SupabaseClient | null {
     client = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL as string,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string,
-      { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } },
+      // flowType 'pkce'：既定の implicit フローは URL ハッシュでトークンを受け取るため、
+      // iOS Safari / PWA でハッシュが落ちてログインが完了しないことがある。
+      // PKCE は ?code= をクライアントが交換する方式で、モバイルでも確実に復帰できる。
+      { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'pkce' } },
     );
   }
   return client;

@@ -921,25 +921,40 @@ export default function HomePage() {
                     })()}
                   </div>
 
-                  {/* ログイン状態（OAuth） */}
-                  {isAuthConfigured() && (
-                    <div className="relative mt-4 flex items-center justify-center gap-2 text-[12px]">
-                      {authProfile ? (
-                        <>
-                          <span className="text-gray-500 truncate max-w-[180px]">🔓 {authProfile.email ?? authProfile.displayName}</span>
-                          <button
-                            onClick={async () => { await signOutAuth(); setSyncUser(null); setAuthProfile(null); window.location.reload(); }}
-                            className="font-black text-shrine-red hover:underline cursor-pointer"
-                          >ログアウト</button>
-                        </>
-                      ) : (
-                        <>
-                          <span className="text-gray-400">ゲストでプレイ中</span>
-                          <button onClick={() => signInWithProvider('google')} className="font-black text-shrine-red hover:underline cursor-pointer">Googleでログイン</button>
-                        </>
-                      )}
-                    </div>
-                  )}
+                  {/* ログイン状態（OAuth）。未設定でも行を出して状態が分かるようにする */}
+                  <div className="relative mt-4 flex items-center justify-center gap-2 text-[12px]">
+                    {!isAuthConfigured() ? (
+                      <span className="text-gray-400">
+                        ゲストでプレイ中（SNSログインは未設定：NEXT_PUBLIC_SUPABASE_URL / ANON_KEY を設定して再デプロイ）
+                      </span>
+                    ) : authProfile ? (
+                      <>
+                        <span className="text-gray-500 truncate max-w-[180px]">🔓 {authProfile.email ?? authProfile.displayName}</span>
+                        <button
+                          onClick={async () => { await signOutAuth(); setSyncUser(null); setAuthProfile(null); window.location.reload(); }}
+                          className="font-black text-shrine-red hover:underline cursor-pointer"
+                        >ログアウト</button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-gray-400">ゲストでプレイ中</span>
+                        <button
+                          onClick={async () => {
+                            const r = await signInWithProvider('google');
+                            if (!r.ok) alert(`SNSログインを開始できませんでした。\n${r.error ?? ''}\nSupabase の認証設定（プロバイダ有効化・Redirect URLs）を確認してください。`);
+                          }}
+                          className="font-black text-shrine-red hover:underline cursor-pointer"
+                        >Googleでログイン</button>
+                        <button
+                          onClick={async () => {
+                            const r = await signInWithProvider('apple');
+                            if (!r.ok) alert(`SNSログインを開始できませんでした。\n${r.error ?? ''}\nSupabase の認証設定（プロバイダ有効化・Redirect URLs）を確認してください。`);
+                          }}
+                          className="font-black text-gray-700 hover:underline cursor-pointer"
+                        >Appleでログイン</button>
+                      </>
+                    )}
+                  </div>
                 </div>
 
                 {/* タブ */}
