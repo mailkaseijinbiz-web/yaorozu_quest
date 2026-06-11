@@ -38,6 +38,7 @@ interface LeafletMapProps {
   setUserLocation: (loc: { lat: number; lng: number }) => void;
   ugcCounts: { [spotId: string]: number };
   goal?: { lat: number; lng: number; name: string; godEmoji?: string } | null; // チャレンジのゴール（godEmoji=挑戦中の神のアイコン）
+  onGoalTap?: () => void; // クエスト中、目的地アイコンのタップ（目的地の詳細を開く）
   trail?: { lat: number; lng: number }[]; // クエスト中に通ったルートの軌跡（ポリラインで描く）
   controlsBottom?: number; // 現在地ボタンの下端からの位置（下部オーバーレイの上端+余白）
   focusGoalToken?: number; // 値が変わると目的地を地図中央へ寄せる
@@ -59,6 +60,7 @@ export default function LeafletMap({
   setUserLocation,
   ugcCounts,
   goal,
+  onGoalTap,
   trail,
   controlsBottom = 210,
   focusGoalToken,
@@ -89,6 +91,8 @@ export default function LeafletMap({
   // 選択中の場を再タップしたときの詳細表示コールバック（マーカー生成クロージャから最新を呼ぶ）
   const onOpenDetailRef = useRef(onOpenDetail);
   onOpenDetailRef.current = onOpenDetail;
+  const onGoalTapRef = useRef(onGoalTap);
+  onGoalTapRef.current = onGoalTap;
   // 自動センタリング判定用：前回パンした現在地（初回取得・ワープ判定に使う）
   const lastPanLocRef = useRef<{ lat: number; lng: number } | null>(null);
 
@@ -271,8 +275,8 @@ export default function LeafletMap({
     // 青のフキダシ（目的地での写真撮影を促す）＋その下に「挑戦中の神」のアイコンを青い丸で表示。
     // アンカーは下端の青い丸の中心＝目的地座標に合わせる。
     const goalHtml = `
-      <div style="position:relative;display:flex;flex-direction:column;align-items:center;">
-        <div style="background:#2563eb;color:#fff;font-weight:900;font-size:11px;white-space:nowrap;padding:3px 11px;border-radius:9999px;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);">📸 ここで写真を撮る！</div>
+      <div style="position:relative;display:flex;flex-direction:column;align-items:center;cursor:pointer;">
+        <div style="background:#2563eb;color:#fff;font-weight:900;font-size:11px;white-space:nowrap;padding:3px 11px;border-radius:9999px;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);">ⓘ タップで詳細</div>
         <div style="width:9px;height:9px;background:#2563eb;transform:rotate(45deg);margin-top:-5px;border-right:2px solid #fff;border-bottom:2px solid #fff;"></div>
         <div style="margin-top:2px;width:38px;height:38px;border-radius:9999px;background:#2563eb;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:20px;line-height:1;">${goalEmoji}</div>
       </div>`;
@@ -280,6 +284,8 @@ export default function LeafletMap({
       icon: L.divIcon({ html: goalHtml, className: 'custom-goal-icon', iconSize: [180, 80], iconAnchor: [90, 52] }),
       zIndexOffset: 1500,
     }).addTo(map);
+    // 目的地アイコンのタップで、その場の詳細を開く（クエスト中でも詳細を見られるように）
+    goalMarkerRef.current.on('click', () => onGoalTapRef.current?.());
 
     // 初回マウント時（タブ遷移直後など）は演出せず、現在地表示を優先する。
     // 目的地が新しく決まった時（チャレンジ開始後の進行・次の目的地へ）だけ演出する。

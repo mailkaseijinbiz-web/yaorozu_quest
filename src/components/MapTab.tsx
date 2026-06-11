@@ -527,6 +527,14 @@ export default function MapTab({
   // text は距離バンドの遷移時に1回だけ合成するため、GPS更新・再レンダーで
   // タイプ表示が途中リセットされない。ステージは単調増加（walk-guide 参照）。
   const [guideMsg, setGuideMsg] = useState<{ stepId: string; stage: number; text: string } | null>(null);
+  // 精霊が一度に喋りすぎないよう、語りは約3行（文の区切り優先）で止める。続きは少し歩くと変わる。
+  const to3Lines = (s: string): string => {
+    const MAX = 78; // text-sm・幅いっぱいでおよそ3行
+    if (s.length <= MAX) return s;
+    const cut = s.slice(0, MAX);
+    const brk = Math.max(cut.lastIndexOf('。'), cut.lastIndexOf('！'), cut.lastIndexOf('？'));
+    return brk >= 30 ? cut.slice(0, brk + 1) : `${cut.trimEnd()}…`;
+  };
   useEffect(() => {
     if (!(showGuide && nextStep && activeChallenge)) { setGuideMsg(null); return; }
     setGuideMsg((prev) => {
@@ -535,9 +543,9 @@ export default function MapTab({
       if (sameStep && stage === prev!.stage) return prev; // 同一バンド内は更新しない
       // ステップ開始時は導入（蘊蓄→観察指示）、歩き出してからはバンドごとの道中語り
       // （残り距離の声かけ・現在地近くの豆知識・道中の観察ミッションのローテーション）。
-      const text = sameStep
+      const text = to3Lines(sameStep
         ? composeWalkGuide({ questId: activeChallenge.id, step: nextStep, stage, distKm: nextDist, user: userLocation })
-        : composeGuideText(nextStep);
+        : composeGuideText(nextStep));
       return { stepId: nextStep.id, stage, text };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -732,6 +740,7 @@ export default function MapTab({
           setUserLocation={setUserLocation}
           ugcCounts={ugcCounts}
           goal={challengeGoal}
+          onGoalTap={() => { const t = destSpot ?? (nextStep?.spotId ? db.getSpot(nextStep.spotId) : null) ?? activeSpot; if (t) onOpenDetail?.(t); }}
           trail={trail}
           controlsBottom={controlsBottom}
           focusGoalToken={focusGoalToken}
@@ -853,6 +862,11 @@ export default function MapTab({
         </div>
       )}
 
+      {/* 道中の写真撮影用の隠しinput（下部ボタン・会話シートのチップ双方から使う） */}
+      {activeChallenge && destSpot && (
+        <input ref={godPhotoInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickGodPhoto} />
+      )}
+
       {/*
         3a. チャレンジ参加中の下部オーバーレイ（次の目的地・次の案内）
       */}
@@ -899,9 +913,21 @@ export default function MapTab({
                   );
                 })()}
               </div>
-              {/* アクション。御朱印タスクは写真・距離ゲートなし（会話で授かって達成）。その他は証拠写真＋500m以内。 */}
+              {/* アクション：目的地に着くまでは「道中で気になった風景・ものを撮る」。撮ると向かう先の神が応える。
+                  目的地100m未満に入ると御朱印が自動授与され達成になる（別の useEffect）。 */}
               <div className="mt-3">
-                {nextStep.type === 'goshuin' ? (
+                {destSpot ? (
+                  <>
+                    <button
+                      onClick={() => godPhotoInputRef.current?.click()}
+                      disabled={chatSending}
+                      className="w-full text-[15px] font-black py-3 rounded-full transition-all cursor-pointer flex items-center justify-center gap-2 bg-[#2563eb] text-white hover:opacity-90 active:scale-[0.99] disabled:opacity-50"
+                    >
+                      <Camera className="w-4 h-4" />気になる風景・ものを撮る
+                    </button>
+                    <p className="text-center text-[11px] text-gray-400 mt-1.5">道中で見つけたら撮ってみよう。{destGodName}が応えてくれる（任意）</p>
+                  </>
+                ) : nextStep.type === 'goshuin' ? (
                   <button
                     onClick={() => {
                       const held = nextStep.spotId ? hasGoShuin(currentUser.id, nextStep.spotId) : false;
@@ -937,7 +963,7 @@ export default function MapTab({
                     <Camera className="w-4 h-4" />証拠写真を撮影
                   </button>
                 )}
-                {farNotice && tooFar && nextStep.type !== 'goshuin' && (
+                {!destSpot && farNotice && tooFar && nextStep.type !== 'goshuin' && (
                   <p className="text-center text-[12px] font-black text-rose-500 mt-2">📍 目的地に近づいてください（500m以内で達成できます）</p>
                 )}
               </div>
@@ -1250,7 +1276,6 @@ export default function MapTab({
                 <button onClick={() => startGodShare('self')} disabled={chatSending} className="flex-shrink-0 text-[12px] font-black text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-full disabled:opacity-40 cursor-pointer">⛩️ あなたのこと</button>
                 <button onClick={() => startGodShare('scene')} disabled={chatSending} className="flex-shrink-0 text-[12px] font-black text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-full disabled:opacity-40 cursor-pointer">👀 気になる風景</button>
                 <button onClick={() => godPhotoInputRef.current?.click()} disabled={chatSending} className="flex-shrink-0 text-[12px] font-black text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-full disabled:opacity-40 cursor-pointer flex items-center gap-1"><Camera className="w-3.5 h-3.5" />写真を撮る</button>
-                <input ref={godPhotoInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickGodPhoto} />
               </div>
             )}
             {/* 入力（会話に参加） */}
