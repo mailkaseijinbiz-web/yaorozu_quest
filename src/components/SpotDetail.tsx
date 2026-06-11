@@ -1196,7 +1196,7 @@ export default function SpotDetail(props: SpotDetailProps) {
   // transitionend が来ない環境向けに、保険として一定時間後に本体をマウントする。
   useEffect(() => {
     const raf = requestAnimationFrame(() => requestAnimationFrame(() => setEntered(true)));
-    const fallback = setTimeout(() => setBodyReady(true), 420);
+    const fallback = setTimeout(() => setBodyReady(true), 240);
     return () => { cancelAnimationFrame(raf); clearTimeout(fallback); };
   }, []);
 
@@ -1204,7 +1204,7 @@ export default function SpotDetail(props: SpotDetailProps) {
   const handleClose = () => {
     if (leaving) return;
     setLeaving(true);
-    setTimeout(props.onClose, 260);
+    setTimeout(props.onClose, 200);
   };
 
   const heroPhoto = spot.imageUrl || ''; // シェルは DB を読まず spot のみで描く
@@ -1214,7 +1214,7 @@ export default function SpotDetail(props: SpotDetailProps) {
       className="fixed sm:absolute inset-0 z-[3000] bg-[#f5f7fa] will-change-transform"
       style={{
         transform: entered && !leaving ? 'translateX(0)' : 'translateX(100%)',
-        transition: 'transform 300ms cubic-bezier(0.22, 1, 0.36, 1)',
+        transition: 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onTransitionEnd={(e) => {
         if (e.propertyName === 'transform' && entered && !leaving) setBodyReady(true);
