@@ -141,8 +141,7 @@ function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '
 価値（楽しみ方）: ${(spot.enjoyments ?? []).join(' / ') || '（未収集）'}
 課題: ${(spot.issues ?? []).map((s, i) => `[${i}] ${s}`).join(' / ') || '（なし）'}${materials}${spotPolicy}${soul}${ugcContext}
 
-必ず次のJSONだけを出力してください（前後に文章を付けない）:
-{"quests":[{"title":"クエスト名","description":"100字以内の導入","difficulty":1,"estMinutes":20,"badgeIcon":"絵文字","badgeName":"バッジ名","tasks":[{"type":"visit","title":"タスク名","action":"行動指示","reward":20,"issueIndex":0,"trivia":"豆知識1〜2文","triviaCategory":"歴史","sourceUgcId":"(UGCを元にした場合のみIDを入れる)"}]}]}
+{"quests":[{"title":"クエスト名","description":"100字以内の導入","difficulty":1,"estMinutes":20,"badgeIcon":"絵文字","badgeName":"バッジ名","tasks":[{"type":"visit","title":"タスク名","action":"行動指示","reward":20,"issueIndex":0,"trivia":"豆知識1〜2文","triviaCategory":"歴史","sourceUgcId":"(UGCを元にした場合のみIDを入れる)"}]}]}`;
 }
 
 function extractJson(text: string): unknown {

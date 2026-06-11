@@ -14,6 +14,7 @@ import SpotDetail from '../components/SpotDetail';
 import GoshuinBookModal from '../components/GoshuinBookModal';
 import DebugPanel from '../components/DebugPanel';
 import OnboardingFlow from '../components/OnboardingFlow';
+import AltruismDividendCelebrate from '../components/AltruismDividendCelebrate';
 import { isDebugEnabled, getDebugLocation, setDebugLocation, type DebugLatLng } from '../lib/debug';
 import { getLevelInfo } from '../data/levels';
 import { getBadgeStates, godAvatarEmoji, type BadgeState } from '../data/badges';
@@ -23,6 +24,7 @@ import { subscribePush } from '../lib/push-client';
 import { useDeviceHeading } from '../lib/use-device-heading';
 import { backfillTrivia } from '../lib/trivia-fill';
 import { buildTourQuest, tourAreaKey } from '../lib/quest-tour';
+import UserTitle from '../components/UserTitle';
 
 type TabType = 'home' | 'record' | 'quest' | 'mypage';
 
@@ -164,7 +166,7 @@ export default function HomePage() {
             soulMd: spotAgent?.soulMd,
             latitude: spot.latitude,
             longitude: spot.longitude,
-            ugc: db.getSpotUgc(spot.id).filter(u => u.visibility === 'all' || u.visibility === 'followers'),
+            ugc: db.getUgcBySpot(spot.id).filter(u => !u.visibility || u.visibility === 'all'),
           },
         }),
       });
@@ -868,19 +870,20 @@ export default function HomePage() {
                               </button>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-1.5 mt-6">
-                              <span className="text-[13px] font-black text-white bg-gradient-to-br from-sky-500 to-blue-600 px-2 py-0.5 rounded-full leading-none">Lv.{lvInfo.current.level}</span>
-                              <h2 className="text-xl font-black text-gray-900">{currentUser.displayName}</h2>
-                              <button
-                                onClick={() => { setEditName(currentUser.displayName); setEditingProfile(true); }}
-                                className="w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-400 hover:text-shrine-red transition-all cursor-pointer"
-                                title="名前を編集"
-                              >
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
+                            <div className="flex flex-col items-center mt-6">
+                              <div className="flex items-center gap-1.5">
+                                <UserTitle toku={currentUser.totalToku} />
+                                <h2 className="text-xl font-black text-gray-900">{currentUser.displayName}</h2>
+                                <button
+                                  onClick={() => { setEditName(currentUser.displayName); setEditingProfile(true); }}
+                                  className="w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-400 hover:text-shrine-red transition-all cursor-pointer"
+                                  title="名前を編集"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </div>
                           )}
-                          <p className="text-[13px] font-bold text-gray-500 mt-0.5">{lvInfo.current.title}</p>
 
                           {/* 徳バー */}
                           <div className="w-full mt-5">
@@ -936,6 +939,24 @@ export default function HomePage() {
                       )}
                     </div>
                   )}
+
+                  {/* プッシュ通知設定 */}
+                  <div className="relative mt-4 flex items-center justify-center gap-2 text-[12px]">
+                    <button
+                      onClick={async () => {
+                        const res = await subscribePush();
+                        if (res.success) {
+                          setPushNotice('神々からの呼びかけを許可しました');
+                        } else {
+                          setPushNotice('通知の許可が拒否されたか、ブラウザが未対応です');
+                        }
+                        setTimeout(() => setPushNotice(null), 3000);
+                      }}
+                      className="font-black text-shrine-red bg-red-50 px-4 py-2 rounded-full border border-red-100 hover:bg-red-100 cursor-pointer transition-colors"
+                    >
+                      🔔 神々からの呼びかけを受け取る
+                    </button>
+                  </div>
                 </div>
 
                 {/* タブ */}
@@ -1072,14 +1093,24 @@ export default function HomePage() {
                       <div className="grid grid-cols-3 gap-2.5">
                         {badges.map((b) => (
                           <div key={b.id} className={`flex flex-col items-center text-center rounded-2xl border p-2.5 ${b.earned ? 'border-gold/40 bg-amber-50' : 'border-gray-200 bg-white'}`}>
-                            <div className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl mb-1 ${b.earned ? 'bg-white shadow-sm' : 'bg-gray-100 grayscale opacity-40'}`}>{b.icon}</div>
-                            <span className={`text-[11px] font-black leading-tight ${b.earned ? 'text-gray-800' : 'text-gray-400'}`}>{b.name}</span>
+                            <div className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl mb-1 ${b.earned ? 'bg-white shadow-sm' : 'bg-gray-100 grayscale opacity-40'}`}>
+                              {b.group === 'コンプリート' && !b.earned ? '❓' : b.icon}
+                            </div>
+                            <span className={`text-[11px] font-black leading-tight ${b.earned ? 'text-gray-800' : 'text-gray-400'}`}>
+                              {b.group === 'コンプリート' && !b.earned ? '？？？' : b.name}
+                            </span>
                             {b.earned ? (
                               <span className="text-[11px] text-emerald-600 font-bold mt-0.5">獲得済</span>
                             ) : (
                               <div className="w-full mt-1">
-                                <div className="h-1 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-shrine-red/60 rounded-full" style={{ width: `${b.progress * 100}%` }} /></div>
-                                <span className="text-[11px] text-gray-400 mt-0.5 block">{Math.floor(b.current(userStats, currentUser))}/{b.target}</span>
+                                {b.group === 'コンプリート' ? (
+                                  <span className="text-[11px] text-gray-400 mt-0.5 block">隠しバッジ</span>
+                                ) : (
+                                  <>
+                                    <div className="h-1 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-shrine-red/60 rounded-full" style={{ width: `${b.progress * 100}%` }} /></div>
+                                    <span className="text-[11px] text-gray-400 mt-0.5 block">{Math.floor(b.current(userStats, currentUser))}/{b.target}</span>
+                                  </>
+                                )}
                               </div>
                             )}
                           </div>
@@ -1353,6 +1384,20 @@ export default function HomePage() {
               </button>
             </div>
           </div>
+        )}
+
+        {/* ── 利他の配当演出 ── */}
+        {currentUser?.pendingDividends && currentUser.pendingDividends.length > 0 && (
+          <AltruismDividendCelebrate
+            amount={currentUser.pendingDividends.reduce((sum, d) => sum + d.amount, 0)}
+            message={currentUser.pendingDividends[0].message}
+            onComplete={() => {
+              const amount = db.claimAltruismDividend(currentUser.id);
+              if (amount > 0) {
+                refreshDatabaseStates();
+              }
+            }}
+          />
         )}
       </div>
     </div>

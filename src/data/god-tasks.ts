@@ -34,9 +34,11 @@ function categoryExtraTypes(category: string): TaskType[] {
  */
 export function resolveTaskTypes(spot: Pick<Spot, 'category' | 'taskTypes'>): TaskType[] {
   if (spot.taskTypes && spot.taskTypes.length > 0) {
-    return spot.taskTypes.filter((t): t is TaskType => t in TASK_CATALOG);
+    const types = spot.taskTypes.filter((t): t is TaskType => t in TASK_CATALOG);
+    if (!types.includes('meditate')) types.push('meditate');
+    return types;
   }
-  return [...COMMON_TASK_TYPES, ...categoryExtraTypes(spot.category)];
+  return [...COMMON_TASK_TYPES, ...categoryExtraTypes(spot.category), 'meditate'];
 }
 
 /** カタログ雛形を、その場の Task インスタンスに具体化する。 */

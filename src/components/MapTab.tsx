@@ -157,7 +157,7 @@ export default function MapTab({
   const [proofError, setProofError] = useState<string | null>(null); // 写真の取り込み失敗メッセージ
   // 達成ビート（豆知識つき・手動で次へ）。feedback は写真へのAIのひとこと（非同期で追記）
   const [celebrate, setCelebrate] = useState<
-    { title: string; icon: string; complete: boolean; trivia?: string; triviaCategory?: TriviaCategory; stepId?: string; feedback?: string } | null
+    { title: string; icon: string; complete: boolean; trivia?: string; triviaCategory?: TriviaCategory; stepId?: string; feedback?: string; omikuji?: { result: string; message: string; toku: number } } | null
   >(null);
   // 導入（プロローグ）を見せたチャレンジID。タブ切替でアンマウントされても消えないよう localStorage に永続化。
   const [introSeenId, setIntroSeenId] = useState<string | null>(() => {
@@ -186,6 +186,46 @@ export default function MapTab({
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   // 上部ガイドのフキダシ本文（3行＋スクロール）の自動スクロール用
   const guideScrollRef = useRef<HTMLDivElement | null>(null);
+
+  // ── 隠れスポット提案 ──
+  const [proposingLoc, setProposingLoc] = useState<{ lat: number; lng: number } | null>(null);
+  const [propName, setPropName] = useState('');
+  const [propCategory, setPropCategory] = useState('神社');
+
+  const handleMapLongPress = (loc: { lat: number; lng: number }) => {
+    // 挑戦中や演出中は提案させない
+    if (activeChallenge || celebrate) return;
+    setProposingLoc(loc);
+    setPropName('');
+  };
+
+  const submitProposal = () => {
+    if (!proposingLoc || !propName.trim()) return;
+    const s: Spot = {
+      id: `prop-${Date.now()}`,
+      name: propName.trim(),
+      description: 'ユーザーが提案した隠れスポットです。',
+      latitude: proposingLoc.lat,
+      longitude: proposingLoc.lng,
+      creatorId: currentUser.id,
+      imageUrl: '',
+      category: propCategory,
+      tokuRequirement: 10,
+      enjoyments: [],
+      difficulty: 1,
+      terrain: 1,
+      attributes: [],
+      cacheType: 'Virtual',
+      godName: '名もなき神',
+      godEmoji: propCategory === '神社' ? '⛩️' : '🙏',
+      godRequests: ['ここを訪れてくれてありがとう。'],
+      verified: false,
+    };
+    db.addSpot(s);
+    setProposingLoc(null);
+    setPropName('');
+    db.grantToku(currentUser.id, 10, 'スポット提案');
+  };
 
   const onPickProof = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -217,6 +257,17 @@ export default function MapTab({
     // 証拠写真に添えるコメントを保存
     if (proofComment.trim()) db.saveChallengeComment(activeChallenge.id, cleared.id, proofComment);
     onAdvanceChallenge?.(cleared.id, proofPhoto);
+    // ── おみくじ機能 ──
+    const omikujiTable = [
+      { result: '大吉', message: '神の祝福があります。今日一番の運勢！', toku: 50 },
+      { result: '中吉', message: '良いことが起きる兆しがあります。', toku: 30 },
+      { result: '小吉', message: 'ささやかな幸せが見つかるでしょう。', toku: 15 },
+      { result: '吉', message: '穏やかな一日になりそうです。', toku: 10 },
+      { result: '末吉', message: '少しずつ運気は上向いています。', toku: 5 }
+    ];
+    const omikujiResult = omikujiTable[Math.floor(Math.random() * omikujiTable.length)];
+    db.grantToku(currentUser.id, omikujiResult.toku, `おみくじ（${omikujiResult.result}）`);
+
     // 達成ビート：このステップで得た豆知識を“次の文章”として見せてから次へ進む
     setCelebrate({
       title: willComplete ? `「${activeChallenge.badgeName}」獲得！` : `${cleared.title} 達成！`,
@@ -225,6 +276,7 @@ export default function MapTab({
       trivia: cleared.trivia,
       triviaCategory: cleared.triviaCategory,
       stepId: cleared.id,
+      omikuji: omikujiResult,
     });
     // 写真の内容へのAIフィードバック（fire-and-forget）。届いたら達成ビートに追記する。
     // 失敗・遅延は無言＝既存の演出のまま（graceful degradation）。
@@ -564,6 +616,7 @@ export default function MapTab({
           hideControls={introShowing}
           onMapMove={onMapMove}
           searchPin={searchPin}
+          onMapLongPress={handleMapLongPress}
           deviceHeading={deviceHeading}
         />
       </div>
@@ -966,6 +1019,15 @@ export default function MapTab({
               <div className="w-14 h-14 rounded-full bg-gradient-to-br from-amber-100 to-orange-50 border-2 border-white shadow-lg flex items-center justify-center text-3xl flex-shrink-0">🦊</div>
               <div className="relative flex-1 bg-white rounded-2xl rounded-bl-sm shadow-xl px-4 py-3">
                 <p className="text-sm font-black text-gray-900">{celebrate.title}</p>
+                {celebrate.omikuji && (
+                  <div className="mt-2 text-left rounded-xl px-3 py-2 bg-red-50 border border-red-200 text-red-800 celebrate-pop">
+                    <span className="inline-flex items-center gap-1.5 text-[13px] font-black">
+                      <span className="text-lg leading-none">🥠</span>おみくじ：{celebrate.omikuji.result}
+                    </span>
+                    <p className="mt-1 text-[13px] leading-relaxed">{celebrate.omikuji.message}</p>
+                    <p className="text-[11px] font-bold mt-1 text-red-600 bg-red-100/50 inline-block px-1.5 py-0.5 rounded">徳 +{celebrate.omikuji.toku} を授かりました</p>
+                  </div>
+                )}
                 {celebrate.trivia && celebrate.triviaCategory ? (
                   <div className={`mt-2 text-left rounded-xl px-3 py-2 ${TRIVIA_TONE[celebrate.triviaCategory]}`}>
                     <span className="inline-flex items-center gap-1.5 text-[13px] font-black">
@@ -1073,6 +1135,64 @@ export default function MapTab({
               />
               <button onClick={sendChat} disabled={!chatInput.trim() || chatSending} aria-label="送信" className="w-10 h-10 rounded-full bg-[#2563eb] text-white flex items-center justify-center disabled:opacity-40 cursor-pointer flex-shrink-0">
                 <Send className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 隠れスポット提案モーダル ── */}
+      {proposingLoc && (
+        <div className="absolute inset-0 z-[5000] flex items-center justify-center p-4" onClick={() => setProposingLoc(null)}>
+          <div className="absolute inset-0 bg-black/50" />
+          <div className="relative w-full max-w-sm bg-white rounded-3xl shadow-xl p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-black text-gray-900 mb-1">隠れスポットを提案</h3>
+            <p className="text-[12px] text-gray-500 mb-4 leading-snug">地図上のこの場所に、まだ誰も知らない場を創り出しますか？</p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold text-gray-500 mb-1">名前</label>
+                <input
+                  type="text"
+                  value={propName}
+                  onChange={(e) => setPropName(e.target.value)}
+                  placeholder="例: 名もなきお地蔵様"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-[14px] outline-none focus:border-[#2563eb]"
+                  autoFocus
+                />
+              </div>
+              
+              <div>
+                <label className="block text-[11px] font-bold text-gray-500 mb-1">種類</label>
+                <div className="flex gap-2">
+                  {['神社', '寺院', 'その他'].map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => setPropCategory(cat)}
+                      className={`flex-1 py-2 rounded-xl text-[13px] font-bold border transition-colors ${
+                        propCategory === cat ? 'bg-[#2563eb] text-white border-[#2563eb]' : 'bg-white text-gray-600 border-gray-200'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 mt-6">
+              <button
+                onClick={() => setProposingLoc(null)}
+                className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold py-2.5 rounded-xl transition-colors text-[14px]"
+              >
+                やめる
+              </button>
+              <button
+                onClick={submitProposal}
+                disabled={!propName.trim()}
+                className="flex-1 bg-[#2563eb] hover:bg-[#1d4ed8] disabled:opacity-50 disabled:hover:bg-[#2563eb] text-white font-bold py-2.5 rounded-xl transition-colors text-[14px]"
+              >
+                提案する
               </button>
             </div>
           </div>

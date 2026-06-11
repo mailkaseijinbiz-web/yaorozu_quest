@@ -42,6 +42,7 @@ export interface Spot {
   expiresAt?: string; // ISO 8601 — 設定されていると期限切れで自動削除（GPS 生成スポット用）
   createdAt?: string; // ISO 8601 — 生成・作成日時。旧レコードは undefined（'—' 表示）。
   deletedAt?: string; // ISO 8601 — ソフト削除日時。undefined = 生存。
+  vintagePhotoUrl?: string; // AR透かし用の古い景色の写真URL
 }
 
 /**
@@ -1205,6 +1206,13 @@ class MockDatabase {
   // 写真UGC（初期は空。投稿でセット、不適切は却下で削除）
   // ────────────────────────────────────────────────
 
+  /** スポットを新規追加する（ユーザー提案など） */
+  addSpot(spot: Spot): void {
+    const spots = this.getSpotsRaw();
+    spots.push(spot);
+    this.saveSpots(spots);
+  }
+
   /** スポットの投稿写真一覧 */
   getSpotPhotos(spotId: string): string[] {
     const spot = this.getSpot(spotId);
@@ -1296,6 +1304,44 @@ class MockDatabase {
       this.saveSpots(spots);
     }
     return spot;
+  }
+  /** 指定したユーザーに利他の配当（未受領の徳とメッセージ）を付与する。対象が自身の場合は付与しない（自作自演防止）。 */
+  distributeAltruismDividend(targetUserId: string, triggerUserId: string, amount: number, message: string): void {
+    if (targetUserId === triggerUserId) return; // 自分のUGCで自分がクエストをクリアした場合は配当なし
+    const allUsers = this.getUsers();
+    const userIndex = allUsers.findIndex(u => u.id === targetUserId);
+    if (userIndex === -1) return;
+    
+    const user = allUsers[userIndex];
+    if (!user.pendingDividends) {
+      user.pendingDividends = [];
+    }
+    user.pendingDividends.push({ amount, message });
+    allUsers[userIndex] = user;
+    this.save(KEYS.USERS, allUsers);
+  }
+
+  /** ユーザーの未受領の利他の配当をすべて受領し、徳を加算する。受領した総額を返す。 */
+  claimAltruismDividend(userId: string): number {
+    const allUsers = this.getUsers();
+    const userIndex = allUsers.findIndex(u => u.id === userId);
+    if (userIndex === -1) return 0;
+
+    const user = allUsers[userIndex];
+    if (!user.pendingDividends || user.pendingDividends.length === 0) return 0;
+
+    const totalAmount = user.pendingDividends.reduce((sum, d) => sum + d.amount, 0);
+    user.pendingDividends = []; // クリア
+    allUsers[userIndex] = user;
+    this.save(KEYS.USERS, allUsers);
+
+    if (totalAmount > 0) {
+      this.rewardToku(userId, totalAmount);
+      // アクティビティログにも記録
+      this.logActivity({ type: 'task', userId, detail: '利他の配当（UGC貢献）', reward: totalAmount });
+    }
+    
+    return totalAmount;
   }
 
   /** 汎用：神の依頼タスク達成で徳を付与 */
@@ -1561,6 +1607,17 @@ class MockDatabase {
       p.done[challengeId] = Array.from(done);
       this.rewardToku(userId, reward);
       this.logActivity({ type: 'quest_step', userId, challengeId, detail: stepId, reward });
+
+      // UGC起因のタスクなら、元のUGCの作者へ利他の配当（徳）を還元する
+      if (task?.sourceUgcId) {
+        const ugcs = this.load<UgcPost[]>(KEYS.UGC, []);
+        const sourceUgc = ugcs.find((u) => u.id === task.sourceUgcId);
+        if (sourceUgc) {
+          // UGC1件につき「徳+5」を還元する。
+          const dividendMessage = `あなたの残した道標（${sourceUgc.content.slice(0, 10)}...）が、巡礼者を導きました。`;
+          this.distributeAltruismDividend(sourceUgc.userId, userId, 5, dividendMessage);
+        }
+      }
     }
     if (done.size >= totalSteps && !p.completed.includes(challengeId)) {
       p.completed.push(challengeId);
