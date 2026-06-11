@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Shield, MapPin, Users as UsersIcon, Lock, LogOut, RotateCcw, Flag, Network, Brain, Activity as ActivityIcon, LineChart, Settings } from 'lucide-react';
+import { Shield, MapPin, Users as UsersIcon, Lock, LogOut, RotateCcw, Flag, Network, Brain, Activity as ActivityIcon, LineChart, Settings, MessageSquare } from 'lucide-react';
 import { db, Spot, User } from '../../lib/db';
 import { pullSnapshot } from '../../lib/cloud-sync';
 import { Blueprint } from '../../components/admin/Blueprint';
@@ -11,10 +11,11 @@ import { ActivityManager } from '../../components/admin/ActivityManager';
 import { SpotsManager } from '../../components/admin/SpotsManager';
 import { ChallengesManager } from '../../components/admin/ChallengesManager';
 import { UsersManager, DEMO_USER_IDS } from '../../components/admin/UsersManager';
+import { UgcManager } from '../../components/admin/UgcManager';
 import { SystemPanel } from '../../components/admin/SystemPanel';
 
 // 認証はサーバー側（/api/admin/login + HttpOnly Cookie）で行う。パスワードはクライアントに持たない。
-type AdminTab = 'blueprint' | 'analytics' | 'spots' | 'gods' | 'users' | 'challenges' | 'activity' | 'system';
+type AdminTab = 'blueprint' | 'analytics' | 'spots' | 'gods' | 'users' | 'challenges' | 'ugc' | 'activity' | 'system';
 
 const TABS: { key: AdminTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'blueprint', label: 'God', icon: Network },
@@ -23,6 +24,7 @@ const TABS: { key: AdminTab; label: string; icon: React.ComponentType<{ classNam
   { key: 'gods', label: '八百万神', icon: Brain },
   { key: 'users', label: '人間', icon: UsersIcon },
   { key: 'challenges', label: 'クエスト', icon: Flag },
+  { key: 'ugc', label: 'UGC', icon: MessageSquare },
   { key: 'activity', label: 'アクティビティ', icon: ActivityIcon },
   { key: 'system', label: 'システム', icon: Settings },
 ];
@@ -198,6 +200,7 @@ export default function AdminPage() {
             blueprint: null, analytics: null, gods: agentCount, activity: db.getActivities().length,
             spots: spots.length, users: users.filter(u => !DEMO_USER_IDS.has(u.id)).length,
             challenges: db.getAllQuests().length, // 生成クエストを含む実数（CHALLENGES は静的・空）
+            ugc: db.getUgc().length,
             system: null,
           };
           const active = tab === key;
@@ -227,6 +230,7 @@ export default function AdminPage() {
         {tab === 'activity' && <ActivityManager spots={spots} />}
         {tab === 'spots' && <SpotsManager spots={spots} onChange={refresh} />}
         {tab === 'challenges' && <ChallengesManager />}
+        {tab === 'ugc' && <UgcManager spots={spots} />}
         {tab === 'users' && <UsersManager users={users} spots={spots} onChange={refresh} />}
         {tab === 'system' && <SystemPanel onChange={refresh} />}
       </main>
