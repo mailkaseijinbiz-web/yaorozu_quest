@@ -8,6 +8,7 @@
 // 実在スポットは verified=true、TTL（expiresAt）を付けない＝期限切れで消えない。
 import { NextResponse } from 'next/server';
 import { lookupRealPlaces, type RealPlace, type Category } from '../../../lib/overpass';
+import { isAnyPushConfigured, sendToAll } from '../../../lib/push-server';
 
 // 外部 API（Overpass + Gemini）を順に叩くため、関数の最大実行時間を明示（既定の短いタイムアウトで殺されない）。
 export const maxDuration = 30;
@@ -184,7 +185,7 @@ function templateFlavorFull(real: RealPlace): GeminiFlavor {
 }
 
 export async function POST(request: Request) {
-  let body: { lat?: number; lng?: number };
+  let body: { lat?: number; lng?: number; notify?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -213,6 +214,17 @@ export async function POST(request: Request) {
     const { spot, agent } = await buildRealSpot(real, geminiKey);
     // 2件目以降はテンプレ味付け（Gemini は最寄り1件のみ＝API 消費を増やさない）
     const extras = await Promise.all(places.slice(1).map((p) => buildRealSpot(p)));
+    // 近接の主生成（notify=true）のみ、購読端末へ「新しい神様が現れた」と知らせる。
+    // 背景の遠距離バッチ生成（notify 無し）は通知しない＝押し売りを避ける。
+    if (body.notify && isAnyPushConfigured()) {
+      try {
+        await sendToAll({
+          title: `${spot.godEmoji || '⛩️'} 近くに新しい神様が現れました`,
+          body: `${spot.name}に${agent.name || spot.godName || '八百万神'}が宿りました。会いに行きましょう。`,
+          url: '/?spot=' + encodeURIComponent(spot.id),
+        });
+      } catch { /* プッシュ失敗は生成結果に影響させない */ }
+    }
     return NextResponse.json({ spot, agent, extras, source: 'osm' });
   }
 
