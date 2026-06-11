@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { UserCircle2, MapPin, Check, Flag, Pencil, Share2, X, Stamp, NotebookPen, Mail } from 'lucide-react';
 import { db, Spot, Agent, User as UserType, UserContribution, SPOT_TTL_MS } from '../lib/db';
 import { getGoShuinList, Goshuin } from '../lib/goshuin';
+import { addVisitRecord, hasRecordForSpotOnDate } from '../lib/visit-records';
 import { pullSnapshot, setSyncUser } from '../lib/cloud-sync';
 import { isAuthConfigured, getSupabaseBrowser, signInWithProvider, signOutAuth, profileFromUser, type AuthProfile } from '../lib/supabase-browser';
 import { distanceKm, destinationPoint } from '../lib/geo';
@@ -812,7 +813,13 @@ export default function HomePage() {
                   }}
                   onCompleteChallenge={() => {
                     if (!activeChallengeId || !currentUser) return;
+                    const ch = db.getQuest(activeChallengeId);
+                    const goalSpot = ch?.spotId ? db.getSpot(ch.spotId) : null;
                     db.completeChallenge(currentUser.id, activeChallengeId);
+                    // クエスト達成を「参拝の記録」にも残す（同じ場・同日の重複は避ける）
+                    if (goalSpot && !hasRecordForSpotOnDate(currentUser.id, goalSpot.id, new Date().toISOString())) {
+                      addVisitRecord(currentUser.id, goalSpot, { note: ch ? `クエスト「${ch.title}」を達成して参拝` : 'クエストを達成して参拝' });
+                    }
                     setActiveChallengeId(null);
                     refreshDatabaseStates();
                   }}
