@@ -78,6 +78,16 @@ export function deleteGoshuin(userId: string, id: string): void {
   writeList(userId, getGoShuinList(userId).filter((g) => g.id !== id));
 }
 
+/** 既存の御朱印に実物写真を保存（差し替え）する。容量超過などで保存できなければ false。 */
+export function setGoshuinPhoto(userId: string, id: string, photo: string): boolean {
+  const list = getGoShuinList(userId);
+  const idx = list.findIndex((g) => g.id === id);
+  if (idx < 0) return false;
+  const next = [...list];
+  next[idx] = { ...next[idx], photo };
+  return writeList(userId, next);
+}
+
 /** 御朱印を授ける。既に持っている場合は null を返す。 */
 export function grantGoShuin(
   userId: string,

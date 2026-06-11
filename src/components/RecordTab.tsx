@@ -21,7 +21,8 @@ import {
   MAX_RECORD_PHOTOS,
   VisitRecord,
 } from '../lib/visit-records';
-import { getGoShuinList, addPhotoGoshuin, deleteGoshuin, grantGoShuin, hasGoShuin, Goshuin } from '../lib/goshuin';
+import { getGoShuinList, addPhotoGoshuin, deleteGoshuin, setGoshuinPhoto, grantGoShuin, hasGoShuin, Goshuin } from '../lib/goshuin';
+import { prefectureOf, PREFECTURES } from '../data/prefectures';
 import { compressImage } from '../lib/upload';
 
 /** デジタル御朱印を取得できる距離（メートル）。これ未満で取得可能。 */
@@ -246,7 +247,9 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
   const [goshuinList, setGoshuinList] = useState<Goshuin[]>(() => getGoShuinList(currentUser.id));
   const refreshGoshuin = () => setGoshuinList(getGoShuinList(currentUser.id));
   const [gFormOpen, setGFormOpen] = useState(false);
-  const [goshuinSort, setGoshuinSort] = useState<'date' | 'place'>('date'); // 御朱印の並び替え（日時順／場所順）
+  const [goshuinSort, setGoshuinSort] = useState<'place' | 'date'>('place'); // 御朱印の並び替え（場所別=既定／日時順）
+  const [reviewGoshuin, setReviewGoshuin] = useState<Goshuin | null>(null); // タップで開く御朱印モーダル
+  const reviewGoshuinPhotoRef = useRef<HTMLInputElement | null>(null);
   // 日本地図に灯す赤い点（緯度経度。古い御朱印は spot から補完）
   const goshuinPoints = useMemo(
     () =>
@@ -260,15 +263,84 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
     [goshuinList]
   );
   // 並び替え後の御朱印（日時=新しい順／場所=寺社名の五十音順、同名は新しい順）
+  // 日時順（新しい順）の並び
   const sortedGoshuin = useMemo(
-    () =>
-      [...goshuinList].sort((a, b) => {
-        const t = new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime();
-        if (goshuinSort === 'place') return a.spotName.localeCompare(b.spotName, 'ja') || t;
-        return t;
-      }),
-    [goshuinList, goshuinSort]
+    () => [...goshuinList].sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime()),
+    [goshuinList]
   );
+  // 御朱印の都道府県を求める（座標優先・無ければ spot から補完）
+  const prefOfGoshuin = (g: Goshuin): string => {
+    if (typeof g.lat === 'number' && typeof g.lng === 'number') return prefectureOf(g.lat, g.lng);
+    const s = db.getSpot(g.spotId);
+    return s ? prefectureOf(s.latitude, s.longitude) : 'その他';
+  };
+  // 場所別＝都道府県でグルーピング（北→南の順、その他は末尾。県内は新しい順）
+  const goshuinByPref = useMemo(() => {
+    const map = new Map<string, Goshuin[]>();
+    for (const g of sortedGoshuin) {
+      const k = prefOfGoshuin(g);
+      const arr = map.get(k);
+      if (arr) arr.push(g); else map.set(k, [g]);
+    }
+    const order = (name: string) => { const i = PREFECTURES.findIndex((p) => p.name === name); return i < 0 ? 999 : i; };
+    return [...map.entries()].map(([pref, items]) => ({ pref, items })).sort((a, b) => order(a.pref) - order(b.pref));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortedGoshuin]);
+
+  // 御朱印カード（タップでモーダル＝写真保存もできる）
+  const renderGoshuinCard = (g: Goshuin) => (
+    <div
+      key={g.id}
+      onClick={() => setReviewGoshuin(g)}
+      role="button"
+      className="relative bg-white rounded-2xl border border-red-100 shadow-sm p-3 flex flex-col items-center text-center cursor-pointer active:scale-[0.99] transition-transform"
+    >
+      {g.source === 'photo' && (
+        <button
+          onClick={(e) => { e.stopPropagation(); deleteGoshuin(currentUser.id, g.id); refreshGoshuin(); onChanged?.(); }}
+          className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/30 text-white flex items-center justify-center cursor-pointer z-10"
+          title="御朱印を削除"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      )}
+      {g.photo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={g.photo} alt={g.spotName} className="w-full h-28 rounded-xl object-cover mb-1.5" />
+      ) : (
+        <div className="relative w-20 h-20 flex-shrink-0 mb-1">
+          <div className="absolute inset-0 rounded-full border-4 border-red-600/80" />
+          <div className="absolute inset-1.5 rounded-full border-2 border-red-600/40" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5">
+            <span className="text-2xl leading-none">{g.godEmoji}</span>
+            {g.godName && <span className="text-[8px] font-black text-red-700 text-center leading-tight px-1" style={{ maxWidth: 64 }}>{g.godName}</span>}
+          </div>
+        </div>
+      )}
+      <p className="text-sm font-black text-gray-900 truncate w-full">{g.spotName}</p>
+      {g.godName && <p className="text-[11px] text-gray-400 truncate w-full">{g.godName}</p>}
+      <p className="text-[10px] text-gray-300 mt-1">{fmtDate(g.receivedAt)}</p>
+    </div>
+  );
+
+  // 御朱印モーダルから実物写真を保存（差し替え）
+  const onPickReviewGoshuinPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !reviewGoshuin) return;
+    try {
+      const dataUrl = await compressImage(file, { maxDim: 1000, quality: 0.7 });
+      if (!setGoshuinPhoto(currentUser.id, reviewGoshuin.id, dataUrl)) {
+        alert('端末の保存容量が一杯のため、写真を保存できませんでした。');
+        return;
+      }
+      refreshGoshuin();
+      onChanged?.();
+      setReviewGoshuin({ ...reviewGoshuin, photo: dataUrl });
+    } catch {
+      alert('画像の読み込みに失敗しました。');
+    }
+  };
   const [gQuery, setGQuery] = useState('');
   const [gSelected, setGSelected] = useState<Spot | null>(null);
   const [gName, setGName] = useState('');
@@ -551,52 +623,53 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
               <div className="space-y-2">
                 {sortedRecords.map((rec) => {
                   const pics = recordPhotos(rec);
-                  return (
-                  <div key={rec.id} className="flex gap-3 bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
-                    {pics.length > 0 ? (
-                      <div className="relative w-16 h-16 flex-shrink-0">
+                  // 写真がある記録は写真をメインに大きく見せる
+                  return pics.length > 0 ? (
+                    <div key={rec.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                      <div className="relative">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={pics[0]} alt={rec.spotName} className="w-16 h-16 rounded-xl object-cover" />
+                        <img src={pics[0]} alt={rec.spotName} className="w-full h-44 object-cover" />
+                        <span className="absolute top-2 left-2 text-[11px] font-black text-white bg-emerald-600/90 px-2 py-0.5 rounded-full">{ordinalOf(rec)}回目</span>
                         {pics.length > 1 && (
-                          <span className="absolute bottom-1 right-1 text-[10px] font-black text-white bg-black/55 rounded-full px-1.5 py-0.5 leading-none">+{pics.length - 1}</span>
+                          <span className="absolute bottom-2 right-2 text-[11px] font-black text-white bg-black/55 rounded-full px-2 py-0.5 leading-none">+{pics.length - 1}枚</span>
+                        )}
+                        <div className="absolute top-2 right-2 flex gap-1.5">
+                          <button onClick={() => openEdit(rec)} className="w-8 h-8 rounded-full bg-black/45 text-white flex items-center justify-center cursor-pointer hover:bg-black/60 transition-all" title="記録を編集"><Pencil className="w-4 h-4" /></button>
+                          <button onClick={() => { deleteVisitRecord(currentUser.id, rec.id); refresh(); }} className="w-8 h-8 rounded-full bg-black/45 text-white flex items-center justify-center cursor-pointer hover:bg-black/60 transition-all" title="記録を削除"><Trash2 className="w-4 h-4" /></button>
+                        </div>
+                      </div>
+                      <div className="p-3">
+                        <p className="text-sm font-black text-gray-900 truncate">{rec.spotName}</p>
+                        <p className="text-[11px] text-gray-400 flex items-center gap-1 mt-0.5"><CalendarDays className="w-3 h-3" />{fmtDate(rec.visitedAt)} 参拝</p>
+                        {rec.note && <p className="text-[12px] text-gray-600 mt-1">{rec.note}</p>}
+                        {rec.trail && rec.trail.length > 1 && (
+                          <div className="mt-1.5 w-[150px] max-w-full">
+                            <TrailMini points={rec.trail} />
+                            <p className="text-[10px] text-gray-400 mt-0.5">🛤️ 当日歩いた道のり</p>
+                          </div>
                         )}
                       </div>
-                    ) : (
+                    </div>
+                  ) : (
+                    <div key={rec.id} className="flex gap-3 bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
                       <div className="w-16 h-16 rounded-xl flex items-center justify-center text-3xl flex-shrink-0 bg-gradient-to-br from-blue-50 to-amber-50">{rec.godEmoji}</div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex-1 min-w-0">
                         <span className="text-[11px] font-black text-emerald-600">{ordinalOf(rec)}回目の記録</span>
+                        <p className="text-sm font-black text-gray-900 truncate">{rec.spotName}</p>
+                        <p className="text-[11px] text-gray-400 flex items-center gap-1 mt-0.5"><CalendarDays className="w-3 h-3" />{fmtDate(rec.visitedAt)} 参拝</p>
+                        {rec.note && <p className="text-[12px] text-gray-600 mt-1 line-clamp-2">{rec.note}</p>}
+                        {rec.trail && rec.trail.length > 1 && (
+                          <div className="mt-1.5 w-[150px] max-w-full">
+                            <TrailMini points={rec.trail} />
+                            <p className="text-[10px] text-gray-400 mt-0.5">🛤️ 当日歩いた道のり</p>
+                          </div>
+                        )}
                       </div>
-                      <p className="text-sm font-black text-gray-900 truncate">{rec.spotName}</p>
-                      <p className="text-[11px] text-gray-400 flex items-center gap-1 mt-0.5">
-                        <CalendarDays className="w-3 h-3" />{fmtDate(rec.visitedAt)} 参拝
-                      </p>
-                      {rec.note && <p className="text-[12px] text-gray-600 mt-1 line-clamp-2">{rec.note}</p>}
-                      {rec.trail && rec.trail.length > 1 && (
-                        <div className="mt-1.5 w-[150px] max-w-full">
-                          <TrailMini points={rec.trail} />
-                          <p className="text-[10px] text-gray-400 mt-0.5">🛤️ 当日歩いた道のり</p>
-                        </div>
-                      )}
+                      <div className="self-start flex flex-col items-center gap-1">
+                        <button onClick={() => openEdit(rec)} className="w-7 h-7 rounded-full hover:bg-blue-50 flex items-center justify-center text-gray-300 hover:text-blue-500 transition-all cursor-pointer" title="記録を編集"><Pencil className="w-4 h-4" /></button>
+                        <button onClick={() => { deleteVisitRecord(currentUser.id, rec.id); refresh(); }} className="w-7 h-7 rounded-full hover:bg-rose-50 flex items-center justify-center text-gray-300 hover:text-rose-500 transition-all cursor-pointer" title="記録を削除"><Trash2 className="w-4 h-4" /></button>
+                      </div>
                     </div>
-                    <div className="self-start flex flex-col items-center gap-1">
-                      <button
-                        onClick={() => openEdit(rec)}
-                        className="w-7 h-7 rounded-full hover:bg-blue-50 flex items-center justify-center text-gray-300 hover:text-blue-500 transition-all cursor-pointer"
-                        title="記録を編集"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => { deleteVisitRecord(currentUser.id, rec.id); refresh(); }}
-                        className="w-7 h-7 rounded-full hover:bg-rose-50 flex items-center justify-center text-gray-300 hover:text-rose-500 transition-all cursor-pointer"
-                        title="記録を削除"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
                   );
                 })}
               </div>
@@ -689,12 +762,12 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                 <span className="text-[10px] text-gray-400">※御朱印は公式のものではありません</span>
                 <span className="text-[12px] font-black text-gray-400">{goshuinList.length}件</span>
               </div>
-              {/* 並び替え：日時順 / 場所順 */}
+              {/* 並び替え：場所別（都道府県）が既定 / 日時順 */}
               <div className="flex items-center gap-1.5">
                 <span className="text-[11px] font-black text-gray-400">並び替え</span>
                 {([
+                  { key: 'place', label: '場所別' },
                   { key: 'date', label: '日時順' },
-                  { key: 'place', label: '場所順' },
                 ] as const).map(({ key, label }) => (
                   <button
                     key={key}
@@ -705,39 +778,58 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                   </button>
                 ))}
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                {sortedGoshuin.map((g) => (
-                  <div key={g.id} className="relative bg-white rounded-2xl border border-red-100 shadow-sm p-3 flex flex-col items-center text-center">
-                    {g.source === 'photo' && (
-                      <button
-                        onClick={() => { deleteGoshuin(currentUser.id, g.id); refreshGoshuin(); onChanged?.(); }}
-                        className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/30 text-white flex items-center justify-center cursor-pointer"
-                        title="御朱印を削除"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                    {g.photo ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={g.photo} alt={g.spotName} className="w-full h-28 rounded-xl object-cover mb-1.5" />
-                    ) : (
-                      <div className="relative w-20 h-20 flex-shrink-0 mb-1">
-                        <div className="absolute inset-0 rounded-full border-4 border-red-600/80" />
-                        <div className="absolute inset-1.5 rounded-full border-2 border-red-600/40" />
-                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5">
-                          <span className="text-2xl leading-none">{g.godEmoji}</span>
-                          {g.godName && <span className="text-[8px] font-black text-red-700 text-center leading-tight px-1" style={{ maxWidth: 64 }}>{g.godName}</span>}
-                        </div>
+              {goshuinSort === 'place' ? (
+                <div className="space-y-3">
+                  {goshuinByPref.map(({ pref, items }) => (
+                    <div key={pref}>
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <span className="text-sm">🗾</span>
+                        <h4 className="text-[12px] font-black text-gray-500">{pref}（{items.length}）</h4>
+                        <span className="flex-1 h-px bg-gray-200" />
                       </div>
-                    )}
-                    <p className="text-sm font-black text-gray-900 truncate w-full">{g.spotName}</p>
-                    {g.godName && <p className="text-[11px] text-gray-400 truncate w-full">{g.godName}</p>}
-                    <p className="text-[10px] text-gray-300 mt-1">{fmtDate(g.receivedAt)}</p>
-                  </div>
-                ))}
-              </div>
+                      <div className="grid grid-cols-2 gap-3">{items.map(renderGoshuinCard)}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">{sortedGoshuin.map(renderGoshuinCard)}</div>
+              )}
             </>
           )}
+        </div>
+      )}
+
+      {/* ── 御朱印モーダル（タップで開く・実物写真の保存もできる）── */}
+      {reviewGoshuin && (
+        <div className="fixed inset-0 z-[4100] bg-black/50 flex items-center justify-center p-4" onClick={() => setReviewGoshuin(null)}>
+          <div className="w-full max-w-[320px] bg-white rounded-3xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="relative bg-gradient-to-br from-red-50 to-rose-100/60 px-5 pt-6 pb-5 text-center">
+              <button onClick={() => setReviewGoshuin(null)} aria-label="閉じる" className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/10 hover:bg-black/20 flex items-center justify-center text-gray-700 cursor-pointer"><X className="w-4 h-4" /></button>
+              {reviewGoshuin.photo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={reviewGoshuin.photo} alt={reviewGoshuin.spotName} className="w-40 h-40 rounded-2xl object-cover mx-auto" />
+              ) : (
+                <div className="relative w-28 h-28 mx-auto">
+                  <div className="absolute inset-0 rounded-full border-[5px] border-red-600/80" />
+                  <div className="absolute inset-2 rounded-full border-2 border-red-600/40" />
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
+                    <span className="text-4xl leading-none">{reviewGoshuin.godEmoji}</span>
+                    {reviewGoshuin.godName && <span className="text-[10px] font-black text-red-700 text-center leading-tight px-2">{reviewGoshuin.godName}</span>}
+                  </div>
+                </div>
+              )}
+              <h3 className="text-base font-black text-gray-900 mt-3 leading-tight">{reviewGoshuin.spotName}</h3>
+              {reviewGoshuin.godName && <p className="text-[12px] text-gray-500 mt-0.5">{reviewGoshuin.godName}</p>}
+              <p className="text-[11px] text-gray-400 mt-0.5">{fmtDate(reviewGoshuin.receivedAt)} ・ {prefOfGoshuin(reviewGoshuin)}</p>
+            </div>
+            <div className="p-4">
+              <label className="w-full inline-flex items-center justify-center gap-2 bg-shrine-red text-white text-sm font-black py-3 rounded-full cursor-pointer hover:opacity-90 active:scale-[0.99] transition-all">
+                <Camera className="w-4 h-4" />{reviewGoshuin.photo ? '実物の写真を撮り直す' : '実物の御朱印を写真で保存'}
+                <input ref={reviewGoshuinPhotoRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickReviewGoshuinPhoto} />
+              </label>
+              <p className="text-[10px] text-gray-400 mt-2 text-center">いただいた実物の御朱印を撮って残せます</p>
+            </div>
+          </div>
         </div>
       )}
 
