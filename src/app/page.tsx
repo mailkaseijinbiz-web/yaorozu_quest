@@ -578,6 +578,12 @@ export default function HomePage() {
     if (fresh.length) setEarnedBadge(fresh[0]);
   };
 
+  // 下に引っぱって更新：クラウドの最新スナップショットを取り込み、ローカル状態を再描画する
+  const handlePullRefresh = async () => {
+    try { await pullSnapshot(); } catch { /* ネットワークエラーは無視 */ }
+    refreshDatabaseStates();
+  };
+
   // バッジ獲得演出を数秒で自動的に閉じる
   useEffect(() => {
     if (!earnedBadge) return;
@@ -768,6 +774,7 @@ export default function HomePage() {
                 currentUser={currentUser || FALLBACK_CURRENT_USER}
                 userLocation={userLocation}
                 isGeneratingQuests={isGeneratingQuests}
+                onRefresh={handlePullRefresh}
                 guided={firstPilgrimageGuided}
                 onStartChallenge={(cid) => {
                   // 移動をともなわないクエスト（アバター設定）は地図に行かず、その場で設定モーダルを開く
@@ -911,6 +918,7 @@ export default function HomePage() {
                 spots={spots}
                 onOpenDetail={setDetailSpot}
                 onChanged={refreshDatabaseStates}
+                onRefresh={handlePullRefresh}
               />
             )}
 
@@ -923,6 +931,7 @@ export default function HomePage() {
                 spots={spots}
                 onOpenDetail={setDetailSpot}
                 onChanged={refreshDatabaseStates}
+                onRefresh={handlePullRefresh}
               />
             )}
 

@@ -8,6 +8,7 @@ import { hasGoShuin } from '../lib/goshuin';
 import { getLevelInfo } from '../data/levels';
 import { distanceKm } from '../lib/geo';
 import { ttlInfo } from '../lib/quest-ui';
+import PullToRefresh from './PullToRefresh';
 
 // 座標を持つタスク（巡る場）を現在地から順に結んだ経路。2地点以上を「周遊」とみなし、
 // 各区間距離（タスクid→km）と合計距離を返す。1地点以下なら null（従来の直線距離を使う）。
@@ -41,11 +42,13 @@ interface HomeTabProps {
   onNeedSpots?: () => void;
   /** 周辺の場とクエストをまとめて生成（「他のクエストを探す」） */
   onExploreMore?: () => void;
+  /** 下に引っぱって更新（クラウド再取得＋再描画） */
+  onRefresh?: () => void | Promise<void>;
   /** 初回ガイド: フィルタを畳み、最寄り1件だけをコーチマーク付きで提示する */
   guided?: boolean;
 }
 
-export default function HomeTab({ currentUser, userLocation, isGeneratingQuests, onStartChallenge, onEndChallenge, onNeedSpots, onExploreMore, guided }: HomeTabProps) {
+export default function HomeTab({ currentUser, userLocation, isGeneratingQuests, onStartChallenge, onEndChallenge, onNeedSpots, onExploreMore, onRefresh, guided }: HomeTabProps) {
   // localStorage 依存のため、マウント後にのみ動的レンダリング（ハイドレーション不一致回避）
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -171,7 +174,7 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
   }, [mounted, realQuestCount, filter]);
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto bg-[#f5f7fa]">
+    <PullToRefresh onRefresh={() => onRefresh?.()} className="flex flex-col bg-[#f5f7fa]">
       {/* ── ブランドヘッダー ── */}
       {/* 上部はステータスバー/Dynamic Island を避けるため safe-area-inset-top を加算（端末以外では 0） */}
       <div
@@ -302,9 +305,6 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
                     <div className="flex items-center gap-1.5">
                       {active && <span className="text-[13px] font-black bg-white/25 text-white px-1.5 py-0.5 rounded-full flex-shrink-0">挑戦中</span>}
                       {completed && !active && <span className="text-[11px] font-black bg-gold text-white px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-0.5"><Check className="w-3 h-3" />達成済み</span>}
-                      {ch.tasks.length === 1 && ch.tasks[0].type === 'goshuin' && (
-                        <span className={`text-[11px] font-black px-1.5 py-0.5 rounded-full flex-shrink-0 ${active ? 'bg-white/25 text-white' : 'bg-rose-100 text-rose-700'}`}>🔴 御朱印</span>
-                      )}
                       <h3 className={`text-base font-black truncate ${active ? 'text-white' : 'text-gray-900'}`}>{ch.title}</h3>
                     </div>
                     {qSpot?.godName ? (
@@ -507,6 +507,6 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
           </div>
         );
       })()}
-    </div>
+    </PullToRefresh>
   );
 }

@@ -10,6 +10,7 @@ import { playChime } from '../lib/sound';
 import GoshuinCelebrate from './GoshuinCelebrate';
 import { distanceKm, bearingDeg } from '../lib/geo';
 import { ttlInfo } from '../lib/quest-ui';
+import { photoThemesFor } from '../lib/photo-themes';
 import { getHeartVoices } from '../data/god-tasks';
 import { composeWalkGuide, nextGuideStage } from '../lib/walk-guide';
 import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
@@ -359,7 +360,13 @@ export default function MapTab({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           photoDataUrl: vision,
-          context: { spotName: stepSpot?.name, taskTitle: cleared.title, taskAction: cleared.action, godName: stepSpot?.godName },
+          context: {
+            spotName: stepSpot?.name,
+            taskTitle: cleared.title,
+            taskAction: cleared.action,
+            godName: stepSpot?.godName,
+            photoThemes: (cleared.type === 'photo' || cleared.photo) ? photoThemesFor(stepSpot?.category) : undefined,
+          },
         }),
         signal: AbortSignal.timeout(12_000),
       })
@@ -1187,6 +1194,22 @@ export default function MapTab({
             <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-3" />
             <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5"><Camera className="w-4 h-4 text-[#2563eb]" />証拠写真を撮影</h3>
             <p className="text-[13px] text-gray-500 mt-1">「{proofStep.title}」を達成するには、現地で証拠となる写真を撮影してください。</p>
+
+            {/* 写真タスクには、この場ならではの撮影テーマ（お題）を2〜3個ヒント表示 */}
+            {(proofStep.type === 'photo' || proofStep.photo) && (() => {
+              const cat = (proofStep.spotId ? db.getSpot(proofStep.spotId)?.category : undefined) || destSpot?.category;
+              const themes = photoThemesFor(cat);
+              return (
+                <div className="mt-2.5">
+                  <p className="text-[11px] font-black text-gray-400 mb-1.5">📸 撮影のお題（どれか一つでも）</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {themes.map((t, i) => (
+                      <span key={i} className="text-[12px] font-black px-2.5 py-1 rounded-full bg-blue-50 text-[#2563eb] border border-blue-100">{t}</span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="mt-3 rounded-2xl overflow-hidden border border-gray-200 bg-gray-100 aspect-video flex items-center justify-center">
               {uploadingProof ? (

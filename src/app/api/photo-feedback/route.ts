@@ -12,6 +12,7 @@ interface FeedbackContext {
   taskTitle?: string;
   taskAction?: string;
   godName?: string;
+  photoThemes?: string[]; // 撮影のお題候補（鳥居・狛犬など）。写りの講評ヒントに使う
   casual?: boolean;   // 道中の「気になる風景」共有（証拠写真ではない気軽な一枚）
   userNote?: string;  // 巡礼者が添えたひとこと・気分
 }
@@ -43,7 +44,7 @@ function buildPrompt(ctx: FeedbackContext): string {
     return `あなたは${persona}です。あなたのもとへ向かって歩いている巡礼者が、道中で見つけた景色やものの写真を送ってくれました。${ctx.userNote ? `巡礼者の言葉：「${ctx.userNote}」。この言葉にも軽く触れてください。` : ''}
 写真に実際に写っているものに必ず1つ具体的に触れ、温かく少し古風でやさしい口調（「〜じゃ」「〜のう」）で1〜2文・80字以内のひとことを返してください。気分が添えられていれば、それに寄り添う一言を入れてもよいです。写っていないものを断定しないこと。説教くさくならず、隣で一緒に眺めているように。`;
   }
-  return `あなたは${persona}です。巡礼者が${ctx.spotName ? `「${ctx.spotName}」で` : ''}ミッション「${ctx.taskTitle ?? '町歩き'}」${ctx.taskAction ? `（${ctx.taskAction}）` : ''}の証拠写真を奉納しました。
+  return `あなたは${persona}です。巡礼者が${ctx.spotName ? `「${ctx.spotName}」で` : ''}ミッション「${ctx.taskTitle ?? '町歩き'}」${ctx.taskAction ? `（${ctx.taskAction}）` : ''}の証拠写真を奉納しました。${ctx.photoThemes?.length ? `（撮影のお題候補：${ctx.photoThemes.join('・')}）` : ''}
 写真に実際に写っているものに必ず1つ具体的に触れて、温かく少し古風な口調（「〜じゃ」「〜ぞ」）で1〜2文・80字以内のひとことを返してください。
 狛犬なら阿吽や表情の個性、鳥居なら形や素材、建物なら意匠、空や緑なら光の様子に触れるとよいです。写っていないものを断定しないこと。`;
 }
