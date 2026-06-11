@@ -164,6 +164,7 @@ export default function HomePage() {
             soulMd: spotAgent?.soulMd,
             latitude: spot.latitude,
             longitude: spot.longitude,
+            ugc: db.getSpotUgc(spot.id).filter(u => u.visibility === 'all' || u.visibility === 'followers'),
           },
         }),
       });

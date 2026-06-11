@@ -92,6 +92,9 @@ export interface Task {
 
   /** resolveIssue 用。参照する課題 */
   issueRef?: IssueRef;
+
+  /** UGCから派生したタスクの場合、その元となったUGCのID（利他の配当用） */
+  sourceUgcId?: string;
 }
 
 /** クエスト = タスクの集まり（旧 Challenge）。 */

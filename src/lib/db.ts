@@ -13,6 +13,7 @@ export interface User {
   totalToku: number;
   currentTitle: string;
   avatarFrameColor?: string; // Special visual indicator for Creators
+  pendingDividends?: { amount: number; message: string }[]; // 未受領の利他の配当（他者が自分のUGCに起因するクエストをクリアした時の報酬）
 }
 
 export interface Spot {

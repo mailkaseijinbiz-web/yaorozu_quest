@@ -18,6 +18,7 @@ interface SpotInput {
   soulMd?: string;
   latitude?: number;
   longitude?: number;
+  ugc?: { id: string; content: string; userDisplayName: string }[];
 }
 
 const KNOWN_TYPES = Object.keys(TASK_CATALOG) as TaskType[];
@@ -57,6 +58,9 @@ function coerceTask(raw: unknown, i: number, spot: SpotInput): Task {
     task.trivia = r.trivia.trim().slice(0, 140);
     const cat = String(r.triviaCategory ?? '');
     task.triviaCategory = (['地形', '歴史', '建築', '道路'] as const).find((c) => c === cat) ?? '歴史';
+  }
+  if (typeof r.sourceUgcId === 'string' && r.sourceUgcId) {
+    task.sourceUgcId = r.sourceUgcId;
   }
   return task;
 }
@@ -102,6 +106,12 @@ function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '
         .map((t) => `- 【${t.landmark ?? t.area}】${t.body.slice(0, 160)}${t.walkTips[0] ? ` ／ 観察: ${t.walkTips[0]}` : ''}`)
         .join('\n')}`
     : '';
+  // 場のUGC（過去の巡礼者の声）。モデルがクエスト生成の題材（discover, verify等）にしてよい素材。
+  const ugcContext = spot.ugc && spot.ugc.length
+    ? `\n過去の巡礼者の声（UGC。これを題材にしたタスクを作る場合は、sourceUgcId にこのIDを含めること）:\n${spot.ugc
+        .map((u) => `- [ID: ${u.id}] ${u.userDisplayName}「${u.content}」`)
+        .join('\n')}`
+    : '';
   return `${policy}${base}あなたは位置情報巡礼ゲーム「八百万クエスト」のクエストデザイナーです。
 以下の「場」を題材に、街歩き型のクエストを${count}個、日本語で考えてください。
 
@@ -114,7 +124,7 @@ function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '
 生成の制約条件:
 - resolveIssue は「課題」が存在する場合のみ使用し、issueIndex で何番目の課題かを必ず示す（課題が無ければ使わない）。
 - value_ask / issue_ask は、価値・課題がまだ薄い場で特に有効（人間から集めて充実させる）。
-- bonnou_ask は人間の内面が対象で場に依存しない。bonnou_resolve は bonnou_ask の後に意味を持つ。
+- 過去の巡礼者の声（UGC）がある場合、それを元に「この声は本当か確かめよう（verify）」や「この人が見つけたものを探そう（discover）」といったタスクを作り、JSONの sourceUgcId フィールドにそのUGCのIDを入れてください。
 - 価値タスクは「楽しみ方」から、操作タスクは「課題」から作ってください。
 - 参拝・信仰の所作（goshuin 御朱印をもらう / donate お賽銭を捧げる / gratitude 感謝を捧げる）や、覚りを高める所作（bonnou_resolve 煩悩を手放す / meditate 瞑想する）も適宜織り交ぜてください。特に神社・寺院など霊的な場では積極的に取り入れます。
 - 各タスクに trivia（その場所・土地にまつわる豆知識1〜2文。達成時にユーザーへ表示される）を付けてください。下の「実在の素材」があればそれを最優先に使い、無ければ寺社の作法・見どころ・歩き方の一般知識にします。素材に無い固有名詞は創作しません。triviaCategory は 地形/歴史/建築/道路 のいずれか。
@@ -129,10 +139,10 @@ function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '
 カテゴリ: ${spot.category}
 説明: ${spot.description ?? ''}
 価値（楽しみ方）: ${(spot.enjoyments ?? []).join(' / ') || '（未収集）'}
-課題: ${(spot.issues ?? []).map((s, i) => `[${i}] ${s}`).join(' / ') || '（なし）'}${materials}${spotPolicy}${soul}
+課題: ${(spot.issues ?? []).map((s, i) => `[${i}] ${s}`).join(' / ') || '（なし）'}${materials}${spotPolicy}${soul}${ugcContext}
 
 必ず次のJSONだけを出力してください（前後に文章を付けない）:
-{"quests":[{"title":"クエスト名","description":"100字以内の導入","difficulty":1,"estMinutes":20,"badgeIcon":"絵文字","badgeName":"バッジ名","tasks":[{"type":"visit","title":"タスク名","action":"行動指示","reward":20,"issueIndex":0,"trivia":"豆知識1〜2文","triviaCategory":"歴史"}]}]}`;
+{"quests":[{"title":"クエスト名","description":"100字以内の導入","difficulty":1,"estMinutes":20,"badgeIcon":"絵文字","badgeName":"バッジ名","tasks":[{"type":"visit","title":"タスク名","action":"行動指示","reward":20,"issueIndex":0,"trivia":"豆知識1〜2文","triviaCategory":"歴史","sourceUgcId":"(UGCを元にした場合のみIDを入れる)"}]}]}
 }
 
 function extractJson(text: string): unknown {
