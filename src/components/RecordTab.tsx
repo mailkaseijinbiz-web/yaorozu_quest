@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { Search, MapPin, Camera, CalendarDays, Trash2, Check, Stamp, NotebookPen, X, Plus } from 'lucide-react';
+import { Search, MapPin, Camera, CalendarDays, Trash2, Check, Stamp, NotebookPen, X } from 'lucide-react';
 import { Spot, User as UserType, db } from '../lib/db';
 import { distanceKm } from '../lib/geo';
 import {
@@ -9,10 +9,16 @@ import {
   addVisitRecord,
   deleteVisitRecord,
   countVisitsForSpot,
+  hasRecordForSpotOnDate,
+  recordPhotos,
+  MAX_RECORD_PHOTOS,
   VisitRecord,
 } from '../lib/visit-records';
-import { getGoShuinList, addPhotoGoshuin, deleteGoshuin, Goshuin } from '../lib/goshuin';
+import { getGoShuinList, addPhotoGoshuin, deleteGoshuin, grantGoShuin, hasGoShuin, Goshuin } from '../lib/goshuin';
 import { compressImage } from '../lib/upload';
+
+/** デジタル御朱印を取得できる距離（メートル）。これ未満で取得可能。 */
+const GOSHUIN_RANGE_M = 100;
 
 interface RecordTabProps {
   currentUser: UserType;
@@ -43,8 +49,9 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
   const [selected, setSelected] = useState<Spot | null>(null);
   const [date, setDate] = useState(todayInput());
   const [note, setNote] = useState('');
-  const [photo, setPhoto] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [goshuinMsg, setGoshuinMsg] = useState<string | null>(null); // 御朱印取得のフィードバック
 
   // 現在地から近い順の寺社（「ここに行った？」候補）。
   // 最初は3件だけ見せて「もっと見る」で広げる（記録フォームが主役なので控えめに）。
@@ -81,27 +88,37 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
     return same.findIndex((r) => r.id === rec.id) + 1;
   };
 
+  // 写真を追加（複数選択可・最大 MAX_RECORD_PHOTOS 枚まで）
   const onPickPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!f) return;
-    try {
-      setPhoto(await compressImage(f, { maxDim: 900, quality: 0.6 }));
-    } catch {
-      /* 読み込み失敗は無視（写真なしで記録できる） */
+    if (!files.length) return;
+    const room = MAX_RECORD_PHOTOS - photos.length;
+    if (room <= 0) return;
+    const added: string[] = [];
+    for (const f of files.slice(0, room)) {
+      try {
+        added.push(await compressImage(f, { maxDim: 900, quality: 0.6 }));
+      } catch {
+        /* 読み込み失敗は無視（その1枚をスキップ） */
+      }
     }
+    if (added.length) setPhotos((prev) => [...prev, ...added].slice(0, MAX_RECORD_PHOTOS));
   };
+
+  const removePhoto = (idx: number) => setPhotos((prev) => prev.filter((_, i) => i !== idx));
 
   const resetForm = () => {
     setSelected(null);
     setQuery('');
     setNote('');
-    setPhoto(null);
+    setPhotos([]);
+    setGoshuinMsg(null);
     setDate(todayInput());
   };
 
   // 記録を保存（徳の探訪ボーナスも付与）
-  const saveRecord = (spot: Spot, opts?: { visitedAt?: string; note?: string; photo?: string }) => {
+  const saveRecord = (spot: Spot, opts?: { visitedAt?: string; note?: string; photos?: string[] }) => {
     setSaving(true);
     try {
       addVisitRecord(currentUser.id, spot, opts);
@@ -115,12 +132,32 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
 
   const onSubmitForm = () => {
     if (!selected || saving) return;
-    saveRecord(selected, {
-      visitedAt: new Date(`${date}T12:00:00`).toISOString(),
-      note,
-      photo: photo ?? undefined,
-    });
+    const visitedAt = new Date(`${date}T12:00:00`).toISOString();
+    // 1日1投稿：同じ寺社・同じ日にすでに記録があれば追加しない
+    if (hasRecordForSpotOnDate(currentUser.id, selected.id, visitedAt)) {
+      alert('この寺社のこの日の記録はすでにあります（1日にひとつの投稿）。');
+      return;
+    }
+    saveRecord(selected, { visitedAt, note, photos });
     resetForm();
+  };
+
+  // デジタル御朱印を取得（選択中の寺社から100m未満でのみ取得可能）
+  const selectedDist = selected ? distanceKm(userLocation.lat, userLocation.lng, selected.latitude, selected.longitude) : Infinity;
+  const selectedInRange = selectedDist * 1000 < GOSHUIN_RANGE_M;
+  const selectedHasGoshuin = selected ? hasGoShuin(currentUser.id, selected.id) : false;
+  const onGetGoshuin = () => {
+    if (!selected) return;
+    if (selectedHasGoshuin) { setGoshuinMsg('この場の御朱印はすでに授かっています。'); return; }
+    if (!selectedInRange) { setGoshuinMsg(`御朱印は${GOSHUIN_RANGE_M}m未満に近づくと授かれます。`); return; }
+    const granted = grantGoShuin(currentUser.id, selected, selected.godName || '');
+    if (granted) {
+      setGoshuinMsg('🧧 デジタル御朱印を授かりました！');
+      refreshGoshuin();
+      onChanged?.();
+    } else {
+      setGoshuinMsg('御朱印を保存できませんでした。');
+    }
   };
 
   // ── 御朱印（撮影して保存）──
@@ -278,23 +315,66 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                   placeholder="ひとことメモ（任意）"
                   className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-shrine-red resize-none"
                 />
-                {photo ? (
-                  <div className="relative rounded-xl overflow-hidden border border-gray-200">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={photo} alt="参拝の写真" className="w-full max-h-48 object-cover" />
-                    <button
-                      onClick={() => setPhoto(null)}
-                      className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/50 text-white flex items-center justify-center cursor-pointer"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
+                {/* 写真（最大 MAX_RECORD_PHOTOS 枚）。複数選択して追加できる */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[12px] font-bold text-gray-500">写真（任意・最大{MAX_RECORD_PHOTOS}枚）</span>
+                    <span className="text-[11px] font-black text-gray-400">{photos.length}/{MAX_RECORD_PHOTOS}</span>
                   </div>
-                ) : (
-                  <label className="flex items-center justify-center gap-1.5 bg-gray-100 text-gray-600 text-[13px] font-black py-2.5 rounded-xl cursor-pointer hover:bg-gray-200 transition-all">
-                    <Camera className="w-4 h-4" />写真を追加（御朱印など・任意）
-                    <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickPhoto} />
-                  </label>
-                )}
+                  {photos.length > 0 && (
+                    <div className="grid grid-cols-3 gap-1.5 mb-1.5">
+                      {photos.map((p, i) => (
+                        <div key={i} className="relative aspect-square rounded-xl overflow-hidden border border-gray-200">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={p} alt={`参拝の写真${i + 1}`} className="w-full h-full object-cover" />
+                          <button
+                            onClick={() => removePhoto(i)}
+                            className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/50 text-white flex items-center justify-center cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {photos.length < MAX_RECORD_PHOTOS && (
+                    <label className="flex items-center justify-center gap-1.5 bg-gray-100 text-gray-600 text-[13px] font-black py-2.5 rounded-xl cursor-pointer hover:bg-gray-200 transition-all">
+                      <Camera className="w-4 h-4" />写真を追加（御朱印など・複数可）
+                      <input type="file" accept="image/*" multiple className="hidden" onChange={onPickPhoto} />
+                    </label>
+                  )}
+                </div>
+
+                {/* デジタル御朱印の取得（100m未満でのみ） */}
+                <div>
+                  <button
+                    onClick={onGetGoshuin}
+                    disabled={selectedHasGoshuin || !selectedInRange}
+                    className={`w-full flex items-center justify-center gap-1.5 text-sm font-black py-3 rounded-xl transition-all ${
+                      selectedHasGoshuin
+                        ? 'bg-emerald-50 text-emerald-600 cursor-default'
+                        : selectedInRange
+                        ? 'bg-rose-600 text-white hover:opacity-90 active:scale-[0.99] cursor-pointer'
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    <Stamp className="w-4 h-4" />
+                    {selectedHasGoshuin
+                      ? 'デジタル御朱印 取得済み'
+                      : selectedInRange
+                      ? 'デジタル御朱印を取得'
+                      : `デジタル御朱印を取得（${GOSHUIN_RANGE_M}m未満で取得可）`}
+                  </button>
+                  {goshuinMsg ? (
+                    <p className="text-[11px] font-bold text-gray-500 mt-1.5 text-center">{goshuinMsg}</p>
+                  ) : !selectedHasGoshuin ? (
+                    <p className="text-[11px] text-gray-400 mt-1.5 text-center">
+                      現在地から {selectedDist < 1 ? `${Math.round(selectedDist * 1000)}m` : `${selectedDist.toFixed(1)}km`}
+                      {selectedInRange ? '・取得できます' : `・あと ${Math.max(0, Math.round(selectedDist * 1000 - GOSHUIN_RANGE_M))}m`}
+                    </p>
+                  ) : null}
+                </div>
+
                 <button
                   onClick={onSubmitForm}
                   disabled={saving}
@@ -360,11 +440,18 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
               </div>
             ) : (
               <div className="space-y-2">
-                {sortedRecords.map((rec) => (
+                {sortedRecords.map((rec) => {
+                  const pics = recordPhotos(rec);
+                  return (
                   <div key={rec.id} className="flex gap-3 bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
-                    {rec.photo ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={rec.photo} alt={rec.spotName} className="w-16 h-16 rounded-xl object-cover flex-shrink-0" />
+                    {pics.length > 0 ? (
+                      <div className="relative w-16 h-16 flex-shrink-0">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={pics[0]} alt={rec.spotName} className="w-16 h-16 rounded-xl object-cover" />
+                        {pics.length > 1 && (
+                          <span className="absolute bottom-1 right-1 text-[10px] font-black text-white bg-black/55 rounded-full px-1.5 py-0.5 leading-none">+{pics.length - 1}</span>
+                        )}
+                      </div>
                     ) : (
                       <div className="w-16 h-16 rounded-xl flex items-center justify-center text-3xl flex-shrink-0 bg-gradient-to-br from-blue-50 to-amber-50">{rec.godEmoji}</div>
                     )}
@@ -386,7 +473,8 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>

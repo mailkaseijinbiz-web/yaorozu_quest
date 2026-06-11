@@ -168,6 +168,15 @@
   100% { transform: translateY(0)    scale(1);   opacity: 1; }
 }
 
+/* クエストの追加・削除（リスト）— 横からスライドしてふわっと現れ、消える時は逆向きに退場 */
+.quest-card-in { animation: quest-card-in 0.42s cubic-bezier(0.2, 0.9, 0.2, 1) both; }
+@keyframes quest-card-in { from { transform: translateX(32px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+.quest-card-out { animation: quest-card-out 0.34s cubic-bezier(0.4, 0, 0.6, 1) both; pointer-events: none; overflow: hidden; }
+@keyframes quest-card-out {
+  from { transform: translateX(0); opacity: 1; max-height: 220px; }
+  to { transform: translateX(32px); opacity: 0; max-height: 0; margin-top: -0.75rem; }
+}
+
 /* クエスト開始時のふわっと登場（ヘッダーは上から・下部オーバーレイは下から） */
 .quest-header-in { animation: quest-header-in 0.45s cubic-bezier(0.2, 0.9, 0.2, 1) both; }
 @keyframes quest-header-in { from { transform: translateY(-110%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
