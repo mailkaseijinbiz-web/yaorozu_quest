@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark } from 'lucide-react';
+import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark, Crown } from 'lucide-react';
 import { Spot, Agent, User, db, isVerifiedSpot, type UgcVisibility } from '../lib/db';
 import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
@@ -118,6 +118,10 @@ function SpotDetailBody({
   // クエスト写真の評価タスク
   const [evaluating, setEvaluating] = useState(false);
   const [evalIdx, setEvalIdx] = useState(0);
+
+  // 創世主設定
+  const [isCreatorModalOpen, setIsCreatorModalOpen] = useState(false);
+  const [creatorFirstMessage, setCreatorFirstMessage] = useState(agent.firstMessage || '');
 
   // チャット
   const [messages, setMessages] = useState<Message[]>([]);
@@ -569,6 +573,13 @@ function SpotDetailBody({
               );
             })()}
           </div>
+          {spot.creatorId === currentUser.id && (
+            <div className="mt-4 p-4 bg-amber-50/50 border border-gold/30 rounded-2xl">
+              <h4 className="text-[13px] font-black text-amber-800 flex items-center gap-1.5"><Crown className="w-4 h-4 text-gold"/>あなたは創世主です</h4>
+              <p className="text-[11px] text-amber-700/80 mt-1 mb-3 leading-relaxed">この地に宿る神の振る舞いを設定し、訪れる巡礼者を導きましょう。</p>
+              <button onClick={() => setIsCreatorModalOpen(true)} className="w-full bg-gold text-white text-xs font-black py-2.5 rounded-xl shadow-sm hover:opacity-90 transition-all cursor-pointer">神をカスタマイズする</button>
+            </div>
+          )}
         </div>
       ) : tab === 'photos' ? (
         /* ── みんなの写真（タブ） ── */

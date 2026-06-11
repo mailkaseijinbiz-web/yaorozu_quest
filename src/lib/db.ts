@@ -105,6 +105,7 @@ export interface Agent {
   haloColor: string; // Hex color for halo
   accessoryType: string; // '鏡' | '剣' | '扇子' | 'なし'
   voiceTone: '厳格' | '親しみやすい' | '神秘的' | '高飛車' | '賢者';
+  firstMessage?: string; // 創世主が設定した、この神が旅人に投げかける最初の問い（ファーストメッセージ）
   identityMd?: string; // この神のアイデンティティ文書（事実・価値・課題）。未設定なら生成。
   soulMd?: string; // この神の魂文書（人格・語り口・世界観）。未設定なら生成。
   createdAt?: string; // ISO 8601 — 生成・作成日時。旧レコードは undefined。
