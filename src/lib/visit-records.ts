@@ -18,12 +18,34 @@ export interface VisitRecord {
   lng: number;
   visitedAt: string; // ISO 8601（参拝した日）
   note?: string;
-  photo?: string; // 圧縮 dataURL（任意・容量超過時は写真なしで保存）
+  photo?: string; // 旧データ（1枚）。後方互換のため読み取り専用で残す
+  photos?: string[]; // 圧縮 dataURL（最大 MAX_RECORD_PHOTOS 枚・任意・容量超過時は写真なしで保存）
   createdAt: string; // ISO 8601（記録を作った日時）
 }
 
+/** 1投稿に添付できる写真の上限 */
+export const MAX_RECORD_PHOTOS = 30;
+
 const KEY = 'yaorozu_visit_records';
 const storageKey = (userId: string) => `${KEY}_${userId}`;
+
+/** 記録の写真を配列で返す（旧 photo 単体データも 1 枚として吸収する）。 */
+export function recordPhotos(rec: VisitRecord): string[] {
+  if (rec.photos && rec.photos.length) return rec.photos;
+  return rec.photo ? [rec.photo] : [];
+}
+
+/** ローカル時刻での日付キー（YYYY-M-D）。1日1投稿の判定に使う。 */
+const dayKey = (iso: string): string => {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+};
+
+/** その寺社について、指定日にすでに記録（投稿）があるか。1日1投稿の制限に使う。 */
+export function hasRecordForSpotOnDate(userId: string, spotId: string, visitedAtISO: string): boolean {
+  const k = dayKey(visitedAtISO);
+  return getVisitRecords(userId).some((r) => r.spotId === spotId && dayKey(r.visitedAt) === k);
+}
 
 export function getVisitRecords(userId: string): VisitRecord[] {
   if (typeof window === 'undefined') return [];
@@ -50,9 +72,10 @@ function write(userId: string, list: VisitRecord[]): boolean {
 export function addVisitRecord(
   userId: string,
   spot: { id: string; name: string; category: string; latitude: number; longitude: number; godEmoji?: string },
-  input?: { visitedAt?: string; note?: string; photo?: string }
+  input?: { visitedAt?: string; note?: string; photos?: string[] }
 ): VisitRecord | null {
   const now = new Date().toISOString();
+  const photos = (input?.photos || []).slice(0, MAX_RECORD_PHOTOS);
   const rec: VisitRecord = {
     id: `${spot.id}_${Date.now()}`,
     spotId: spot.id,
@@ -63,14 +86,14 @@ export function addVisitRecord(
     lng: spot.longitude,
     visitedAt: input?.visitedAt || now,
     note: input?.note?.trim() || undefined,
-    photo: input?.photo,
+    photos: photos.length ? photos : undefined,
     createdAt: now,
   };
   const list = getVisitRecords(userId);
   if (write(userId, [rec, ...list])) return rec;
-  // 容量超過 → 写真を外して保存し直す
-  if (rec.photo) {
-    rec.photo = undefined;
+  // 容量超過 → 写真を減らして（最終的に外して）保存し直す
+  if (rec.photos) {
+    rec.photos = undefined;
     if (write(userId, [rec, ...list])) return rec;
   }
   return null;

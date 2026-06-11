@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { db, Spot, Activity, ActivityType, ActivitySource } from '../../lib/db';
 import { CHALLENGES } from '../../data/challenges';
+import { getVisitRecords, recordPhotos, VisitRecord } from '../../lib/visit-records';
 import { PER_PAGE, Pager } from './ui';
 
 // アクティビティ＝巡礼者の行動ログ（クエストに参加・場所に行く・依頼達成 等を時系列で保持）
@@ -32,15 +33,21 @@ function timeAgo(iso: string): string {
   return `${Math.floor(h / 24)}日前`;
 }
 
+// 巡礼者の投稿（記録）も同じタイムラインに統合して表示する
+type Row =
+  | { kind: 'act'; t: number; a: Activity }
+  | { kind: 'rec'; t: number; r: VisitRecord };
+
 export function ActivityManager({ spots }: { spots: Spot[] }) {
   const [page, setPage] = useState(0);
-  const [filter, setFilter] = useState<'all' | 'quest' | 'visit'>('all');
+  const [filter, setFilter] = useState<'all' | 'quest' | 'visit' | 'post'>('all');
   const [sourceFilter, setSourceFilter] = useState<'all' | ActivitySource>('all');
   const [all, setAll] = useState<Activity[]>(() => db.getActivities());
+  const [records, setRecords] = useState<VisitRecord[]>(() => getVisitRecords('user-self'));
 
   // リアルタイム同期：同タブ（カスタムイベント）＋別タブ（storage イベント）
   useEffect(() => {
-    const refresh = () => setAll(db.getActivities());
+    const refresh = () => { setAll(db.getActivities()); setRecords(getVisitRecords('user-self')); };
     window.addEventListener('yaorozu:activity', refresh);
     window.addEventListener('storage', refresh);
     return () => {
@@ -52,8 +59,19 @@ export function ActivityManager({ spots }: { spots: Spot[] }) {
   const challengeTitle = (id?: string) => (id ? (CHALLENGES.find((c) => c.id === id)?.title ?? id) : '');
   const spotName = (id?: string) => (id ? (spots.find((s) => s.id === id)?.name ?? id) : '');
 
-  const filtered = all.filter((a) => {
-    const typeOk = filter === 'all' ? true : filter === 'quest' ? a.type.startsWith('quest') : a.type === 'visit';
+  // アクティビティ＋投稿を時系列にマージしてフィルタ
+  const rows: Row[] = [
+    ...all.map((a): Row => ({ kind: 'act', t: new Date(a.createdAt).getTime(), a })),
+    ...records.map((r): Row => ({ kind: 'rec', t: new Date(r.createdAt || r.visitedAt).getTime(), r })),
+  ].sort((x, y) => y.t - x.t);
+
+  const filtered = rows.filter((row) => {
+    if (row.kind === 'rec') {
+      // 投稿（記録）は人間の行動。'system' 絞り込み時は除外
+      return (filter === 'all' || filter === 'post') && sourceFilter !== 'system';
+    }
+    const a = row.a;
+    const typeOk = filter === 'all' ? true : filter === 'quest' ? a.type.startsWith('quest') : filter === 'visit' ? a.type === 'visit' : false;
     const srcOk = sourceFilter === 'all' ? true : (a.source ?? 'human') === sourceFilter;
     return typeOk && srcOk;
   });
@@ -63,6 +81,7 @@ export function ActivityManager({ spots }: { spots: Spot[] }) {
     { k: 'all', label: 'すべて' },
     { k: 'quest', label: 'クエスト' },
     { k: 'visit', label: '訪問' },
+    { k: 'post', label: '投稿' },
   ] as const;
 
   const SOURCE_FILTERS: { k: 'all' | ActivitySource; label: string; icon: string }[] = [
@@ -98,12 +117,44 @@ export function ActivityManager({ spots }: { spots: Spot[] }) {
       </div>
 
       {pageItems.length === 0 ? (
-        <p className="text-center text-xs text-gray-400 py-10">まだアクティビティがありません。<br />アプリでクエストに参加したり、場所を訪れると記録されます。</p>
+        <p className="text-center text-xs text-gray-400 py-10">まだアクティビティがありません。<br />アプリでクエストに参加したり、場所を訪れたり、記録を投稿すると残ります。</p>
       ) : (
         <div className="relative pl-4">
           <div className="absolute left-1.5 top-1 bottom-1 w-px bg-gray-200" />
           <div className="space-y-2">
-            {pageItems.map((a) => {
+            {pageItems.map((row) => {
+              // ── 投稿（記録）：写真サムネイル付きで表示 ──
+              if (row.kind === 'rec') {
+                const r = row.r;
+                const pics = recordPhotos(r);
+                return (
+                  <div key={`rec-${r.id}`} className="relative bg-white rounded-xl border border-gray-100 shadow-sm p-2.5 pl-3">
+                    <div className="absolute -left-[14px] top-3 w-3 h-3 rounded-full bg-white border-2 border-pink-400" />
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg shrink-0">📝</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] font-black text-gray-800 truncate"><span className="text-pink-600">記録を投稿</span><span className="text-gray-700"> 「{r.spotName}」</span></p>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <p className="text-[10px] text-gray-400">{timeAgo(r.createdAt || r.visitedAt)}{pics.length ? ` ・ 写真${pics.length}枚` : ''}</p>
+                          <span className="text-[9px] font-black bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">👤 人間</span>
+                        </div>
+                      </div>
+                    </div>
+                    {r.note && <p className="text-[11px] text-gray-600 mt-1.5 line-clamp-2">{r.note}</p>}
+                    {pics.length > 0 && (
+                      <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                        {pics.slice(0, 8).map((p, i) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img key={i} src={p} alt={`${r.spotName}の写真${i + 1}`} className="w-12 h-12 rounded-lg object-cover border border-gray-100" />
+                        ))}
+                        {pics.length > 8 && <span className="w-12 h-12 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center text-[11px] font-black text-gray-500">+{pics.length - 8}</span>}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+              // ── 通常のアクティビティ ──
+              const a = row.a;
               const m = META[a.type];
               const target = a.challengeId ? `「${challengeTitle(a.challengeId)}」` : a.spotId ? `「${spotName(a.spotId)}」` : '';
               return (

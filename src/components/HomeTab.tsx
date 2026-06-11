@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Trophy, Flag, Clock, X, Check, Hourglass } from 'lucide-react';
-import { User, db, QUEST_TTL_MS, StreakInfo } from '../lib/db';
+import { User, db, QUEST_TTL_MS } from '../lib/db';
 import { difficultyLabel, terrainLabel, Challenge } from '../data/challenges';
 import { getLevelInfo } from '../data/levels';
 import { distanceKm } from '../lib/geo';
@@ -52,16 +52,6 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
     return () => clearInterval(t);
   }, []);
 
-  // 参拝ストリーク（日参）。徳を得る行動のたびに 'yaorozu:activity' が飛ぶので購読して即時更新
-  const [streak, setStreak] = useState<StreakInfo | null>(null);
-  useEffect(() => {
-    if (!mounted) return;
-    const update = () => setStreak(db.getStreakInfo());
-    update();
-    window.addEventListener('yaorozu:activity', update);
-    return () => window.removeEventListener('yaorozu:activity', update);
-  }, [mounted]);
-
   const progress = db.getChallengeProgress();
   const userLevel = getLevelInfo(currentUser.totalToku).current.level;
 
@@ -96,6 +86,45 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
   // 初回ガイド中は最寄りの1件だけに集中させる（最初の一手を明確にする）
   const shown = guided ? nearChallenges.slice(0, 1) : visibleChallenges;
 
+  // クエストの追加・削除をスライド＆フェードで見せるための描画リスト。
+  // shown（実データ）の差分を取り、新規は entering、消えたものは exiting にして
+  // 退場アニメーション（約340ms）を待ってから取り除く。
+  type RenderItem = { ch: Challenge; entering: boolean; exiting: boolean };
+  const [renderItems, setRenderItems] = useState<RenderItem[]>(() => shown.map((ch) => ({ ch, entering: false, exiting: false })));
+  const exitTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const shownIds = shown.map((c) => c.id).join(',');
+  useEffect(() => {
+    setRenderItems((prev) => {
+      const prevActiveIds = new Set(prev.filter((p) => !p.exiting).map((p) => p.ch.id));
+      const nextIds = new Set(shown.map((c) => c.id));
+      // 現在の shown を基準に並べ直す（新規は entering）
+      const result: RenderItem[] = shown.map((ch) => {
+        // 退場アニメ中に復活した場合は、保留中の削除タイマーを取り消す
+        if (exitTimers.current[ch.id]) { clearTimeout(exitTimers.current[ch.id]); delete exitTimers.current[ch.id]; }
+        return { ch, entering: !prevActiveIds.has(ch.id), exiting: false };
+      });
+      // shown から消えたものは元の位置付近に exiting として差し戻し、退場後に取り除く
+      prev.forEach((it, idx) => {
+        if (it.exiting) return; // すでに退場中
+        if (!nextIds.has(it.ch.id)) {
+          result.splice(Math.min(idx, result.length), 0, { ch: it.ch, entering: false, exiting: true });
+          if (!exitTimers.current[it.ch.id]) {
+            exitTimers.current[it.ch.id] = setTimeout(() => {
+              delete exitTimers.current[it.ch.id];
+              setRenderItems((cur) => cur.filter((c) => c.ch.id !== it.ch.id));
+            }, 340);
+          }
+        }
+      });
+      return result;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownIds]);
+  // アンマウント時に保留中の退場タイマーを片付ける
+  useEffect(() => () => { Object.values(exitTimers.current).forEach(clearTimeout); }, []);
+  // 入場アニメーション完了後に entering フラグを下ろす（再生は一度だけ）
+  const clearEntering = (id: string) => setRenderItems((cur) => cur.map((it) => (it.ch.id === id ? { ...it, entering: false } : it)));
+
   // クエストが表示されていないとき（'done'フィルタ除く）、場の生成をリクエスト
   useEffect(() => {
     if (!mounted) return;
@@ -116,20 +145,6 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
           <span className="text-shrine-red">YAOROZU</span>
           <span className="text-gray-900"> QUEST</span>
         </h1>
-
-        {/* 参拝ストリーク（日参）。今日まだ徳を積んでいない日は灰色で誘う */}
-        {mounted && streak && streak.current > 0 && (
-          <div
-            className={`mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-[12px] font-black ${
-              streak.todayDone
-                ? 'bg-orange-50 border-orange-200 text-orange-600'
-                : 'bg-gray-100 border-gray-200 text-gray-400'
-            }`}
-          >
-            <span className={streak.todayDone ? '' : 'grayscale opacity-60'}>🔥</span>
-            {streak.todayDone ? `日参 ${streak.current}日目` : `日参 ${streak.current}日 — 今日の参拝はまだ`}
-          </div>
-        )}
       </div>
 
       {/* ── 近くのヤオロズクエスト（チャレンジ） ── */}
@@ -185,7 +200,7 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
           </div>
         ) : (
         <div className="flex flex-col gap-3">
-          {shown.map((ch) => {
+          {renderItems.map(({ ch, entering, exiting }) => {
             const diff = difficultyLabel(ch.difficulty);
             const qSpot = ch.spotId ? db.getSpot(ch.spotId) : null; // 神名＋地形バッジ用
             const ter = qSpot ? terrainLabel(qSpot.terrain) : null;
@@ -204,9 +219,12 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
             return (
               <button
                 key={ch.id}
-                onClick={() => setConfirmCh(ch)}
+                onClick={() => !exiting && setConfirmCh(ch)}
                 aria-label={`クエスト「${ch.title}」を開く`}
+                onAnimationEnd={(e) => { if (entering && e.target === e.currentTarget) clearEntering(ch.id); }}
                 className={`w-full text-left rounded-2xl overflow-hidden transition-all cursor-pointer active:scale-[0.99] ${
+                  exiting ? 'quest-card-out' : entering ? 'quest-card-in' : ''
+                } ${
                   active
                     ? 'bg-[#2563eb] shadow-md'
                     : completed

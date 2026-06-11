@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, NotebookPen, CalendarDays } from 'lucide-react';
+import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, NotebookPen, CalendarDays, Stamp } from 'lucide-react';
 import { Spot, Agent, User, db, isVerifiedSpot, isQuotaError, type UgcVisibility } from '../lib/db';
 import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
 import { uploadImage, compressImage } from '../lib/upload';
-import { getVisitRecords, addVisitRecord, deleteVisitRecord, type VisitRecord } from '../lib/visit-records';
+import { getVisitRecords, addVisitRecord, deleteVisitRecord, hasRecordForSpotOnDate, recordPhotos, MAX_RECORD_PHOTOS, type VisitRecord } from '../lib/visit-records';
 import { getAddress } from '../lib/address';
 import { shareToSns } from '../lib/share';
 import { grantGoShuin, hasGoShuin, getGoShuinList } from '../lib/goshuin';
@@ -203,29 +203,42 @@ function SpotDetailBody({
   const [recFormOpen, setRecFormOpen] = useState(false);
   const [recDate, setRecDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [recNote, setRecNote] = useState('');
-  const [recPhoto, setRecPhoto] = useState<string | null>(null);
+  const [recPhotos, setRecPhotos] = useState<string[]>([]);
   const [recSaving, setRecSaving] = useState(false);
   const recPhotoInputRef = useRef<HTMLInputElement>(null);
 
+  // 写真を追加（複数選択可・最大 MAX_RECORD_PHOTOS 枚まで）
   const onPickRecPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!f) return;
-    try {
-      setRecPhoto(await compressImage(f, { maxDim: 900, quality: 0.6 }));
-    } catch {
-      /* 読み込み失敗は無視（写真なしで記録できる） */
+    if (!files.length) return;
+    const room = MAX_RECORD_PHOTOS - recPhotos.length;
+    if (room <= 0) return;
+    const added: string[] = [];
+    for (const f of files.slice(0, room)) {
+      try {
+        added.push(await compressImage(f, { maxDim: 900, quality: 0.6 }));
+      } catch {
+        /* 読み込み失敗は無視（その1枚をスキップ） */
+      }
     }
+    if (added.length) setRecPhotos((prev) => [...prev, ...added].slice(0, MAX_RECORD_PHOTOS));
   };
 
   const saveSpotRecord = () => {
     if (recSaving) return;
+    const visitedAt = new Date(`${recDate}T12:00:00`).toISOString();
+    // 1日1投稿：同じ寺社・同じ日にすでに記録があれば追加しない
+    if (hasRecordForSpotOnDate(currentUser.id, spot.id, visitedAt)) {
+      flashToast('この日の記録はすでにあります（1日にひとつ）');
+      return;
+    }
     setRecSaving(true);
     try {
       const rec = addVisitRecord(currentUser.id, spot, {
-        visitedAt: new Date(`${recDate}T12:00:00`).toISOString(),
+        visitedAt,
         note: recNote,
-        photo: recPhoto ?? undefined,
+        photos: recPhotos,
       });
       if (!rec) {
         flashToast('端末の保存領域がいっぱいで記録できませんでした');
@@ -235,11 +248,27 @@ function SpotDetailBody({
       refreshRecords();
       setRecFormOpen(false);
       setRecNote('');
-      setRecPhoto(null);
+      setRecPhotos([]);
       flashToast('📔 参拝を記録しました');
       onChanged?.();
     } finally {
       setRecSaving(false);
+    }
+  };
+
+  // デジタル御朱印を取得（この場から100m未満でのみ）
+  const recNear = userLocation ? distanceKm(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude) < 0.1 : false;
+  const recHasGoshuin = hasGoShuin(currentUser.id, spot.id);
+  const onGetRecGoshuin = () => {
+    if (recHasGoshuin) { flashToast('この場の御朱印はすでに授かっています'); return; }
+    if (!recNear) { flashToast('御朱印は100m未満に近づくと授かれます'); return; }
+    const stamp = grantGoShuin(currentUser.id, spot, spot.godName || agent.name);
+    if (stamp) {
+      setGoshuinCelebrate({ isNear: true });
+      flashToast('🧧 デジタル御朱印を授かりました');
+      onChanged?.();
+    } else {
+      flashToast('御朱印を保存できませんでした');
     }
   };
 
@@ -670,18 +699,32 @@ function SpotDetailBody({
                   rows={2}
                   className="w-full text-[13px] text-gray-700 bg-white border border-black/10 rounded-lg px-2.5 py-2 resize-none"
                 />
-                {recPhoto && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={recPhoto} alt="記録の写真" className="w-full h-32 object-cover rounded-lg" />
+                {recPhotos.length > 0 && (
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {recPhotos.map((p, i) => (
+                      <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-black/10">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={p} alt={`記録の写真${i + 1}`} className="w-full h-full object-cover" />
+                        <button
+                          onClick={() => setRecPhotos((prev) => prev.filter((_, j) => j !== i))}
+                          className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/50 text-white flex items-center justify-center cursor-pointer"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 )}
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => recPhotoInputRef.current?.click()}
-                    className="flex items-center gap-1 text-[12px] font-black text-gray-600 bg-white border border-black/10 px-3 py-1.5 rounded-full cursor-pointer"
-                  >
-                    <Camera className="w-3.5 h-3.5" />{recPhoto ? '撮り直す' : '写真を添える'}
-                  </button>
-                  <input ref={recPhotoInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickRecPhoto} />
+                  {recPhotos.length < MAX_RECORD_PHOTOS && (
+                    <button
+                      onClick={() => recPhotoInputRef.current?.click()}
+                      className="flex items-center gap-1 text-[12px] font-black text-gray-600 bg-white border border-black/10 px-3 py-1.5 rounded-full cursor-pointer"
+                    >
+                      <Camera className="w-3.5 h-3.5" />写真を添える（{recPhotos.length}/{MAX_RECORD_PHOTOS}）
+                    </button>
+                  )}
+                  <input ref={recPhotoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={onPickRecPhoto} />
                   <button
                     onClick={saveSpotRecord}
                     disabled={recSaving}
@@ -690,6 +733,22 @@ function SpotDetailBody({
                     {recSaving ? '保存中…' : 'この内容で記録'}
                   </button>
                 </div>
+
+                {/* デジタル御朱印の取得（100m未満でのみ） */}
+                <button
+                  onClick={onGetRecGoshuin}
+                  disabled={recHasGoshuin || !recNear}
+                  className={`w-full flex items-center justify-center gap-1.5 text-[13px] font-black py-2.5 rounded-xl transition-all ${
+                    recHasGoshuin
+                      ? 'bg-emerald-50 text-emerald-600 cursor-default'
+                      : recNear
+                      ? 'bg-rose-600 text-white hover:opacity-90 active:scale-[0.99] cursor-pointer'
+                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  <Stamp className="w-4 h-4" />
+                  {recHasGoshuin ? 'デジタル御朱印 取得済み' : recNear ? 'デジタル御朱印を取得' : 'デジタル御朱印を取得（100m未満で取得可）'}
+                </button>
               </div>
             )}
 
@@ -722,10 +781,18 @@ function SpotDetailBody({
                         </button>
                       </div>
                       {rec.note && <p className="text-[13px] text-gray-600 mt-1.5 leading-relaxed">{rec.note}</p>}
-                      {rec.photo && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={rec.photo} alt="参拝の写真" className="mt-2 w-full h-36 object-cover rounded-xl" />
-                      )}
+                      {(() => {
+                        const pics = recordPhotos(rec);
+                        if (pics.length === 0) return null;
+                        return (
+                          <div className="grid grid-cols-3 gap-1.5 mt-2">
+                            {pics.map((p, j) => (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img key={j} src={p} alt={`参拝の写真${j + 1}`} className="aspect-square w-full object-cover rounded-lg" />
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </li>
                   ))}
               </ul>
