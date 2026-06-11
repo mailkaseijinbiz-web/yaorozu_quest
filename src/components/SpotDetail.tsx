@@ -1,13 +1,16 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark, Crown } from 'lucide-react';
-import { Spot, Agent, User, db, isVerifiedSpot, type UgcVisibility } from '../lib/db';
+import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark, Crown, NotebookPen, CalendarDays } from 'lucide-react';
+import { Spot, Agent, User, db, isVerifiedSpot, isQuotaError, type UgcVisibility } from '../lib/db';
 import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
-import { uploadImage } from '../lib/upload';
+import { uploadImage, compressImage } from '../lib/upload';
+import { getVisitRecords, addVisitRecord, deleteVisitRecord, type VisitRecord } from '../lib/visit-records';
+import { getAddress } from '../lib/address';
 import { shareToSns } from '../lib/share';
-import { grantGoShuin, hasGoShuin } from '../lib/goshuin';
+import { grantGoShuin, hasGoShuin, getGoShuinList } from '../lib/goshuin';
+import { getLevelInfo } from '../data/levels';
 import YaorozuSpirit from './YaorozuSpirit';
 import GoshuinCelebrate from './GoshuinCelebrate';
 
@@ -62,7 +65,7 @@ function resolveAgent(spot: Spot): Agent {
     spotId: spot.id,
     name: godName,
     personaDescription: `${spot.name}に宿る八百万の神。`,
-    systemPrompt: `あなたは「${spot.name}」(${spot.category})に宿る神霊「${godName}」です。${spot.description} この土地の歴史・見どころ・周辺の楽しみ方について、親しみやすくも神々しい口調で案内してください。会話の中では、巡礼者がこの街をもっと楽しめるよう、近くの「クエスト（街歩きの小さな冒険）」への挑戦や、あなたへの「依頼（徳を積むタスク）」を、押しつけがましくならない範囲で前向きに勧めてください。たとえば話題が一段落したら「ついでに近くの冒険に挑んでみぬか？」のように促します。返答は150文字以内。`,
+    systemPrompt: `あなたは「${spot.name}」(${spot.category})に宿る神霊「${godName}」です。${spot.description} この土地の歴史・見どころ・周辺の楽しみ方について、親しみやすくも神々しい口調で案内してください。会話の中では、巡礼者がこの街をもっと楽しめるよう、近くの「クエスト（街歩きの小さな冒険）」への挑戦や、あなたへの「依頼（徳を積むタスク）」を、押しつけがましくならない範囲で前向きに勧めてください。たとえば話題が一段落したら「ついでに近くの冒険に挑んでみぬか？」のように促します。返答は200字程度。`,
     avatar3dUrl: 'shrine',
     haloColor: '#c5a028',
     accessoryType: 'なし',
@@ -85,7 +88,8 @@ function SpotDetailBody({
   userLocation,
   onOpenGoshuinBook,
 }: SpotDetailProps) {
-  const [tab, setTab] = useState<'chat' | 'requests' | 'photos' | 'leaderboard'>('chat');
+  // 詳細ページは「記録」（参拝の記録）がメイン。開いた直後は記録タブを表示する
+  const [tab, setTab] = useState<'chat' | 'requests' | 'photos' | 'records'>('records');
   const [agent] = useState<Agent>(() => resolveAgent(spot));
 
   // UGCで変化する状態（写真・楽しみ方）は db から都度読む
@@ -123,11 +127,27 @@ function SpotDetailBody({
   const [isCreatorModalOpen, setIsCreatorModalOpen] = useState(false);
   const [creatorFirstMessage, setCreatorFirstMessage] = useState(agent.firstMessage || '');
 
-  // チャット
-  const [messages, setMessages] = useState<Message[]>([]);
+  // チャット。会話履歴はスポット毎に localStorage で保持し、再訪時に続きから話せる
+  // （純ローカル・直近20件。キーがスポット毎に動的なため SYNC_KEYS（クラウド同期）には含めない）。
+  const [messages, setMessages] = useState<Message[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(`yaorozu_chat_log_${spot.id}`);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.slice(-20) : [];
+    } catch {
+      return [];
+    }
+  });
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (messages.length === 0) return;
+    try {
+      localStorage.setItem(`yaorozu_chat_log_${spot.id}`, JSON.stringify(messages.slice(-20)));
+    } catch {}
+  }, [messages, spot.id]);
 
   // 「あなただけ」の投稿は本人以外には見せない（AIの参照対象からも除外）
   const ugc = useMemo(
@@ -140,14 +160,16 @@ function SpotDetailBody({
   const tasks = buildSpotTasks(spot);
 
   // 評価タスクの対象写真：クエスト証拠写真＋各スポットの奉納写真。不足時は巡礼地の代表写真で補完。
-  const evalPhotos = useMemo(() => {
+  // 証拠写真は base64 の塊で、全件パース（getAllChallengePhotoUrls）が重い。
+  // マウント時に集めると詳細ページの初期表示が遅くなるため、評価を始めるときに集める。
+  const [evalPhotos, setEvalPhotos] = useState<string[]>([]);
+  const collectEvalPhotos = () => {
     const urls: string[] = [];
     db.getAllChallengePhotoUrls().forEach((u) => u && urls.push(u));
     allSpots.forEach((s) => (s.photos || []).forEach((u) => u && urls.push(u)));
     if (urls.length < 5) allSpots.forEach((s) => { if (s.imageUrl) urls.push(s.imageUrl); });
     return Array.from(new Set(urls)).slice(0, 8);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allSpots, spot.id]);
+  };
   const evalTarget = Math.min(3, evalPhotos.length);
 
   // このスポットに最も近い未制覇クエスト（会話で能動的に挑戦を促す）
@@ -162,9 +184,67 @@ function SpotDetailBody({
   }, [spot.id]);
   const heroPhoto = photos[0] || spot.imageUrl || '';
 
+  // 住所（逆ジオコーディング・キャッシュつき）。緯度経度の生の数字は表示しない
+  const [address, setAddress] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getAddress(spot.latitude, spot.longitude).then((a) => {
+      if (alive && a) setAddress(a);
+    });
+    return () => { alive = false; };
+  }, [spot.latitude, spot.longitude]);
+
   const flashToast = (text: string) => {
     setToast(text);
     setTimeout(() => setToast(null), 1800);
+  };
+
+  // ── 記録タブ：この寺社への参拝記録（日付・メモ・写真つきで何度でも残せる） ──
+  const [spotRecords, setSpotRecords] = useState<VisitRecord[]>(
+    () => getVisitRecords(currentUser.id).filter((r) => r.spotId === spot.id)
+  );
+  const refreshRecords = () => setSpotRecords(getVisitRecords(currentUser.id).filter((r) => r.spotId === spot.id));
+  const [recFormOpen, setRecFormOpen] = useState(false);
+  const [recDate, setRecDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [recNote, setRecNote] = useState('');
+  const [recPhoto, setRecPhoto] = useState<string | null>(null);
+  const [recSaving, setRecSaving] = useState(false);
+  const recPhotoInputRef = useRef<HTMLInputElement>(null);
+
+  const onPickRecPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      setRecPhoto(await compressImage(f, { maxDim: 900, quality: 0.6 }));
+    } catch {
+      /* 読み込み失敗は無視（写真なしで記録できる） */
+    }
+  };
+
+  const saveSpotRecord = () => {
+    if (recSaving) return;
+    setRecSaving(true);
+    try {
+      const rec = addVisitRecord(currentUser.id, spot, {
+        visitedAt: new Date(`${recDate}T12:00:00`).toISOString(),
+        note: recNote,
+        photo: recPhoto ?? undefined,
+      });
+      if (!rec) {
+        flashToast('端末の保存領域がいっぱいで記録できませんでした');
+        return;
+      }
+      db.recordVisit(currentUser.id, spot.id); // 探訪バッジ・徳（重複は無視）
+      refreshRecords();
+      setRecFormOpen(false);
+      setRecNote('');
+      setRecPhoto(null);
+      flashToast('📔 参拝を記録しました');
+      onChanged?.();
+    } finally {
+      setRecSaving(false);
+    }
   };
 
   /** タスク達成を確定（state＋日付つき永続化） */
@@ -194,8 +274,9 @@ function SpotDetailBody({
       markDone({ id: 'photo' });
       flashToast('📸 写真を奉納！ +30徳');
       onChanged?.();
-    } catch {
-      flashToast('写真の投稿に失敗しました');
+    } catch (e) {
+      // 端末ストレージ満杯（quota）は原因をユーザーに伝える（古い写真の整理で回復できる）
+      flashToast(isQuotaError(e) ? '端末の保存領域がいっぱいで写真を保存できませんでした' : '写真の投稿に失敗しました');
     } finally {
       setUploading(false);
     }
@@ -275,12 +356,17 @@ function SpotDetailBody({
         flashToast(`🔴 御朱印を授かっている！ +${task.reward}徳`);
         onChanged?.();
       } else {
-        flashToast('「会話」タブで神と語らうと御朱印を授かれます');
+        const near = userLocation
+          ? distanceKm(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude) < 0.1
+          : false;
+        flashToast(near ? '「会話」タブで神と語らうと御朱印を授かれます' : '御朱印は現地（100m以内）で神と語らうと授かれます');
         setTab('chat');
       }
       return;
     } else if (task.type === 'evaluate') {
-      if (evalPhotos.length === 0) { flashToast('まだ評価できる写真がありません'); return; }
+      const collected = collectEvalPhotos();
+      if (collected.length === 0) { flashToast('まだ評価できる写真がありません'); return; }
+      setEvalPhotos(collected);
       setEvalIdx(0);
       setEvaluating(true); // 評価し終えたら done にする
       return;
@@ -392,7 +478,7 @@ function SpotDetailBody({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spot.id]);
 
-  // チャット初期あいさつ
+  // チャット初期あいさつ（履歴が無いときだけ。復元時は前回の続きから）
   useEffect(() => {
     if (tab === 'chat' && messages.length === 0) {
       const greet = nearbyChallenge
@@ -401,7 +487,23 @@ function SpotDetailBody({
       setMessages([
         { id: `greet-${Date.now()}`, sender: 'agent', text: greet, createdAt: new Date().toISOString() },
       ]);
-      // はじめて会話を始めた（チャットを開いた）瞬間に御朱印を授ける（スポットごとに1度）
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, messages.length, agent.name, spot.name, currentUser.displayName, nearbyChallenge]);
+
+  // 御朱印の授与と、御朱印クエストの自動達成。
+  // 御朱印は「実地参拝の証」：現在地からスポットまで 100m 未満のときだけ授かれる。
+  // 遠いうちは何もせず、userLocation の更新（歩いて近づく）で再評価される。
+  const chatRitualDoneRef = useRef(false);
+  useEffect(() => {
+    if (tab !== 'chat' || chatRitualDoneRef.current) return;
+    const isNear = userLocation
+      ? distanceKm(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude) < 0.1
+      : false;
+    // まだ遠く、御朱印も未取得なら待つ（近づいた位置更新で再実行される）
+    if (!isNear && !hasGoShuin(currentUser.id, spot.id)) return;
+    chatRitualDoneRef.current = true;
+    if (isNear) {
       const stamp = grantGoShuin(
         currentUser.id,
         { id: spot.id, name: spot.name, category: spot.category, godEmoji: spot.godEmoji },
@@ -409,22 +511,18 @@ function SpotDetailBody({
       );
       if (stamp) {
         onGoShuinGranted?.();
-        // 神の挨拶が画面に落ち着いてから授与式を始める。300m 以内なら参拝、遠隔なら遥拝
-        //（授与のゲートはしない＝GPS拒否でもコレクションできる。ラベルだけ分ける）。
-        const isNear = userLocation
-          ? distanceKm(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude) <= 0.1
-          : true;
-        setTimeout(() => setGoshuinCelebrate({ isNear }), 900);
-      }
-      // 御朱印のみクエストが進行中なら、御朱印取得済み（今授与 or 既取得）で自動的にステップ達成
-      const pending = activeChallenge?.tasks.find((t) => t.type === 'goshuin' && t.spotId === spot.id);
-      if (pending && onAdvanceChallenge && hasGoShuin(currentUser.id, spot.id)) {
-        onAdvanceChallenge(pending.id, null);
-        flashToast(`✅ 「${pending.title}」達成！`);
+        // 神の挨拶が画面に落ち着いてから授与式を始める（100m未満＝参拝の証）
+        setTimeout(() => setGoshuinCelebrate({ isNear: true }), 900);
       }
     }
+    // 御朱印のみクエストが進行中なら、御朱印取得済み（今授与 or 既取得）で自動的にステップ達成
+    const pending = activeChallenge?.tasks.find((t) => t.type === 'goshuin' && t.spotId === spot.id);
+    if (pending && onAdvanceChallenge && hasGoShuin(currentUser.id, spot.id)) {
+      onAdvanceChallenge(pending.id, null);
+      flashToast(`✅ 「${pending.title}」達成！`);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, messages.length, agent.name, spot.name, currentUser.displayName, nearbyChallenge]);
+  }, [tab, spot.id, activeChallenge?.id, userLocation]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -439,6 +537,18 @@ function SpotDetailBody({
     setIsLoading(true);
     if (onMessageSent) onMessageSent();
     try {
+      // 巡礼者の歩み（神が会話で「そなたの旅」に触れられるようにする軽量サマリ）
+      const stats = db.getUserStats(currentUser.id);
+      const prog = db.getChallengeProgress();
+      const questsById = new Map(db.getAllQuests().map((q) => [q.id, q]));
+      const userContext = {
+        visitCount: stats.visitedSpotIds.length,
+        totalToku: currentUser.totalToku,
+        levelTitle: getLevelInfo(currentUser.totalToku).current.title,
+        goshuinCount: getGoShuinList(currentUser.id).length,
+        questClears: prog.completed.length,
+        questClearsHere: prog.completed.filter((id) => questsById.get(id)?.spotId === spot.id).length,
+      };
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -450,7 +560,9 @@ function SpotDetailBody({
           ugc,
           affiliates,
           userName: currentUser.displayName,
-          spot: { name: spot.name, category: spot.category, description: spot.description, enjoyments, godName: spot.godName },
+          // latitude/longitude はサーバ側で「土地の実在豆知識」を引くために使う
+          spot: { name: spot.name, category: spot.category, description: spot.description, enjoyments, godName: spot.godName, latitude: spot.latitude, longitude: spot.longitude },
+          userContext,
         }),
       });
       if (!res.ok) throw new Error('failed');
@@ -479,15 +591,14 @@ function SpotDetailBody({
 
   return (
     <div className="absolute inset-0 bg-[#f5f7fa] flex flex-col">
-      {/* ── ヒーロー写真（無ければ NO IMAGE） ── */}
+      {/* ── ヒーロー写真（無ければ神の絵文字を据えた飾り背景。文字は出さない） ── */}
       <div className="relative h-52 flex-shrink-0 bg-gray-200">
         {heroPhoto ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={heroPhoto} alt={spot.name} className="w-full h-full object-cover" />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-center px-6 bg-gray-100">
-            <span className="text-sm font-black text-gray-400 tracking-[0.3em]">NO IMAGE</span>
-            <p className="text-[13px] text-gray-400 mt-1.5">「写真」タブから最初の一枚を奉納しよう</p>
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-100 via-amber-50 to-amber-100">
+            <span className="text-7xl opacity-80">{godEmoji}</span>
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-black/30 pointer-events-none" />
@@ -507,20 +618,22 @@ function SpotDetailBody({
             <span className="ml-1.5 text-[12px] font-bold bg-gray-500/70 backdrop-blur-md px-2 py-0.5 rounded-full">未検証</span>
           )}
           <h1 className="text-2xl font-black mt-1.5 leading-tight drop-shadow-lg">{spot.name}</h1>
-          <div className="flex items-center gap-1 mt-0.5 text-white/90">
-            <MapPin className="w-3 h-3" />
-            <span className="text-[13px]">{spot.latitude.toFixed(4)}, {spot.longitude.toFixed(4)}</span>
-          </div>
+          {address && (
+            <div className="flex items-center gap-1 mt-0.5 text-white/90">
+              <MapPin className="w-3 h-3" />
+              <span className="text-[13px]">{address}</span>
+            </div>
+          )}
         </div>
       </div>
 
       {/* ── タブ切替 ── */}
       <div className="flex border-b border-black/5 bg-white flex-shrink-0">
         {([
-          { key: 'chat',        label: '会話',   icon: MessageCircle },
-          { key: 'requests',    label: 'クエスト', icon: Flag },
-          { key: 'photos',      label: '写真',   icon: Camera },
-          { key: 'leaderboard', label: '石碑',   icon: Landmark },
+          { key: 'records',  label: '記録',   icon: NotebookPen },
+          { key: 'chat',     label: '会話',   icon: MessageCircle },
+          { key: 'requests', label: 'クエスト', icon: Flag },
+          { key: 'photos',   label: '写真',   icon: Camera },
         ] as const).map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setTab(key)} className={`flex-1 py-3 flex flex-row items-center justify-center gap-1.5 text-[12px] font-black transition-all cursor-pointer border-b-2 ${tab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
             <Icon className="w-3.5 h-3.5" />{label}
@@ -528,50 +641,99 @@ function SpotDetailBody({
         ))}
       </div>
 
-      {tab === 'leaderboard' ? (
-        /* ── 石碑（参拝者ランキング） ── */
+      {tab === 'records' ? (
+        /* ── 記録（この寺社への参拝記録。日付・メモ・写真つき） ── */
         <div className="flex-1 overflow-y-auto p-4">
           <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
-            <div className="px-4 pt-4 pb-2 flex items-center gap-2 border-b border-black/5">
-              <Landmark className="w-4 h-4 text-stone-500" />
-              <h3 className="text-sm font-black text-gray-800">石碑</h3>
-              <span className="text-[11px] text-gray-400 ml-auto">この地に捧げた徳</span>
+            <div className="px-4 pt-4 pb-3 flex items-center gap-2 border-b border-black/5">
+              <NotebookPen className="w-4 h-4 text-emerald-600" />
+              <h3 className="text-sm font-black text-gray-800">参拝の記録 ({spotRecords.length})</h3>
+              <button
+                onClick={() => setRecFormOpen((v) => !v)}
+                className="ml-auto flex items-center gap-1 text-[12px] font-black text-white bg-emerald-600 px-3 py-1.5 rounded-full hover:opacity-90 transition-all cursor-pointer"
+              >
+                ＋ 記録する
+              </button>
             </div>
-            {(() => {
-              const ranking = db.getSpotRanking(spot.id);
-              if (ranking.length === 0) {
-                return (
-                  <div className="text-center py-10">
-                    <div className="text-4xl mb-2">🪨</div>
-                    <p className="text-sm text-gray-400">まだ参拝者がいません</p>
-                    <p className="text-xs text-gray-300 mt-1">この地で徳を積んで刻まれよう</p>
-                  </div>
-                );
-              }
-              const RANK_MEDAL = ['🥇','🥈','🥉'];
-              return (
-                <ul>
-                  {ranking.map(({ user, toku }, i) => {
-                    const isSelf = user.id === currentUser.id;
-                    return (
-                      <li key={user.id} className={`flex items-center gap-3 px-4 py-3 border-b border-black/4 last:border-0 ${isSelf ? 'bg-amber-50/60' : ''}`}>
-                        <span className="w-6 text-center text-base flex-shrink-0">
-                          {i < 3 ? RANK_MEDAL[i] : <span className="text-[12px] font-black text-gray-400">{i + 1}</span>}
+
+            {recFormOpen && (
+              <div className="px-4 py-3 border-b border-black/5 bg-emerald-50/40 space-y-2">
+                <div className="flex items-center gap-2">
+                  <CalendarDays className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <input
+                    type="date"
+                    value={recDate}
+                    onChange={(e) => setRecDate(e.target.value)}
+                    className="flex-1 text-[13px] font-bold text-gray-700 bg-white border border-black/10 rounded-lg px-2 py-1.5"
+                  />
+                </div>
+                <textarea
+                  value={recNote}
+                  onChange={(e) => setRecNote(e.target.value)}
+                  placeholder="メモ（任意）：天気、御朱印、心に残ったこと…"
+                  rows={2}
+                  className="w-full text-[13px] text-gray-700 bg-white border border-black/10 rounded-lg px-2.5 py-2 resize-none"
+                />
+                {recPhoto && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={recPhoto} alt="記録の写真" className="w-full h-32 object-cover rounded-lg" />
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => recPhotoInputRef.current?.click()}
+                    className="flex items-center gap-1 text-[12px] font-black text-gray-600 bg-white border border-black/10 px-3 py-1.5 rounded-full cursor-pointer"
+                  >
+                    <Camera className="w-3.5 h-3.5" />{recPhoto ? '撮り直す' : '写真を添える'}
+                  </button>
+                  <input ref={recPhotoInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickRecPhoto} />
+                  <button
+                    onClick={saveSpotRecord}
+                    disabled={recSaving}
+                    className="ml-auto text-[12px] font-black text-white bg-emerald-600 px-4 py-1.5 rounded-full hover:opacity-90 disabled:opacity-50 transition-all cursor-pointer"
+                  >
+                    {recSaving ? '保存中…' : 'この内容で記録'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {spotRecords.length === 0 ? (
+              <div className="text-center py-10">
+                <div className="text-4xl mb-2">📔</div>
+                <p className="text-sm text-gray-400">まだ記録がありません</p>
+                <p className="text-xs text-gray-300 mt-1">参拝したら日付とひとことを残そう</p>
+              </div>
+            ) : (
+              <ul>
+                {[...spotRecords]
+                  .sort((a, b) => new Date(b.visitedAt).getTime() - new Date(a.visitedAt).getTime())
+                  .map((rec, i, arr) => (
+                    <li key={rec.id} className="px-4 py-3 border-b border-black/4 last:border-0">
+                      <div className="flex items-center gap-2">
+                        <CalendarDays className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                        <span className="text-[13px] font-black text-gray-800">
+                          {new Date(rec.visitedAt).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
                         </span>
-                        <img src={user.avatarUrl} alt={user.displayName} className="w-8 h-8 rounded-full border-2 flex-shrink-0 object-cover" style={{ borderColor: user.avatarFrameColor || '#e5e7eb' }} />
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-[13px] font-black truncate ${isSelf ? 'text-amber-700' : 'text-gray-800'}`}>
-                            {user.displayName}{isSelf && <span className="ml-1 text-[10px] text-amber-500">（あなた）</span>}
-                          </p>
-                          <p className="text-[10px] text-gray-400">{user.currentTitle || '巡礼者'}</p>
-                        </div>
-                        <span className="text-sm font-black text-amber-600 flex-shrink-0">{toku.toLocaleString()} 徳</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              );
-            })()}
+                        <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">
+                          {arr.length - i}回目
+                        </span>
+                        <button
+                          onClick={() => { deleteVisitRecord(currentUser.id, rec.id); refreshRecords(); }}
+                          aria-label="記録を削除"
+                          className="ml-auto text-gray-300 hover:text-rose-400 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      {rec.note && <p className="text-[13px] text-gray-600 mt-1.5 leading-relaxed">{rec.note}</p>}
+                      {rec.photo && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={rec.photo} alt="参拝の写真" className="mt-2 w-full h-36 object-cover rounded-xl" />
+                      )}
+                    </li>
+                  ))}
+              </ul>
+            )}
           </div>
           {spot.creatorId === currentUser.id && (
             <div className="mt-4 p-4 bg-amber-50/50 border border-gold/30 rounded-2xl">
@@ -599,7 +761,7 @@ function SpotDetailBody({
             </div>
             {photos.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-center">
-                <span className="text-sm font-black text-gray-300 tracking-[0.3em]">NO IMAGE</span>
+                <span className="text-4xl">{godEmoji}</span>
                 <p className="text-[13px] text-gray-400 mt-2">まだ写真がありません。<br />最初の一枚を奉納しよう。</p>
               </div>
             ) : (
@@ -937,7 +1099,7 @@ export default function SpotDetail(props: SpotDetailProps) {
           </div>
           {/* タブ骨格 */}
           <div className="flex border-b border-black/5 bg-white flex-shrink-0">
-            {['会話', 'クエスト', '写真', '石碑'].map((label) => (
+            {['記録', '会話', 'クエスト', '写真'].map((label) => (
               <div key={label} className="flex-1 py-3 flex items-center justify-center text-[12px] font-black text-gray-300">
                 {label}
               </div>

@@ -10,26 +10,13 @@
 // -----------------------------------------------------------------------------
 
 import { db } from './db';
-import { distanceKm } from './geo';
-import { TOKYO_TRIVIA, type TriviaTheme } from '../data/tokyo-trivia';
+import { getTriviaNear, THEME_TO_CATEGORY } from '../data/tokyo-trivia';
 import type { Quest, TriviaCategory } from '../data/tasks';
 
 interface TriviaCandidate {
   content: string;
   category: TriviaCategory;
 }
-
-/** TOKYO_TRIVIA のテーマ軸を Task.triviaCategory（地形/歴史/建築/道路）へ寄せる */
-const THEME_TO_CATEGORY: Record<TriviaTheme, TriviaCategory> = {
-  '地形・スリバチ': '地形',
-  '暗渠・川跡': '地形',
-  坂道: '道路',
-  歴史: '歴史',
-  路地裏: '道路',
-  '地名の由来': '歴史',
-  '建築・遺構': '建築',
-  ウォーキングコース: '道路',
-};
 
 /** 表示幅に収まるよう蘊蓄を短縮（達成カードは1〜2文想定） */
 function clip(text: string): string {
@@ -52,14 +39,9 @@ function collectCandidates(spot: SpotLike): TriviaCandidate[] {
     if (t.area && text.includes(t.area)) out.push({ content: clip(t.content), category: t.category });
   }
   if (spot.latitude != null && spot.longitude != null) {
-    for (const t of TOKYO_TRIVIA) {
-      if (
-        t.latitude != null &&
-        t.longitude != null &&
-        distanceKm(spot.latitude, spot.longitude, t.latitude, t.longitude) <= 5
-      ) {
-        out.push({ content: clip(t.body), category: THEME_TO_CATEGORY[t.themes[0]] ?? '歴史' });
-      }
+    // 近い豆知識から順に割り当てる（距離昇順）
+    for (const t of getTriviaNear(spot.latitude, spot.longitude, 5, 5)) {
+      out.push({ content: clip(t.body), category: THEME_TO_CATEGORY[t.themes[0]] ?? '歴史' });
     }
   }
   return out;

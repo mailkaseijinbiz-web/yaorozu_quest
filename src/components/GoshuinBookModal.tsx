@@ -67,15 +67,21 @@ export default function GoshuinBookModal({ goShuinList, onClose }: GoshuinBookMo
                       key={g.id}
                       className="bg-white rounded-2xl border border-red-100 shadow-sm overflow-hidden flex flex-col items-center py-4 px-2 gap-1.5"
                     >
-                      {/* 朱印円 */}
-                      <div className="relative w-20 h-20 flex-shrink-0">
-                        <div className="absolute inset-0 rounded-full border-4 border-red-600/80" />
-                        <div className="absolute inset-1.5 rounded-full border-2 border-red-600/40" />
-                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5">
-                          <span className="text-2xl leading-none">{g.godEmoji}</span>
-                          <span className="text-[8px] font-black text-red-700 text-center leading-tight px-1" style={{ maxWidth: 64 }}>{g.godName}</span>
+                      {g.photo ? (
+                        // 撮影して保存した実物の御朱印
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={g.photo} alt={g.spotName} className="w-20 h-20 rounded-lg object-cover flex-shrink-0" />
+                      ) : (
+                        /* 朱印円 */
+                        <div className="relative w-20 h-20 flex-shrink-0">
+                          <div className="absolute inset-0 rounded-full border-4 border-red-600/80" />
+                          <div className="absolute inset-1.5 rounded-full border-2 border-red-600/40" />
+                          <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5">
+                            <span className="text-2xl leading-none">{g.godEmoji}</span>
+                            <span className="text-[8px] font-black text-red-700 text-center leading-tight px-1" style={{ maxWidth: 64 }}>{g.godName}</span>
+                          </div>
                         </div>
-                      </div>
+                      )}
                       {/* スポット名 */}
                       <p className="text-[11px] font-black text-gray-800 text-center leading-tight line-clamp-2">{g.spotName}</p>
                       <p className="text-[9px] text-gray-400">{dateStr} {timeStr}</p>

@@ -4,11 +4,12 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Compass, ChevronRight, Flag, X, Camera, Check, MapPin, Clock, Navigation2, MessageCircle, Send, Search } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { Spot, User, db } from '../lib/db';
-import { uploadImage } from '../lib/upload';
+import { uploadImage, compressImage } from '../lib/upload';
 import { hasGoShuin } from '../lib/goshuin';
 import { distanceKm, bearingDeg } from '../lib/geo';
 import { getHeartVoices } from '../data/god-tasks';
-import { Challenge, ChallengeStep, difficultyLabel, terrainLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
+import { composeWalkGuide, nextGuideStage } from '../lib/walk-guide';
+import { Challenge, ChallengeStep, difficultyLabel, TRIVIA_TONE, TRIVIA_ICON, TriviaCategory } from '../data/challenges';
 
 const LeafletMap = dynamic(() => import('./LeafletMap'), {
   ssr: false,
@@ -20,13 +21,10 @@ const LeafletMap = dynamic(() => import('./LeafletMap'), {
   ),
 });
 
-// 道案内の精霊のセリフ。
-// near=false（遠い）：土地の紹介 → 歩いて向かおう、という案内。
-// near=true（500m以内）：到着間近 → さあ撮影しよう、という流れに切り替える。
-function composeGuideText(step: ChallengeStep, near = false): string {
-  if (near) {
-    return '目的地はもう目の前。あたりをゆっくり見回して、心に残る一枚を写真におさめてみよう。';
-  }
+// 道案内の精霊のセリフ（ステップ開始時の導入）。
+// 土地の紹介（蘊蓄）→ 観察指示 → 写真誘導、という語り。
+// 歩いている途中の語り（距離・豆知識・観察ミッション）は ../lib/walk-guide が担う。
+function composeGuideText(step: ChallengeStep): string {
   const intro = step.trivia ? step.trivia : '';
   const action = step.action ?? '';
   const alreadyPhoto = /写真|一枚|撮|収め|おさめ/.test(action);
@@ -151,12 +149,15 @@ export default function MapTab({
   // チャレンジ：証拠写真モーダル & 達成演出
   const [proofStep, setProofStep] = useState<ChallengeStep | null>(null);
   const [proofPhoto, setProofPhoto] = useState<string | null>(null);
+  // AIフィードバック用の軽量 dataURL。proofPhoto が Supabase の公開URLになっても
+  // vision モデルへ渡せるよう、端末で圧縮した小さいコピーを別に保持する。
+  const [proofVision, setProofVision] = useState<string | null>(null);
   const [proofComment, setProofComment] = useState(''); // 証拠写真に添えるコメント
   const [uploadingProof, setUploadingProof] = useState(false);
   const [proofError, setProofError] = useState<string | null>(null); // 写真の取り込み失敗メッセージ
-  // 達成ビート（豆知識つき・手動で次へ）
+  // 達成ビート（豆知識つき・手動で次へ）。feedback は写真へのAIのひとこと（非同期で追記）
   const [celebrate, setCelebrate] = useState<
-    { title: string; icon: string; complete: boolean; trivia?: string; triviaCategory?: TriviaCategory } | null
+    { title: string; icon: string; complete: boolean; trivia?: string; triviaCategory?: TriviaCategory; stepId?: string; feedback?: string } | null
   >(null);
   // 導入（プロローグ）を見せたチャレンジID。タブ切替でアンマウントされても消えないよう localStorage に永続化。
   const [introSeenId, setIntroSeenId] = useState<string | null>(() => {
@@ -193,9 +194,12 @@ export default function MapTab({
     if (!f) return;
     setUploadingProof(true);
     setProofError(null);
+    setProofVision(null);
     try {
       const url = await uploadImage(f, `challenge-${activeChallenge?.id ?? 'x'}`);
       setProofPhoto(url);
+      // vision 用の軽量コピー（失敗しても達成フローには影響させない）
+      compressImage(f, { maxDim: 640, quality: 0.7 }).then(setProofVision).catch(() => setProofVision(null));
     } catch {
       setProofPhoto(null);
       setProofError('写真の読み込みに失敗しました。もう一度撮影・選択してください。');
@@ -220,9 +224,33 @@ export default function MapTab({
       complete: willComplete,
       trivia: cleared.trivia,
       triviaCategory: cleared.triviaCategory,
+      stepId: cleared.id,
     });
+    // 写真の内容へのAIフィードバック（fire-and-forget）。届いたら達成ビートに追記する。
+    // 失敗・遅延は無言＝既存の演出のまま（graceful degradation）。
+    const vision = proofVision;
+    if (vision) {
+      const stepSpot = (cleared.spotId ? db.getSpot(cleared.spotId) : undefined)
+        ?? (activeChallenge.spotId ? db.getSpot(activeChallenge.spotId) : undefined);
+      fetch('/api/photo-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          photoDataUrl: vision,
+          context: { spotName: stepSpot?.name, taskTitle: cleared.title, taskAction: cleared.action, godName: stepSpot?.godName },
+        }),
+        signal: AbortSignal.timeout(12_000),
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          // ユーザーが先に「次へ」を押していたら破棄（stepId ガードで古い応答の混入も防ぐ）
+          if (d?.feedback) setCelebrate((prev) => (prev && prev.stepId === cleared.id ? { ...prev, feedback: d.feedback } : prev));
+        })
+        .catch(() => {});
+    }
     setProofStep(null);
     setProofPhoto(null);
+    setProofVision(null);
     setProofComment('');
     // 自動で閉じない（豆知識を読んでから手動で次へ）
   };
@@ -264,7 +292,6 @@ export default function MapTab({
       ? distanceKm(userLocation.lat, userLocation.lng, nextStep.lat, nextStep.lng)
       : null;
   const tooFar = nextDist != null && nextDist >= 0.5;
-  const near = nextDist != null && nextDist < 0.5; // 500m以内＝到着間近
   // 挑戦中の神のアイコン（クエストを鋳造した神→次の目的地の場の神→選択中の神→既定）。目的地マーカーの青い丸に表示する。
   const challengeGodEmoji = activeChallenge
     ? ((activeChallenge.spotId ? db.getSpot(activeChallenge.spotId)?.godEmoji : undefined)
@@ -296,21 +323,76 @@ export default function MapTab({
   // マーカータップ/スワイプで activeSpot が変わり、それに追従してカードと地図ハイライトが更新される。
   const cardSpot = activeSpot ?? nearSpotList[0] ?? null;
   const cardIdx = cardSpot ? nearSpotList.findIndex((s) => s.id === cardSpot.id) : -1;
-  // 横スワイプ検出（スワイプ直後のタップで誤って詳細を開かないよう swipedRef でガード）
-  const swipeStartXRef = useRef<number | null>(null);
+  // ── 指に追従する横スワイプ・カルーセル（次のカードが右にチラ見えする） ──
+  // PEEK=右に覗かせる次カードの幅+間隔、GAP=カード間の間隔。実カード幅は計測で決める。
+  const CARD_GAP = 10;
+  const CARD_PEEK = 34; // 右に約 (PEEK-GAP)=24px 次カードを覗かせる
+  const cardViewportRef = useRef<HTMLDivElement | null>(null);
+  const cardTrackRef = useRef<HTMLDivElement | null>(null);
+  const [slideW, setSlideW] = useState(0);
+  const slideWRef = useRef(0);
+  const cardIdxRef = useRef(0);
+  // スワイプ直後のタップで誤って詳細を開かないよう swipedRef でガードする
   const swipedRef = useRef(false);
-  const onCardTouchStart = (e: React.TouchEvent) => { swipeStartXRef.current = e.touches[0]?.clientX ?? null; swipedRef.current = false; };
-  const onCardTouchEnd = (e: React.TouchEvent) => {
-    const start = swipeStartXRef.current;
-    swipeStartXRef.current = null;
-    if (start == null || nearSpotList.length <= 1) return;
-    const dx = (e.changedTouches[0]?.clientX ?? start) - start;
-    if (Math.abs(dx) <= 40) return;
-    swipedRef.current = true; // スワイプ後のタップ誤爆を防ぐ
-    // スワイプで隣の場を選択（地図のハイライトも更新）。端では動かさない。
-    const base = cardIdx < 0 ? 0 : cardIdx;
-    if (dx < 0 && base < nearSpotList.length - 1) onSelectSpot(nearSpotList[base + 1]);
-    else if (dx > 0 && base > 0) onSelectSpot(nearSpotList[base - 1]);
+  const dragRef = useRef<{ startX: number; dragging: boolean; dx: number }>({ startX: 0, dragging: false, dx: 0 });
+
+  // ビューポート幅からカード幅を計測（右の覗き分を差し引く）。
+  // カード領域はクエスト中・達成ビート中は描画されないため、「表示されているか」を
+  // 依存に含める（cardSpot だけだと、クエスト終了で再表示されたとき el=null のまま
+  // 計測されず slideW=0 → カードが全幅＋ズレた位置で描画され左右が見切れる）。
+  const cardCarouselVisible = !activeChallenge && !celebrate && !!cardSpot;
+  useEffect(() => {
+    const el = cardViewportRef.current;
+    if (!el) return;
+    const measure = () => { const w = Math.max(0, el.clientWidth - CARD_PEEK); slideWRef.current = w; setSlideW(w); };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [cardCarouselVisible]);
+  // 現在カードの位置を ref に同期（タッチハンドラのクロージャから最新を読む）。
+  useEffect(() => { cardIdxRef.current = cardIdx < 0 ? 0 : cardIdx; }, [cardIdx]);
+
+  const cardBaseFor = (idx: number) => -(idx * (slideWRef.current + CARD_GAP));
+  const setTrackX = (x: number, withTransition: boolean) => {
+    const t = cardTrackRef.current;
+    if (!t) return;
+    t.style.transition = withTransition ? 'transform .3s cubic-bezier(.22,.61,.36,1)' : 'none';
+    t.style.transform = `translateX(${x}px)`;
+  };
+  const onTrackTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    if (!t) return;
+    dragRef.current = { startX: t.clientX, dragging: true, dx: 0 };
+    swipedRef.current = false;
+    setTrackX(cardBaseFor(cardIdxRef.current), false);
+  };
+  const onTrackTouchMove = (e: React.TouchEvent) => {
+    const st = dragRef.current;
+    const t = e.touches[0];
+    if (!st.dragging || !t) return;
+    let dx = t.clientX - st.startX;
+    // 端ではゴムのように抵抗をつけて「これ以上ない」ことを伝える
+    const atFirst = cardIdxRef.current <= 0;
+    const atLast = cardIdxRef.current >= nearSpotList.length - 1;
+    if ((atFirst && dx > 0) || (atLast && dx < 0)) dx *= 0.35;
+    st.dx = dx;
+    if (Math.abs(dx) > 8) swipedRef.current = true; // ドラッグはタップとみなさない
+    setTrackX(cardBaseFor(cardIdxRef.current) + dx, false); // 指に追従
+  };
+  const onTrackTouchEnd = () => {
+    const st = dragRef.current;
+    if (!st.dragging) return;
+    st.dragging = false;
+    const idx = cardIdxRef.current;
+    const dx = st.dx;
+    const threshold = Math.max(48, (slideWRef.current || 240) * 0.22);
+    let newIdx = idx;
+    if (dx <= -threshold && idx < nearSpotList.length - 1) newIdx = idx + 1;
+    else if (dx >= threshold && idx > 0) newIdx = idx - 1;
+    // 目標カードへ滑らかにスナップ（指を離した位置から続けてアニメーション）
+    setTrackX(cardBaseFor(newIdx), true);
+    if (newIdx !== idx) onSelectSpot(nearSpotList[newIdx]);
   };
 
   // 導入（プロローグ）表示中か。表示中はヘッダー/下部オーバーレイ/現在地ボタンを隠す。
@@ -364,11 +446,29 @@ export default function MapTab({
 
   // 複数ステップのクエストでは、上部の進捗ガイドをクエスト中ずっと表示する
   const showGuide = !!activeChallenge && activeChallenge.tasks.length > 1 && !introShowing && !celebrate && !chAllDone && !!nextStep;
+  // 道中ガイド：いま表示中の語りを {stepId, stage, text} で固定保持する。
+  // text は距離バンドの遷移時に1回だけ合成するため、GPS更新・再レンダーで
+  // タイプ表示が途中リセットされない。ステージは単調増加（walk-guide 参照）。
+  const [guideMsg, setGuideMsg] = useState<{ stepId: string; stage: number; text: string } | null>(null);
   useEffect(() => {
-    if (!(showGuide && nextStep && activeChallenge)) { setBriefTyped(''); setGuideDone(false); return; }
-    // 「次は『title』へ」ではなく、土地の紹介 → 現地で写真を撮ろう、という自然な語りにする。
-    // 目的地名・距離は下部カードに表示するため、ここでは触れない。
-    const full = composeGuideText(nextStep, near);
+    if (!(showGuide && nextStep && activeChallenge)) { setGuideMsg(null); return; }
+    setGuideMsg((prev) => {
+      const sameStep = prev?.stepId === nextStep.id;
+      const stage = nextGuideStage(nextDist, sameStep ? prev!.stage : null);
+      if (sameStep && stage === prev!.stage) return prev; // 同一バンド内は更新しない
+      // ステップ開始時は導入（蘊蓄→観察指示）、歩き出してからはバンドごとの道中語り
+      // （残り距離の声かけ・現在地近くの豆知識・道中の観察ミッションのローテーション）。
+      const text = sameStep
+        ? composeWalkGuide({ questId: activeChallenge.id, step: nextStep, stage, distKm: nextDist, user: userLocation })
+        : composeGuideText(nextStep);
+      return { stepId: nextStep.id, stage, text };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showGuide, nextStep?.id, nextDist, userLocation.lat, userLocation.lng]);
+  // 語りを一文字ずつタイプ表示
+  useEffect(() => {
+    if (!guideMsg) { setBriefTyped(''); setGuideDone(false); return; }
+    const full = guideMsg.text;
     setBriefTyped('');
     setGuideDone(false);
     let i = 0;
@@ -378,8 +478,7 @@ export default function MapTab({
       if (i >= full.length) { clearInterval(id); setGuideDone(true); }
     }, 30);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showGuide, nextStep?.id, near]);
+  }, [guideMsg]);
   // タイプ中はフキダシ本文を最下部へ追従（3行枠内でスクロール）
   useEffect(() => {
     const el = guideScrollRef.current;
@@ -433,6 +532,8 @@ export default function MapTab({
           affiliates: [],
           userName: currentUser.displayName || '旅人',
           spot: { name: activeChallenge.title, category: 'クエスト', description: activeChallenge.description, enjoyments: [] },
+          // 現在地。サーバ側で「土地の実在豆知識」を引き、精霊が道中の土地の話をできるようにする
+          location: { lat: userLocation.lat, lng: userLocation.lng },
         }),
       });
       const data = await res.json();
@@ -453,6 +554,7 @@ export default function MapTab({
           spots={displaySpots}
           activeSpot={activeSpot}
           onSelectSpot={onSelectSpot}
+          onOpenDetail={onOpenDetail}
           userLocation={userLocation}
           setUserLocation={setUserLocation}
           ugcCounts={ugcCounts}
@@ -667,72 +769,87 @@ export default function MapTab({
             </>
           ) : null}
         </div>
-      ) : !activeChallenge && !celebrate && cardSpot ? (() => {
-        // ▼ インタラクティブカード（Interactive Card）：選択中/最寄りの場を提示し、タップで詳細を開く
-        const spot = cardSpot;
-        const d = distanceKm(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude);
-        const distVal = d < 1 ? `${Math.round(d * 1000)}` : d.toFixed(1);
-        const distUnit = d < 1 ? 'm' : 'km';
-        const godEmoji = spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏');
-        const held = hasGoShuin(currentUser.id, spot.id); // この場の御朱印を授かり済みか
-        const ugc = ugcCounts[spot.id] ?? 0;
-        // 探索コンパス：その場の方角を指す（端末の向きがあれば実方向、無ければ北基準）
-        const compassRot = bearingDeg(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude) - (deviceHeading ?? 0);
-        const ter = terrainLabel(spot.terrain); // 地形(Terrain)バッジ用
-        return (
+      ) : !activeChallenge && !celebrate && cardSpot ? (
+        // ▼ インタラクティブカード（Interactive Card）：指に追従するスワイプ・カルーセル。
+        //   右に次のカードがチラ見えして「横にめくれる」ことが一目で分かる（近い順）。
+        <div
+          ref={(el) => { overlayElRef.current = el; cardViewportRef.current = el; }}
+          className="absolute bottom-3 left-3 right-3 z-[1000] overflow-hidden touch-pan-y"
+          onTouchStart={onTrackTouchStart}
+          onTouchMove={onTrackTouchMove}
+          onTouchEnd={onTrackTouchEnd}
+        >
           <div
-            ref={(el) => { overlayElRef.current = el; }}
-            role="button"
-            tabIndex={0}
-            onTouchStart={onCardTouchStart}
-            onTouchEnd={onCardTouchEnd}
-            onClick={() => { if (swipedRef.current) { swipedRef.current = false; return; } onSelectSpot(spot); onOpenDetail?.(spot); }}
-            className="absolute bottom-3 left-3 right-3 z-[1000] text-left bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-black/5 overflow-hidden cursor-pointer active:scale-[0.99] transition-all touch-pan-y"
+            ref={cardTrackRef}
+            className="flex items-stretch will-change-transform"
+            style={{
+              gap: `${CARD_GAP}px`,
+              // 計測前（slideW=0）はオフセットを掛けない＝見切れたカードを出さない
+              transform: `translateX(${slideW ? cardBaseFor(cardIdx < 0 ? 0 : cardIdx) : 0}px)`,
+              transition: slideW ? 'transform .3s cubic-bezier(.22,.61,.36,1)' : 'none',
+            }}
           >
-            <div className="flex items-stretch gap-3">
-              <div className="w-20 self-stretch rounded-l-2xl flex items-center justify-center text-4xl flex-shrink-0 bg-gradient-to-br from-blue-100 to-amber-100 relative">
-                {godEmoji}
-                {/* 探索コンパス：枠の上辺を、その場の方向へ回る矢印が指す（宝探し誘導） */}
-                <div className="absolute inset-1.5 pointer-events-none transition-transform duration-300" style={{ transform: `rotate(${compassRot}deg)` }}>
-                  <Navigation2 className="w-3.5 h-3.5 text-[#2563eb] fill-[#2563eb] absolute top-0 left-1/2 -translate-x-1/2" />
-                </div>
-              </div>
-              <div className="flex-1 min-w-0 py-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-black tracking-wider text-[#2563eb]/70">近くの場{nearSpotList.length > 1 && cardIdx >= 0 ? ` ${cardIdx + 1}/${nearSpotList.length}` : ''}</span>
-                  {nearSpotList.length > 1 && (
-                    <span className="text-[10px] text-gray-400 flex items-center gap-0.5">← スワイプ →</span>
-                  )}
-                </div>
-                <h4 className="text-sm font-black text-gray-900 truncate">{spot.name}</h4>
-                {spot.godName && (
-                  <p className="text-[11px] font-bold text-gray-400 truncate mt-0.5">
-                    {spot.godEmoji ? `${spot.godEmoji} ` : ''}{spot.godName}
-                  </p>
-                )}
-                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                  {spot.category && <span className="text-[13px] font-black text-gray-500">{spot.category}</span>}
-                  <span className="text-[13px] font-black flex items-center gap-0.5 text-[#2563eb]">
-                    <MapPin className="w-3 h-3" /><span className="tabular-nums">{distVal}</span><span className="text-[11px]">{distUnit}</span>
-                  </span>
-                  <span className={`text-[12px] font-black px-1.5 py-0.5 rounded-full ${ter.tone}`}>🥾 {ter.label}</span>
-                  {held && <span className="text-[13px] font-black text-shrine-red flex items-center gap-0.5">🔴 御朱印</span>}
-                  {ugc > 0 && <span className="text-[13px] flex items-center gap-0.5 text-gray-400"><Camera className="w-3 h-3" />{ugc}</span>}
-                </div>
-                {/* ページインジケータ（ドット） */}
-                {nearSpotList.length > 1 && (
-                  <div className="flex items-center gap-1 mt-1.5">
-                    {nearSpotList.map((_, i) => (
-                      <span key={i} className={`h-1 rounded-full transition-all ${i === cardIdx ? 'w-3 bg-[#2563eb]' : 'w-1 bg-gray-300'}`} />
-                    ))}
+            {nearSpotList.map((s, i) => {
+              const d = distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude);
+              const distVal = d < 1 ? `${Math.round(d * 1000)}` : d.toFixed(1);
+              const distUnit = d < 1 ? 'm' : 'km';
+              const godEmoji = s.godEmoji || (s.category === '神社' ? '⛩️' : '🙏');
+              const held = hasGoShuin(currentUser.id, s.id); // この場の御朱印を授かり済みか
+              const ugc = ugcCounts[s.id] ?? 0;
+              // 探索コンパス：その場の方角を指す（端末の向きがあれば実方向、無ければ北基準）
+              const cardPhoto = (s.photos && s.photos[0]) || s.imageUrl || '';
+              return (
+                <div
+                  key={s.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => { if (swipedRef.current) { swipedRef.current = false; return; } onSelectSpot(s); onOpenDetail?.(s); }}
+                  style={{ width: slideW || '100%', flexShrink: 0 }}
+                  className="text-left bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-black/5 overflow-hidden cursor-pointer"
+                >
+                  <div className="flex items-stretch gap-3">
+                    {/* 左：その場の写真（奉納写真→代表写真の順）。無ければ神の絵文字 */}
+                    <div className="w-20 self-stretch rounded-l-2xl flex items-center justify-center text-4xl flex-shrink-0 bg-gradient-to-br from-blue-100 to-amber-100 relative overflow-hidden">
+                      {cardPhoto ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={cardPhoto} alt={s.name} className="absolute inset-0 w-full h-full object-cover" />
+                      ) : (
+                        godEmoji
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0 py-3">
+                      {/* めくれることはドットインジケータと右の覗きカードで伝わるため、ラベル・スワイプ表記は出さない */}
+                      <h4 className="text-sm font-black text-gray-900 truncate">{s.name}</h4>
+                      {s.godName && (
+                        <p className="text-[11px] font-bold text-gray-400 truncate mt-0.5">
+                          {s.godEmoji ? `${s.godEmoji} ` : ''}{s.godName}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        {s.category && <span className="text-[13px] font-black text-gray-500">{s.category}</span>}
+                        <span className="text-[13px] font-black flex items-center gap-0.5 text-[#2563eb]">
+                          <MapPin className="w-3 h-3" /><span className="tabular-nums">{distVal}</span><span className="text-[11px]">{distUnit}</span>
+                        </span>
+                        {held && <span className="text-[13px] font-black text-shrine-red flex items-center gap-0.5">🔴 御朱印</span>}
+                        {ugc > 0 && <span className="text-[13px] flex items-center gap-0.5 text-gray-400"><Camera className="w-3 h-3" />{ugc}</span>}
+                      </div>
+                      {/* ページインジケータ（ドット） */}
+                      {nearSpotList.length > 1 && (
+                        <div className="flex items-center gap-1 mt-1.5">
+                          {nearSpotList.map((_, j) => (
+                            <span key={j} className={`h-1 rounded-full transition-all ${j === i ? 'w-3 bg-[#2563eb]' : 'w-1 bg-gray-300'}`} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="self-center pr-3 flex-shrink-0 text-[#2563eb]"><ChevronRight className="w-5 h-5" /></div>
                   </div>
-                )}
-              </div>
-              <div className="self-center pr-3 flex-shrink-0 text-[#2563eb]"><ChevronRight className="w-5 h-5" /></div>
-            </div>
+                </div>
+              );
+            })}
           </div>
-        );
-      })() : null}
+        </div>
+      ) : null}
 
 
       {/* 証拠写真モーダル（この目的地を達成するには写真が必要） */}
@@ -859,6 +976,15 @@ export default function MapTab({
                   </div>
                 ) : (
                   <p className="text-[13px] text-gray-600 mt-0.5">{celebrate.complete ? 'みごと制覇じゃ。よく歩いたのう！' : 'よくやった。次へ進もうぞ。'}</p>
+                )}
+                {celebrate.feedback && (
+                  /* 奉納した写真の内容へのAIのひとこと（非同期で届いたら表示） */
+                  <div className="mt-2 text-left rounded-xl px-3 py-2 bg-amber-50 border border-amber-200 text-amber-800 celebrate-pop">
+                    <span className="inline-flex items-center gap-1.5 text-[13px] font-black">
+                      <span className="text-lg leading-none">📸</span>写真へのひとこと
+                    </span>
+                    <p className="mt-1 text-[13px] leading-relaxed">{celebrate.feedback}</p>
+                  </div>
                 )}
               </div>
             </div>

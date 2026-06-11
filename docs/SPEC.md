@@ -92,20 +92,33 @@ happiness = (totalValue − totalIssues) + totalToku
 
 ### 3.1 メインアプリ — 3タブナビゲーション
 
-画面下部のナビゲーションバー（NAV_TABS）で 3 タブを切り替える。`activeTab` state で管理。
+画面下部のナビゲーションバー（NAV_TABS）で 4 タブを切り替える。`activeTab` state で管理。
 
 | key | ラベル | アイコン | 内容 |
 |---|---|---|---|
 | `home` | クエスト | Flag | クエスト一覧（HomeTab） |
+| `record` | 記録 | NotebookPen | 参拝記録・御朱印（RecordTab） |
 | `quest` | マップ | MapPin | Leaflet 地図（MapTab） |
 | `mypage` | マイページ | UserCircle2 | プロフィール・4サブタブ |
 
-> **重要**: ラベルとkeyが意味的に反転している。key=`home` が「クエスト」一覧を、key=`quest` が「マップ」を指す。実装・読解の際はこの反転に注意（§6.1・§6.2 冒頭でも再掲）。
+> **重要**: ラベルとkeyが意味的に反転している。key=`home` が「クエスト」一覧を、key=`quest` が「マップ」を指す。実装・読解の際はこの反転に注意（§6.1・§6.2 冒頭でも再掲）。`record` は「マップ」の左に置く。
 
 #### タブ切り替え時の自動生成
 
 - `key === 'home'`: `generateSpotNearby()` 実行＋クエスト確認。クエスト 0 件なら agentId を持つスポット優先で `generateQuestsForSpot()`。
-- `key === 'quest'` かつ `spots.length === 0`: `generateSpotNearby()`。
+- `key === 'quest'` または `key === 'record'` かつ `spots.length === 0`: `generateVariedSpots()`。
+
+#### 記録タブ（RecordTab）
+
+参拝の記録を残す画面。上部に「参拝の記録／御朱印」の2サブタブ。
+- **参拝の記録**: 「新しい記録を追加」で寺社を検索選択 → 参拝日・メモ・写真（任意）を付けて記録。「ここに行った？」で近くの寺社をワンタップ記録。「これまでの記録」は参拝日降順で一覧（同一寺社は「N回目の記録」を表示・複数回記録可）。記録は `db.recordVisit()` も呼び探訪ボーナス +5徳（重複スポットは徳なし）。
+- **御朱印**: `getGoShuinList()` のコレクションをグリッド表示。**「御朱印を撮影して保存」**で実物の御朱印を写真つきで追加できる（`addPhotoGoshuin`／`source:'photo'`、寺社は選択 or 自由入力、`deleteGoshuin` で削除可）。写真がある御朱印は朱印円の代わりに写真を表示（マイページ・御朱印帳モーダルも対応）。
+- 保存は `src/lib/visit-records.ts`（localStorage `yaorozu_visit_records_<userId>`、写真は圧縮 dataURL・容量超過時は写真を外して保存）。書き込み時に `schedulePush()` でクラウド同期（`yaorozu_visit_records_user-self` は SYNC_KEYS 対象）。
+
+#### PWA・更新検知
+
+- **Service Worker**（`public/sw.js`）はキャッシュせず配信はネットワークに委ねる（古いアプリシェルを掴まない）。`skipWaiting`＋`clients.claim`。Web Push 受信・通知タップ処理を持つ。`/sw.js` は `Cache-Control: no-cache`（`next.config.ts` の headers）。
+- **新デプロイの検知**: `next.config.ts` がデプロイごとに一意な `NEXT_PUBLIC_BUILD_ID`（Vercel はコミットSHA、他はビルド時刻）をバンドルへ埋め込む。`PwaRegister` がアプリ復帰（visibilitychange）・5分間隔で `/api/version` を `no-store` で取得し、自分のビルドIDと異なれば「✨ 新しいバージョンがあります — タップで更新」トーストを表示。タップで `location.reload()`。これにより PWA（ホーム画面起動）でも手動キャッシュ削除なしに更新できる。
 
 #### マイページのサブタブ
 
@@ -354,19 +367,21 @@ ITEM_POOL（7種）: お守り🧿 / 御神酒🍶 / 絵馬🎴 / 神札🎋 / �
 | API_CALLS | `yaorozu_api_calls` | |
 | REVOKED | `yaorozu_revoked_users` | |
 
-### 5.2 クラウド同期（SYNC_KEYS, 16個）
+### 5.2 クラウド同期（SYNC_KEYS）
 
-Supabase へ同期されるキーは **正確に16個** であり、全 KEYS のサブセットである（`src/lib/cloud-sync.ts` で検証済み）。トリビア（`yaorozu_trivia`）・メトリクススナップショット（`yaorozu_metrics_snapshots`）など純ローカルデータは含まない。
+Supabase へ同期されるキーは全 KEYS のサブセットである（正本は `src/lib/cloud-sync.ts`）。トリビア（`yaorozu_trivia`）・メトリクススナップショット（`yaorozu_metrics_snapshots`）など純ローカルデータは含まない。
 
 ```
 yaorozu_users, yaorozu_ugc, yaorozu_user_stats, yaorozu_challenge_progress,
-yaorozu_challenge_photos, yaorozu_activities, yaorozu_goshuin_user-self,
-yaorozu_spots_v3, yaorozu_agents_v2, yaorozu_quests_v2, yaorozu_quest_rules,
+yaorozu_challenge_photos, yaorozu_challenge_comments, yaorozu_activities,
+yaorozu_goshuin_user-self, yaorozu_visit_records_user-self,
+yaorozu_daily_v1, yaorozu_god_tasks_v1,
+yaorozu_spots_v4, yaorozu_agents_v2, yaorozu_quests_v2, yaorozu_quest_rules,
 yaorozu_spot_rules, yaorozu_system_role, yaorozu_dainichi_identity,
-yaorozu_api_calls, yaorozu_revoked_users
+yaorozu_api_calls, yaorozu_revoked_users, yaorozu_bonnou, yaorozu_app_settings
 ```
 
-> **注**: 管理コンソール側の一部記述で「27 SYNC_KEYS」とされる箇所があるが誤りである。SYNC_KEYS のリストは1つだけ存在し、その要素数は16である。`yaorozu_goshuin_user-self`（御朱印）が含まれ、単一ユーザーデモのため userId が固定で埋め込まれている点に注意。
+> **注**: `yaorozu_goshuin_user-self`（御朱印）・`yaorozu_visit_records_user-self`（参拝記録）は単一ユーザーデモのため userId（`user-self`）が固定で埋め込まれている。スナップショットのバケットは `SNAPSHOT_ID`（未ログイン=`user-self`／OAuth ログイン中は認証ユーザーID）で切り替わる。
 
 スナップショットIDは単一ユーザーデモのため固定値 `user-self`（SNAPSHOT_ID）。将来は認証ユーザーIDを使用。
 
@@ -415,13 +430,15 @@ GPS生成スポットは `SPOT_TTL_MS = 30 * 24 * 60 * 60 * 1000`（30日）の 
 
 - タイル: CartoDB Voyager（`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png`, maxZoom=19）。attributionControl は無効。
 - **ユーザー位置マーカー**: シアンドット＋コンパス。zIndexOffset=1000。iOS は `webkitCompassHeading`、Android は `deviceorientation` の alpha から導出。取得不可なら activeSpot への bearing にフォールバック。iOS 13+ は権限タップ必須。
-- **スポットマーカー**: divIcon バブル。最寄り or 選択時に 🦊 神絵文字 + 30字に切り詰めた神の声を白バブルで表示（4.5秒間隔で回転、フェード）。それ以外は青ドット。
-- **マーカー間引き**: ズームに応じて表示数を制限。z≤12→12, z≤13→20, z≤14→30, z≤15→45, z>15→60。境界パディング 0.15（15%）。activeSpot は画面外でも常に含める。
+- **スポットマーカー**: divIcon バブル。フキダシは選択中の場に対して表示（青丸マーカーの上に開く）。無選択時のみ最寄りの場に表示。🦊 神絵文字 + 30字に切り詰めた神の声を白バブルで表示（4.5秒間隔で回転、フェード）。それ以外は**種別アイコン**（神社=⛩️ / 寺院=🙏）で表示し、地図上で寺社の種別を一目で見分けられる。種別アイコン・選択中の青丸の下には名前キャプション（`.map-spot-name`、白フチの Google Map ラベル風）を表示する。マーカーのタップは「未選択→選択（`onSelectSpot`）」、「選択中の場を再タップ→詳細を開く（`onOpenDetail`）」。
+- **マーカー間引き**: ズームに応じて表示数を制限。z≤11→80, z≤12→150, z≤13→350, z≤14→700, **z≥15→無制限（画面内の神社・寺をすべて表示）**。境界パディング 0.15（15%）。activeSpot は画面外でも常に含める。表示スポットの再計算は moveend/zoomend（ドラッグ完了時）に集約し、多数マーカーでもドラッグがカクつかないようにする。
+- **場所検索**: 検索バーは登録スポット（名前/神名/カテゴリ部分一致・近い順）と Nominatim ジオコーダ（450msデバウンス）を併用。任意の場所を選ぶと赤ピン（`searchPin`）を立てて `flyTo`。検索した場所にはまだ場が無いことが多いため、`onMapMove` を直接呼んで検索地点で場の生成を促す（moveend の60秒スロットルに依存しない／下流の `generateSpotNearby` が 5分・500m で重複生成を抑止）。
 - **ゴールマーカー**: activeChallenge があり未完ステップが残るとき青📸バブル。zIndexOffset=1500。クエスト開始時にゴールへ0.9秒で飛び、1.7秒停止後ユーザー位置へ0.9秒で戻る演出。
 - **チャレンジ導入（プロローグ）**: 初回入場時（introSeenId≠challenge.id かつ done.size===0）。Phase0（0.8秒遅延後）に説明を1字/38msでタイプ表示、Phase1（完了1.5秒後）に PROLOGUE カード（難易度/推定時間/タスク数）を表示し3秒で自動進行。導入中はヘッダー・フッター・地図ボタンを隠す。`localStorage['yaorozu_intro_seen']` に保存。
 - **チャレンジ進行**: 上部に青バナー「Challenge In Progress」。マルチステップなら精霊フォックス＋予報バブル（1字/30ms）。下部に次ウェイポイントカード（500m閾値）。500m以遠ならボタングレーアウト、タップで「📍 近づいてください」警告（2.8秒で自動消去）。距離表示の色: ≤50m=emerald, ≤300m=amber, それ以外=青。
 - **チャレンジ完了**: 「証拠写真」ボタン → file input（capture='environment'）→ プレビュー → `onAdvanceChallenge(stepId, photoUrl)`。全ステップ完了で celebrate モーダル（紙吹雪18片、バッジ、精霊バブル＋トリビア）。
 - **インタラクティブカード**: activeChallenge が無いとき、画面下部にユーザーレベルで参加可能な最寄り未制覇クエストを表示（completed除外、activeId除外、`userLevel >= minLevel`）。距離優先・レベル可否で並べ替え。クリックで `onStartChallenge`。創世主神社を `godSpot.godName` で表示。
+- **近くの場カード（スワイプ・カルーセル）**: クエスト未参加時に画面下部へ最寄り10件をカード表示。**指に追従する横スワイプ**で隣の場へ切替（`translateX` を touchmove で直接更新、touchend で閾値判定して隣カードへスナップ）。**右に次カードを約24px チラ見せ**して横にめくれることを示す（ビューポート幅 − PEEK=34px をカード幅に、カード間 GAP=10px）。タップで詳細（`onOpenDetail`）。スワイプ直後のタップは `swipedRef` で誤爆防止。
 - **精霊ガイドチャット（マップモード）**: 予報バブル右上のフォックスアイコンで開く。`buildGuideLog`（説明＋各ステップガイド再構成）+ 追加交換を表示。`POST /api/chat`、精霊名「道案内の精霊」、systemPrompt は200字以内推奨。
 - **TTSトグル**: 音量アイコンで切替。`localStorage['yaorozu_tts']`（'0'|'1'）。ON時は `/api/tts`（ElevenLabs）→ 失敗/鍵なしで Web Speech へフォールバック。
 - **地図再描画**: リサイズ/orientationchange/PWA復帰（pageshow）で `invalidateSize()`。`onMapMove` は60000ms（60秒）スロットルでアクティビティログ記録。
@@ -925,6 +942,6 @@ Supabase クライアントは service-role キー使用・サーバーAPIルー
 | 道案内の精霊 | クエスト進行を案内する専用エージェント（`agent-guide-spirit`）。 |
 | 合成エージェント | 個別 Agent 不在時に Spot 情報のみで応答するエージェント（`agent-synthetic-*`）。 |
 | 失効（Revocation） | 管理者削除によりユーザーを `yaorozu_revoked_users` に追加し再ログインを強制する処理。 |
-| スナップショット | localStorage の16個の SYNC_KEYS をまとめた Supabase 同期単位（ID は `user-self`）。 |
+| スナップショット | localStorage の SYNC_KEYS（`src/lib/cloud-sync.ts`）をまとめた Supabase 同期単位（バケットID は `SNAPSHOT_ID`）。 |
 | トリビア（TriviaEntry） | 町歩き蘊蓄DB（約1000件以上）。地形/歴史/建築/道路の4カテゴリ。SYNC対象外の純ローカルデータ。 |
 | TTL | GPS生成スポットの30日有効期限（SPOT_TTL_MS）。`getSpots()` で期限切れを自動削除。 |

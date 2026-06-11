@@ -13,6 +13,7 @@ const SYNC_KEYS = [
   'yaorozu_challenge_comments',
   'yaorozu_activities',
   'yaorozu_goshuin_user-self',
+  'yaorozu_visit_records_user-self', // 参拝記録（RecordTab）
   'yaorozu_daily_v1',      // 参拝ストリーク・カムバック（日付キーマップ）
   'yaorozu_god_tasks_v1',  // 場の御用の本日達成（日付キーマップ）
   // 管理者が作成するコンテンツ
@@ -77,6 +78,8 @@ export async function pullSnapshot(): Promise<boolean> {
       applied = true;
     }
     suspendPush = false;
+    // db のキャッシュ（スポット等）に localStorage の直接書き換えを知らせる
+    if (applied) window.dispatchEvent(new CustomEvent('yaorozu:external-write'));
     return applied;
   } catch {
     cloudEnabled = false;
@@ -125,6 +128,8 @@ async function pushNow(): Promise<void> {
           if (key === 'yaorozu_users' && (!Array.isArray(v) || v.length === 0)) continue;
           localStorage.setItem(key, JSON.stringify(v));
         }
+        // db のキャッシュ（スポット等）に localStorage の直接書き換えを知らせる
+        window.dispatchEvent(new CustomEvent('yaorozu:external-write'));
       } finally {
         suspendPush = false;
       }

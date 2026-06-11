@@ -160,6 +160,12 @@ const INITIAL_USERS: User[] = [
 // GPS 周辺の実在スポット発見（/api/generate-spot）は近接シードを再利用して重複しない。
 const INITIAL_SPOTS: Spot[] = generateTokyoSpots();
 
+// シードの照合用 JSON（id → 生成直後の JSON）。スポットの保存（saveSpots）で
+// 「シードから変更されていない場」を書き込み対象から外すために使う。
+// シード全件は約2.3MB あり、丸ごと localStorage へ保存すると quota（約5MB）を圧迫して
+// 写真投稿などの保存が QuotaExceededError で失敗する。差分だけなら数KBで済む。
+const SEED_SPOT_JSON: Map<string, string> = new Map(INITIAL_SPOTS.map((s) => [s.id, JSON.stringify(s)]));
+
 
 const INITIAL_AGENTS: Agent[] = [
   // リセット済み — 管理画面から追加してください
@@ -609,7 +615,7 @@ const ITEM_POOL: { name: string; icon: string }[] = [
 ];
 
 /** localStorage の容量超過エラーか（Safari/WKWebView は code 22、Firefox は NS_ERROR_DOM_QUOTA_REACHED）。 */
-function isQuotaError(e: unknown): boolean {
+export function isQuotaError(e: unknown): boolean {
   return (
     e instanceof DOMException &&
     (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22)
@@ -619,6 +625,14 @@ function isQuotaError(e: unknown): boolean {
 // Database class wrapping client side state
 class MockDatabase {
   private isBrowser = typeof window !== 'undefined';
+
+  constructor() {
+    // クラウド復元（cloud-sync の pull / マージ反映）は db を経由せず localStorage を
+    // 直接書き換えるため、このイベントでスポットキャッシュを破棄して読み直す。
+    if (this.isBrowser) {
+      window.addEventListener('yaorozu:external-write', () => this.invalidateSpotsCache());
+    }
+  }
 
   private load<T>(key: string, defaultValue: T): T {
     if (!this.isBrowser) return defaultValue;
@@ -648,9 +662,66 @@ class MockDatabase {
     return users;
   }
 
-  /** 削除済みも含む全スポット（監査・mutator の保存用）。 */
+  /** 旧形式（シード全件保存）→ 差分形式への圧縮を、セッション中1回だけ行うフラグ */
+  private spotsCompacted = false;
+  // スポットはアプリ中で最も読まれるデータ（地図・一覧・詳細が毎レンダー参照する）。
+  // 毎回の JSON パース＋シードとのマージ（4,600件）を避けるためセッション内キャッシュを持つ。
+  private spotsRawCache: Spot[] | null = null;
+  private spotsLiveCache: Spot[] | null = null;
+
+  /** db を経由しない localStorage 書き込み（クラウド復元など）の後に呼ぶ。 */
+  invalidateSpotsCache(): void {
+    this.spotsRawCache = null;
+    this.spotsLiveCache = null;
+  }
+
+  /**
+   * 削除済みも含む全スポット（監査・mutator の保存用）。
+   * 保存形式は「シードとの差分」（変更された/追加されたスポットのみ）。読み取り時に
+   * シードへ重ねて完全なリストへ復元する。旧形式（全件保存・約2.3MB）が残っていたら
+   * 一度だけ差分形式へ圧縮し直し、localStorage の quota を解放する。
+   */
   private getSpotsRaw(): Spot[] {
-    return this.load<Spot[]>(KEYS.SPOTS, INITIAL_SPOTS);
+    if (this.spotsRawCache) return this.spotsRawCache;
+    const stored = this.load<Spot[] | null>(KEYS.SPOTS, null);
+    if (!Array.isArray(stored)) {
+      this.spotsRawCache = INITIAL_SPOTS;
+      return INITIAL_SPOTS;
+    }
+    const overlay = new Map<string, Spot>();
+    const extras: Spot[] = [];
+    for (const s of stored) {
+      if (SEED_SPOT_JSON.has(s.id)) overlay.set(s.id, s);
+      else extras.push(s);
+    }
+    const merged = [...INITIAL_SPOTS.map((s) => overlay.get(s.id) ?? s), ...extras];
+    this.spotsRawCache = merged;
+    // 旧形式の検出: シード由来の保存件数が明らかに多い（差分なら通常は少数）
+    if (!this.spotsCompacted && this.isBrowser) {
+      this.spotsCompacted = true;
+      if (overlay.size > 1000) {
+        try {
+          this.saveSpots(merged);
+        } catch {
+          /* 圧縮できなくても読み取りは成立させる */
+        }
+      }
+    }
+    return merged;
+  }
+
+  /**
+   * スポットを保存する（KEYS.SPOTS への唯一の書き込み口）。
+   * シードと同一内容の場は書き込まず、変更・追加された場だけを永続化する。
+   */
+  private saveSpots(spots: Spot[]): void {
+    this.spotsRawCache = spots;
+    this.spotsLiveCache = null;
+    const delta = spots.filter((s) => {
+      const seed = SEED_SPOT_JSON.get(s.id);
+      return !seed || seed !== JSON.stringify(s);
+    });
+    this.save(KEYS.SPOTS, delta);
   }
 
   /** 削除済みも含む全エージェント（監査・mutator の保存用）。 */
@@ -659,6 +730,7 @@ class MockDatabase {
   }
 
   getSpots(): Spot[] {
+    if (this.spotsLiveCache) return this.spotsLiveCache;
     const stored = this.getSpotsRaw();
     const now = Date.now();
     // 読み取り時の退役処理（ソフト削除＝deletedAt 打刻。ハード削除はせず監査ログを残す）:
@@ -679,7 +751,7 @@ class MockDatabase {
       return s;
     });
     if (mutated) {
-      this.save(KEYS.SPOTS, withTtl);
+      this.saveSpots(withTtl);
       // カスケード：退役（TTL or 寺社以外）になった場の神もソフト削除
       const justRetired = new Set(
         withTtl.filter(s => s.deletedAt && !stored.find(o => o.id === s.id)?.deletedAt).map(s => s.id)
@@ -689,7 +761,9 @@ class MockDatabase {
           justRetired.has(a.spotId) && !a.deletedAt ? { ...a, deletedAt: new Date().toISOString() } : a));
       }
     }
-    return withTtl.filter(s => !s.deletedAt);
+    const live = withTtl.filter(s => !s.deletedAt);
+    this.spotsLiveCache = live;
+    return live;
   }
 
   /** 削除済みスポット（生成/削除日時の監査ビュー用）。 */
@@ -1059,7 +1133,7 @@ class MockDatabase {
       // 更新時は createdAt を維持（リセットしない）
       spots[index] = { ...spot, createdAt: spot.createdAt ?? spots[index].createdAt };
     }
-    this.save(KEYS.SPOTS, spots);
+    this.saveSpots(spots);
     return spot;
   }
 
@@ -1068,7 +1142,7 @@ class MockDatabase {
     const ts = new Date().toISOString();
     const spots = this.getSpotsRaw();
     const target = spots.find(s => s.id === id);
-    this.save(KEYS.SPOTS, spots.map(s => s.id === id && !s.deletedAt ? { ...s, deletedAt: ts } : s));
+    this.saveSpots(spots.map(s => s.id === id && !s.deletedAt ? { ...s, deletedAt: ts } : s));
     this.save(KEYS.AGENTS, this.getAgentsRaw().map(a => a.spotId === id && !a.deletedAt ? { ...a, deletedAt: ts } : a));
     this.save(KEYS.UGC, this.getUgc().filter(p => p.spotId !== id));
     // 生成クエストはハード削除（再生成可能・orphan を残さない）
@@ -1155,7 +1229,7 @@ class MockDatabase {
     // メイン画像が未設定ならこの投稿をメインにする
     if (!spot.imageUrl) spot.imageUrl = url;
     spots[idx] = spot;
-    this.save(KEYS.SPOTS, spots);
+    this.saveSpots(spots);
 
     this.rewardToku(userId, 30);
     this.recalculateSpotCreator(spotId);
@@ -1173,7 +1247,7 @@ class MockDatabase {
     // メイン画像が却下されたら次の投稿写真へ差し替え（無ければ空）
     if (spot.imageUrl === url) spot.imageUrl = spot.photos[0] ?? '';
     spots[idx] = spot;
-    this.save(KEYS.SPOTS, spots);
+    this.saveSpots(spots);
     return spot;
   }
 
@@ -1186,7 +1260,7 @@ class MockDatabase {
     if (!spot.enjoyments.includes(text)) {
       spot.enjoyments = [...spot.enjoyments, text];
       spots[idx] = spot;
-      this.save(KEYS.SPOTS, spots);
+      this.saveSpots(spots);
     }
     return spot;
   }
@@ -1201,7 +1275,7 @@ class MockDatabase {
     if (!issues.includes(text)) {
       spot.issues = [...issues, text];
       spots[idx] = spot;
-      this.save(KEYS.SPOTS, spots);
+      this.saveSpots(spots);
     }
     return spot;
   }
@@ -1218,7 +1292,7 @@ class MockDatabase {
     if (at !== -1) {
       spot.issues = [...issues.slice(0, at), ...issues.slice(at + 1)];
       spots[idx] = spot;
-      this.save(KEYS.SPOTS, spots);
+      this.saveSpots(spots);
     }
     return spot;
   }
@@ -1667,7 +1741,7 @@ class MockDatabase {
       if (spot.creatorId !== topUserId) {
         spot.creatorId = topUserId;
         spots[spotIndex] = spot;
-        this.save(KEYS.SPOTS, spots);
+        this.saveSpots(spots);
       }
     } else {
       // If no one meets it, it might revert to null (or keep previous if they still have the lead,
@@ -1675,7 +1749,7 @@ class MockDatabase {
       if (spot.creatorId !== null && maxToku < spot.tokuRequirement) {
         spot.creatorId = null;
         spots[spotIndex] = spot;
-        this.save(KEYS.SPOTS, spots);
+        this.saveSpots(spots);
       }
     }
   }

@@ -1,5 +1,6 @@
 // Yaorozu God OS - Chat API Route with OpenAI & Rule-based Fallback
 import { NextResponse } from 'next/server';
+import { getTriviaNear } from '../../../data/tokyo-trivia';
 
 // Interface matching DB types inside API
 interface Agent {
@@ -27,6 +28,18 @@ interface SpotContext {
   description: string;
   enjoyments: string[];
   godName?: string;
+  latitude?: number;
+  longitude?: number;
+}
+
+/** 巡礼者の歩み（クライアントから渡る軽量サマリ。全フィールド任意＝旧形式でも動く） */
+interface UserContext {
+  visitCount?: number;
+  totalToku?: number;
+  levelTitle?: string;
+  goshuinCount?: number;
+  questClears?: number;
+  questClearsHere?: number;
 }
 
 // spot 情報に基づく動的フォールバック（個別Agent未登録のスポット用）
@@ -194,7 +207,7 @@ function getGuideFallbackResponse(message: string, spot?: SpotContext): string {
 
 export async function POST(request: Request) {
   try {
-    const { message, history, spotId, agent, ugc, affiliates, userName, spot, localTime } = await request.json();
+    const { message, history, spotId, agent, ugc, affiliates, userName, spot, localTime, userContext, location } = await request.json();
 
     const apiKey = process.env.OPENAI_API_KEY;
     const geminiKey = process.env.GEMINI_API_KEY;
@@ -228,25 +241,64 @@ export async function POST(request: Request) {
       `Offer [${index + 1}] (Category: ${aff.category}): Name: "${aff.title}", URL: "${aff.url}", Rating: ${aff.rating}, Price Range: ${aff.priceRange}`
     ).join('\n');
 
-    const fullSystemPrompt = `${agent.systemPrompt}
+    // 旧データの Agent には「返答は150文字以内」が焼き込まれているため、サーバ側で緩和する
+    // （localStorage の移行なしで全エージェントに効く）。
+    const baseSystemPrompt = String(agent?.systemPrompt ?? '').replace(/150\s*文?字以内/g, '200字程度');
+
+    // 巡礼者の歩み（神が会話の中で自然に触れられるようにする）
+    const uc: UserContext | undefined = userContext;
+    const userContextSection = uc
+      ? `
+
+The pilgrim's journey so far (real data; weave it into conversation naturally and with respect, when relevant):
+- 巡った場所: ${uc.visitCount ?? 0}カ所 / 徳: ${uc.totalToku ?? 0} / 称号: ${uc.levelTitle ?? '見習い巡礼者'}
+- 御朱印: ${uc.goshuinCount ?? 0}体 / 果たしたクエスト: ${uc.questClears ?? 0}個${uc.questClearsHere ? `（この場では${uc.questClearsHere}個）` : ''}`
+      : '';
+
+    // 土地の実在豆知識（半径2km）。事実として会話に使ってよい素材を渡す
+    const loc =
+      location && typeof location.lat === 'number' && typeof location.lng === 'number'
+        ? location
+        : spot && typeof spot.latitude === 'number' && typeof spot.longitude === 'number'
+        ? { lat: spot.latitude, lng: spot.longitude }
+        : null;
+    const nearbyTrivia = loc ? getTriviaNear(loc.lat, loc.lng, 2, 3) : [];
+    const triviaSection = nearbyTrivia.length
+      ? `
+
+Real local knowledge near this place (verified facts; you may share these in conversation):
+${nearbyTrivia.map((t) => `- ${t.title} — ${t.body}`).join('\n')}`
+      : '';
+
+    // 話題シード：会話が途切れたとき、神が自分から振れる寺社歩きの話題
+    const topicSection = `
+
+会話が一段落したら、次の話題から一つ選び、自分から短く振ってもよい:
+- ご祭神・御本尊の物語（いつ・誰のために祀られたかという由緒）
+- 鳥居の形（神明系/明神系）の見分け方、狛犬の阿吽と個性
+- 御朱印の季節デザイン・切り絵御朱印、変わりおみくじ（鳩・狐・だるま型）
+- 参道の正中を避けて端を歩く作法、ご神木、参道から本殿への空気の切り替わり
+- 門前の和菓子・名物、一本裏の路地、古地図的な謎（なぜここにこの社があるのか）`;
+
+    const fullSystemPrompt = `${baseSystemPrompt}
 
 Below is the visitor-contributed local knowledge (UGC) for your spot. This is the collective memory of past pilgrims. 
 Whenever possible, use this information not just to answer questions, but to inspire the current user to look closer. For example, say things like "A past pilgrim named [Name] noticed [Detail]. Can you find it too?" or use it as a hint for their exploration.
 ${ugcContext || 'No UGC posts yet.'}
 
 Below are relevant local affiliate recommendations. If the user asks about food, restaurants, hotels, accommodation, experiences, or activities in the area, naturally suggest ONE appropriate recommendation from this list in your persona:
-${affiliateContext || 'No affiliate offers available.'}
+${affiliateContext || 'No affiliate offers available.'}${userContextSection}${triviaSection}${topicSection}
 
 User's display name: ${userName || '巡礼者'}
 Current local time: ${localTime || '不明'}
 
-Remember: Answer in character, be extremely concise (under 150 characters), and embed affiliate URLs naturally in your persona style.
+Remember: Answer in character. Aim for about 200 Japanese characters — keep a conversational tempo, go deep on ONE topic rather than listing many, and when natural, end with a short question or invitation that keeps the walk going. Embed affiliate URLs naturally in your persona style.
 Consider the current local time in your response if appropriate (e.g. greeting them for morning/evening, or commenting on the night).`;
 
     // ── Gemini を優先（GEMINI_API_KEY がある場合）──
     if (geminiKey) {
       const contents = [
-        ...history.slice(-6).map((msg: { sender: 'user' | 'agent'; text: string }) => ({
+        ...history.slice(-10).map((msg: { sender: 'user' | 'agent'; text: string }) => ({
           role: msg.sender === 'user' ? 'user' : 'model',
           parts: [{ text: msg.text }],
         })),
@@ -262,7 +314,7 @@ Consider the current local time in your response if appropriate (e.g. greeting t
             systemInstruction: { parts: [{ text: fullSystemPrompt }] },
             contents,
             generationConfig: {
-              maxOutputTokens: 300,
+              maxOutputTokens: 400,
               temperature: 0.7,
               thinkingConfig: { thinkingBudget: 0 }, // 思考トークンを無効化（応答を確実に返す）
             },
@@ -282,7 +334,7 @@ Consider the current local time in your response if appropriate (e.g. greeting t
 
     const chatMessages = [
       { role: 'system', content: fullSystemPrompt },
-      ...history.slice(-6).map((msg: { sender: 'user' | 'agent'; text: string }) => ({
+      ...history.slice(-10).map((msg: { sender: 'user' | 'agent'; text: string }) => ({
         role: msg.sender === 'user' ? 'user' : 'assistant',
         content: msg.text,
       })),
@@ -298,7 +350,7 @@ Consider the current local time in your response if appropriate (e.g. greeting t
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: chatMessages,
-        max_tokens: 150,
+        max_tokens: 300,
         temperature: 0.7
       })
     });

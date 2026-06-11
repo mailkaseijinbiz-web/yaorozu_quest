@@ -97,7 +97,7 @@ async function enrichWithGemini(real: RealPlace, geminiKey: string): Promise<Gem
     godName: String(g.godName || `${real.name}の${persona.god}`).slice(0, 30),
     godEmoji: String(g.godEmoji || persona.emoji).slice(0, 2),
     godPersona: String(g.godPersona || `${real.name}に宿る${persona.god}。`).slice(0, 100),
-    godSystemPrompt: String(g.godSystemPrompt || `あなたは実在する「${real.name}」(${real.category})に宿る神霊です。この場所の魅力を伝えてください。返答は150字以内。`).slice(0, 300),
+    godSystemPrompt: String(g.godSystemPrompt || `あなたは実在する「${real.name}」(${real.category})に宿る神霊です。この場所の魅力を伝えてください。返答は200字程度。`).slice(0, 300),
     voiceTone: (VOICE_TONES as readonly string[]).includes(g.voiceTone) ? g.voiceTone : persona.tone,
     godRequests: Array.isArray(g.godRequests) && g.godRequests.length
       ? g.godRequests.slice(0, 5).map(String)
@@ -176,7 +176,7 @@ function templateFlavorFull(real: RealPlace): GeminiFlavor {
     godName,
     godEmoji: persona.emoji,
     godPersona: `${real.name}に宿る${persona.god}。実在するこの地を見守っている。`,
-    godSystemPrompt: `あなたは実在する「${real.name}」(${real.category})に宿る神霊「${godName}」です。${persona.tone}な口調で、この場所の魅力や歴史を訪れた人に伝えてください。返答は150字以内。`,
+    godSystemPrompt: `あなたは実在する「${real.name}」(${real.category})に宿る神霊「${godName}」です。${persona.tone}な口調で、この場所の魅力や歴史を訪れた人に伝えてください。返答は200字程度。`,
     voiceTone: persona.tone,
     godRequests: [`${persona.emoji} ${real.name}の今の様子を写真に撮ってほしいのじゃ`, 'この場の良いところを一つ教えてくれぬか'],
     haloColor: HALO_COLORS[real.osmId % HALO_COLORS.length],
@@ -199,16 +199,21 @@ export async function POST(request: Request) {
   const geminiKey = process.env.GEMINI_API_KEY;
 
   // 1) 実在優先：OSM(Overpass) で近くの実在の寺社（神社・寺院）を探す。
-  //    寺社のみに絞った分ヒット密度が下がるため、半径を広げて取りこぼしを防ぐ（最寄り1件を採用）。
-  let real: RealPlace | null = null;
+  //    最寄り1件だけでなく周辺もまとめて返す。大寺院（例: 善光寺）の境内・門前には
+  //    子院・祠が密集しており、「最寄り1件」方式だとそちらに取られて本体が
+  //    いつまでも地図に出ない問題があったため。
+  let places: RealPlace[] = [];
   try {
-    real = (await lookupRealPlaces(lat, lng, 2500, 8))[0] ?? null;
+    places = await lookupRealPlaces(lat, lng, 2500, 8);
   } catch (err) {
     console.error('[generate-spot] overpass error:', err);
   }
+  const real = places[0] ?? null;
   if (real) {
     const { spot, agent } = await buildRealSpot(real, geminiKey);
-    return NextResponse.json({ spot, agent, source: 'osm' });
+    // 2件目以降はテンプレ味付け（Gemini は最寄り1件のみ＝API 消費を増やさない）
+    const extras = await Promise.all(places.slice(1).map((p) => buildRealSpot(p)));
+    return NextResponse.json({ spot, agent, extras, source: 'osm' });
   }
 
   // 2) 近くに実在の場が無い → 生成しない（架空の場やプレースホルダーは作らない）
