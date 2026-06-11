@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, Clock, Share2, X, Stamp, NotebookPen } from 'lucide-react';
-import { db, Spot, Agent, User as UserType, UserContribution, Activity, SPOT_TTL_MS } from '../lib/db';
+import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, Share2, X, Stamp, NotebookPen } from 'lucide-react';
+import { db, Spot, Agent, User as UserType, UserContribution, SPOT_TTL_MS } from '../lib/db';
 import { getGoShuinList, Goshuin } from '../lib/goshuin';
 import { pullSnapshot, setSyncUser } from '../lib/cloud-sync';
 import { isAuthConfigured, getSupabaseBrowser, signInWithProvider, signOutAuth, profileFromUser, type AuthProfile } from '../lib/supabase-browser';
@@ -26,7 +26,7 @@ import { backfillTrivia } from '../lib/trivia-fill';
 import { buildTourQuest, tourAreaKey } from '../lib/quest-tour';
 import UserTitle from '../components/UserTitle';
 
-type TabType = 'home' | 'record' | 'quest' | 'mypage';
+type TabType = 'home' | 'quest' | 'mypage';
 
 // マイページ・ヒーローの装飾シェイプ（正十角形メダリオン枠 / XPシールド）
 const MEDALLION_FRAME =
@@ -125,7 +125,7 @@ export default function HomePage() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
-  const [mypageTab, setMypageTab] = useState<'activity' | 'goshuin' | 'badges' | 'quests'>('activity');
+  const [mypageTab, setMypageTab] = useState<'record' | 'goshuin' | 'badges' | 'quests'>('record');
   const [goShuinList, setGoShuinList] = useState<Goshuin[]>([]);
   // 御朱印帳 modal（授与式の「御朱印帳を見る」から開く）
   const [goshuinBookOpen, setGoshuinBookOpen] = useState(false);
@@ -616,7 +616,6 @@ export default function HomePage() {
 
   const NAV_TABS = [
     { key: 'home' as TabType, label: 'クエスト', icon: Flag },
-    { key: 'record' as TabType, label: '記録', icon: NotebookPen },
     { key: 'quest' as TabType, label: 'マップ', icon: MapPin },
     { key: 'mypage' as TabType, label: 'マイページ', icon: UserCircle2 },
   ];
@@ -800,18 +799,6 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* ── 記録（参拝記録・御朱印） ── */}
-            {activeTab === 'record' && (
-              <RecordTab
-                currentUser={currentUser || FALLBACK_CURRENT_USER}
-                userLocation={userLocation}
-                spots={spots}
-                onOpenDetail={setDetailSpot}
-                onChanged={refreshDatabaseStates}
-              />
-            )}
-
-
             {/* ── マイページ ── */}
             {activeTab === 'mypage' && currentUser && (
               <div className="overflow-y-auto h-full bg-gradient-to-b from-sky-50 via-white to-amber-50/50">
@@ -962,7 +949,7 @@ export default function HomePage() {
                 {/* タブ */}
                 <div className="flex border-b border-black/5 bg-white sticky top-0 z-10">
                   {([
-                    { key: 'activity', label: 'アクティビティ', icon: Clock },
+                    { key: 'record',   label: '記録',           icon: NotebookPen },
                     { key: 'goshuin',  label: '御朱印',         icon: Stamp },
                     { key: 'quests',   label: '達成クエスト',   icon: Flag },
                     { key: 'badges',   label: 'バッジ',         icon: Trophy },
@@ -975,66 +962,16 @@ export default function HomePage() {
 
                 {/* タブ内容 */}
                 <div className="p-4">
-                  {/* アクティビティ（訪問・クエスト参加・依頼達成などの履歴） */}
-                  {mypageTab === 'activity' && (() => {
-                    // ユーザーのアクティビティでは「ホームタブを表示」「地図を移動」などの操作ログは出さない
-                    const HIDDEN_USER_ACTS = new Set(['home_view', 'map_move', 'spot_generate', 'god_generate', 'spot_delete']);
-                    const activities = db.getActivities()
-                      .filter((a) => a.userId === currentUser.id && !HIDDEN_USER_ACTS.has(a.type))
-                      .slice(0, 60);
-
-                    const TASK_LABEL: Record<string, string> = {
-                      context: 'コンテキスト収集', photo: '写真奉納', evaluate: '写真評価',
-                      event: 'できごと報告', review: 'クチコミ', sns: 'SNS共有',
-                      buy: '買い物体験', eat: '食事体験', cleaning: '清掃奉仕',
-                      visit: '来訪', resolveIssue: '課題解決', judge: '評価',
-                    };
-                    const ACT_CFG: Record<Activity['type'], { icon: string; bg: string; text: string; label: (a: Activity) => string }> = {
-                      visit:          { icon: '📍', bg: 'bg-blue-50',   text: 'text-blue-700',   label: (a) => `${db.getSpot(a.spotId ?? '')?.name ?? a.spotId ?? '場所'} を訪問` },
-                      quest_join:     { icon: '🏴', bg: 'bg-indigo-50', text: 'text-indigo-700', label: (a) => `「${db.getQuest(a.challengeId ?? '')?.title ?? 'クエスト'}」に参加` },
-                      quest_step:     { icon: '✅', bg: 'bg-emerald-50',text: 'text-emerald-700',label: (a) => `クエストのミッションを達成` },
-                      quest_complete: { icon: '🏆', bg: 'bg-amber-50',  text: 'text-amber-700',  label: (a) => `「${db.getQuest(a.challengeId ?? '')?.title ?? 'クエスト'}」を制覇！` },
-                      task:           { icon: '⭐', bg: 'bg-violet-50', text: 'text-violet-700', label: (a) => `${db.getSpot(a.spotId ?? '')?.name ?? '場所'} で${TASK_LABEL[a.detail ?? ''] ?? '依頼'}を達成` },
-                      photo:          { icon: '📸', bg: 'bg-rose-50',   text: 'text-rose-700',   label: (a) => `${db.getSpot(a.spotId ?? '')?.name ?? '場所'} に写真を奉納` },
-                      ugc:            { icon: '💬', bg: 'bg-sky-50',    text: 'text-sky-700',    label: (a) => `${db.getSpot(a.spotId ?? '')?.name ?? '場所'} に口コミを投稿` },
-                      home_view:      { icon: '🏠', bg: 'bg-slate-50',  text: 'text-slate-700',  label: () => 'ホームタブを表示' },
-                      map_move:       { icon: '🗺️', bg: 'bg-teal-50',   text: 'text-teal-700',   label: () => '地図を移動' },
-                      spot_generate:  { icon: '✨', bg: 'bg-purple-50', text: 'text-purple-700', label: (a) => `場を生成：${a.detail ?? '新しい場所'}` },
-                      god_generate:   { icon: '🪷', bg: 'bg-fuchsia-50',text: 'text-fuchsia-700',label: (a) => `神を生成：${a.detail ?? '新しい神'}` },
-                      spot_delete:    { icon: '🗑️', bg: 'bg-rose-50',   text: 'text-rose-700',   label: (a) => `場を削除：${a.detail ?? '場所'}` },
-                    };
-
-                    if (activities.length === 0) return (
-                      <div className="text-center py-12">
-                        <Clock className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                        <p className="text-xs text-gray-400">まだアクティビティがありません。<br />スポットを訪問してクエストに挑もう。</p>
-                      </div>
-                    );
-
-                    return (
-                      <div className="space-y-2">
-                        {activities.map((a) => {
-                          const cfg = ACT_CFG[a.type] ?? ACT_CFG.task;
-                          return (
-                            <div key={a.id} className="flex items-start gap-3 bg-white rounded-2xl p-3 border border-black/5 shadow-sm">
-                              <div className={`w-9 h-9 rounded-full flex items-center justify-center text-lg flex-shrink-0 ${cfg.bg}`}>
-                                {cfg.icon}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className={`text-xs font-bold leading-snug ${cfg.text}`}>{cfg.label(a)}</p>
-                                <div className="flex items-center gap-2 mt-0.5">
-                                  <p className="text-[11px] text-gray-400">{new Date(a.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
-                                  {a.reward != null && a.reward > 0 && (
-                                    <span className="text-[11px] font-black text-amber-600">+{a.reward}徳</span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })()}
+                  {/* 記録（参拝記録・御朱印） */}
+                  {mypageTab === 'record' && (
+                    <RecordTab
+                      currentUser={currentUser}
+                      userLocation={userLocation}
+                      spots={spots}
+                      onOpenDetail={setDetailSpot}
+                      onChanged={refreshDatabaseStates}
+                    />
+                  )}
 
                   {/* 御朱印帳 */}
                   {mypageTab === 'goshuin' && (() => {
@@ -1214,8 +1151,8 @@ export default function HomePage() {
                       }
                     }
                   }
-                  if ((key === 'quest' || key === 'record') && spots.length === 0) {
-                    // マップ／記録に近くの寺社が無い場合は近・中・遠を複数生成する
+                  if (key === 'quest' && spots.length === 0) {
+                    // マップに近くの寺社が無い場合は近・中・遠を複数生成する
                     generateVariedSpots(userLocation.lat, userLocation.lng);
                   }
                   setActiveTab(key);
