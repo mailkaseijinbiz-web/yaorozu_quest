@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Volume2, Square, Loader2 } from 'lucide-react';
 import { UgcPost } from '../lib/db';
+import { speakText, type SpeechController } from '../lib/tts-client';
 
 interface KataribePlayerProps {
   ugcList: UgcPost[];
@@ -13,24 +14,22 @@ export default function KataribePlayer({ ugcList, onClose }: KataribePlayerProps
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
-  const synthRef = useRef<SpeechSynthesis | null>(null);
-  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  // 現在の読み上げ（Gemini TTS → speechSynthesis フォールバック）の制御ハンドル
+  const controllerRef = useRef<SpeechController | null>(null);
+  const stoppedRef = useRef(false);
+  // 再帰呼び出し用に最新の playNext を保持（自己参照を避ける）
+  const playNextRef = useRef<(index: number) => void>(() => {});
 
-  // コンポーネントマウント時に SpeechSynthesis を初期化
+  // アンマウント時に再生を止める
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      synthRef.current = window.speechSynthesis;
-    }
     return () => {
-      // アンマウント時に再生を強制停止
-      if (synthRef.current) {
-        synthRef.current.cancel();
-      }
+      stoppedRef.current = true;
+      controllerRef.current?.stop();
     };
   }, []);
 
   const playNext = useCallback((index: number) => {
-    if (!synthRef.current) return;
+    if (stoppedRef.current) return;
     if (index >= ugcList.length) {
       setIsFinished(true);
       setIsPlaying(false);
@@ -40,42 +39,25 @@ export default function KataribePlayer({ ugcList, onClose }: KataribePlayerProps
     const post = ugcList[index];
     const textToSpeak = `${post.userDisplayName}の声。${post.content}`;
 
-    synthRef.current.cancel(); // 念のため現在の音声をキャンセル
-
-    const utterance = new SpeechSynthesisUtterance(textToSpeak);
-    utterance.lang = 'ja-JP';
-    utterance.rate = 0.9; // 少しゆっくりめに語らせる
-    utterance.pitch = 0.9; // 落ち着いたトーン
-
-    // 日本語の音声を優先的に選択
-    const voices = synthRef.current.getVoices();
-    const jaVoice = voices.find((v) => v.lang === 'ja-JP' || v.lang === 'ja_JP');
-    if (jaVoice) {
-      utterance.voice = jaVoice;
-    }
-
-    utterance.onstart = () => {
-      setCurrentIndex(index);
-      setIsPlaying(true);
-    };
-
-    utterance.onend = () => {
-      // 1つの読み上げが終わったら少し（1秒）間をあけて次へ
-      setTimeout(() => {
-        if (synthRef.current && !synthRef.current.paused) {
-          playNext(index + 1);
-        }
-      }, 1000);
-    };
-
-    utterance.onerror = (e) => {
-      console.error('SpeechSynthesis error', e);
-      setIsPlaying(false);
-    };
-
-    utteranceRef.current = utterance;
-    synthRef.current.speak(utterance);
+    controllerRef.current?.stop(); // 念のため現在の音声を止める
+    controllerRef.current = speakText(textToSpeak, {
+      onStart: () => {
+        setCurrentIndex(index);
+        setIsPlaying(true);
+      },
+      onEnd: () => {
+        if (stoppedRef.current) return;
+        // 1つの読み上げが終わったら少し（1秒）間をあけて次へ
+        setTimeout(() => { if (!stoppedRef.current) playNextRef.current(index + 1); }, 1000);
+      },
+      onError: () => {
+        // この投稿が読み上げられなくても止めず、次へ進める
+        if (stoppedRef.current) return;
+        setTimeout(() => { if (!stoppedRef.current) playNextRef.current(index + 1); }, 400);
+      },
+    });
   }, [ugcList]);
+  playNextRef.current = playNext;
 
   // 初回マウント時に少し遅延させてから再生開始（ユーザーアクション後なので自動再生ポリシーを回避しやすい）
   useEffect(() => {
@@ -87,9 +69,8 @@ export default function KataribePlayer({ ugcList, onClose }: KataribePlayerProps
   }, [ugcList, playNext, isFinished]);
 
   const handleStop = () => {
-    if (synthRef.current) {
-      synthRef.current.cancel();
-    }
+    stoppedRef.current = true;
+    controllerRef.current?.stop();
     setIsPlaying(false);
     onClose();
   };

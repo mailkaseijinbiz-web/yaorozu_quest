@@ -63,16 +63,6 @@ const MOOD_PRESETS = [
   { emoji: '🤔', label: '考え中' },
 ];
 
-// 「何を撮る？」のネタ振り（道中で目を向ける先のヒント）。神社/寺院/共通で出し分ける。
-const PHOTO_PROMPTS_SHRINE = ['狛犬の阿吽の表情', '鳥居の形や色あい', '手水舎や灯籠のたたずまい', '境内のご神木・大木', '絵馬や提灯のにぎわい'];
-const PHOTO_PROMPTS_TEMPLE = ['山門や仁王像の迫力', '瓦や彫刻の意匠', '苔むした石畳や石仏', '鐘楼や五重塔の姿', '庭園の静けさ'];
-const PHOTO_PROMPTS_COMMON = ['路地や坂のある風景', '季節の草花や木々', '古い建物と新しい街の対比', '空や光の様子', '気になる看板やお店'];
-function photoPromptFor(category: string | undefined, n: number): string {
-  const base = category === '神社' ? PHOTO_PROMPTS_SHRINE : category ? PHOTO_PROMPTS_TEMPLE : [];
-  const pool = [...base, ...PHOTO_PROMPTS_COMMON];
-  return pool[Math.abs(n) % pool.length];
-}
-
 // 現在のクエスト進捗から、精霊が語ってきた会話ログを再構成する（序章→現在の目的地まで）。
 function buildGuideLog(ch: Challenge, doneIds: Set<string>): GuideMsg[] {
   const msgs: GuideMsg[] = [{ role: 'spirit', text: ch.description }];
@@ -261,6 +251,7 @@ export default function MapTab({
   const [goshuinCelebrate, setGoshuinCelebrate] = useState<{ spot: Spot; godName: string } | null>(null);
   const [quitConfirm, setQuitConfirm] = useState(false); // 「中断」確認モーダル
   const arrivalDoneRef = useRef(false);
+  const goshuinStepDoneRef = useRef<string | null>(null); // 自動授与済みの御朱印ステップID（多重発火防止）
   // 上部ガイドのフキダシ本文（3行＋スクロール）の自動スクロール用
   const guideScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -444,8 +435,6 @@ export default function MapTab({
   const destAgent = destSpot ? db.getAgentBySpot(destSpot.id) : undefined;
   const destGodName = destSpot?.godName || destAgent?.name || '八百万の神';
   const destGodEmoji = destSpot ? (destSpot.godEmoji || (destSpot.category === '神社' ? '⛩️' : '🙏')) : '⛩️';
-  // 「何を撮る？」のネタ振り。撮った枚数で替わる。
-  const photoPrompt = destSpot ? photoPromptFor(destSpot.category, questPhotos.length) : '';
 
   const activeDist = activeSpot ? distanceKm(userLocation.lat, userLocation.lng, activeSpot.latitude, activeSpot.longitude) : 0;
   const activeNear = activeDist <= 1.0;
@@ -663,7 +652,7 @@ export default function MapTab({
   // チャレンジが変わったら会話・寄り道・軌跡・御朱印演出をリセット
   useEffect(() => {
     setChatExtra([]); setChatOpen(false); setChatInput(''); setPendingShareKind(null);
-    arrivalDoneRef.current = false; setGoshuinCelebrate(null);
+    arrivalDoneRef.current = false; goshuinStepDoneRef.current = null; setGoshuinCelebrate(null);
     setPhotoComment(null); if (photoTimerRef.current) clearTimeout(photoTimerRef.current);
     setPendingPhoto(null); setPhotoCommentInput(''); setPhotoMood(null); setReviewPhoto(null);
     topicBumpRef.current = 0; setQuitConfirm(false);
@@ -691,6 +680,35 @@ export default function MapTab({
     const name = destGodName;
     setTimeout(() => { playChime(); setGoshuinCelebrate({ spot: target, godName: name }); }, 600);
   }, [userLocation, destSpot?.id, activeChallenge?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 御朱印ステップ（destSpot を持たない授与タスク）も、100m以内に近づいたら自動で授かって達成にする。
+  // 以前は「御朱印をもらいに行く」ボタンで会話タブへ誘導していたが、現地到達で自動化する。
+  useEffect(() => {
+    if (!activeChallenge || !nextStep || nextStep.type !== 'goshuin' || destSpot) return;
+    if (goshuinStepDoneRef.current === nextStep.id) return; // 一度きり
+    if (nextStep.lat == null || nextStep.lng == null) return;
+    const d = distanceKm(userLocation.lat, userLocation.lng, nextStep.lat, nextStep.lng);
+    if (d >= 0.1) return; // 100m ゲート
+    goshuinStepDoneRef.current = nextStep.id;
+    // 御朱印を授与（未取得時のみ）。場が引ければ授与情報を補完する。
+    const spot = nextStep.spotId ? (spots.find((s) => s.id === nextStep.spotId) ?? db.getSpot(nextStep.spotId)) : null;
+    if (spot && !hasGoShuin(currentUser.id, spot.id)) {
+      grantGoShuin(
+        currentUser.id,
+        { id: spot.id, name: spot.name, category: spot.category, godEmoji: spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏'), latitude: spot.latitude, longitude: spot.longitude },
+        spot.godName || '八百万の神',
+      );
+    }
+    const doneNow = new Set(db.getChallengeProgress().done[activeChallenge.id] || []);
+    const willComplete = doneNow.size + 1 >= activeChallenge.tasks.length;
+    onAdvanceChallenge?.(nextStep.id, null);
+    playChime();
+    setCelebrate({
+      title: willComplete ? `「${activeChallenge.badgeName}」獲得！` : `${nextStep.title} 達成！`,
+      icon: willComplete ? activeChallenge.badgeIcon : '🔴',
+      complete: willComplete, trivia: nextStep.trivia, triviaCategory: nextStep.triviaCategory,
+    });
+  }, [userLocation, nextStep?.id, nextStep?.type, destSpot?.id, activeChallenge?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 神の言葉が届いた瞬間の共通処理：ポーン音を鳴らし、チップ起点の共有なら徳を授ける
   // （1目的地・種別ごと1日1回まで＝farming 防止）。
@@ -1062,33 +1080,14 @@ export default function MapTab({
                       disabled={photoSending}
                       className="w-full text-[15px] font-black py-3 rounded-full transition-all cursor-pointer flex items-center justify-center gap-2 bg-[#2563eb] text-white hover:opacity-90 active:scale-[0.99] disabled:opacity-60"
                     >
-                      <Camera className="w-4 h-4" />{photoSending ? '神が眺めている…' : '気になる風景・ものを撮る'}
+                      <Camera className="w-4 h-4" />{photoSending ? '神が眺めている…' : '道中で気になる風景・ものを撮る'}
                     </button>
-                    <p className="text-center text-[11px] text-gray-400 mt-1.5">📷 お題：{photoPrompt}｜{destGodName}が応えてくれる（任意）</p>
                   </>
                 ) : nextStep.type === 'goshuin' ? (
-                  <button
-                    onClick={() => {
-                      const held = nextStep.spotId ? hasGoShuin(currentUser.id, nextStep.spotId) : false;
-                      if (held) {
-                        const doneNow = new Set(db.getChallengeProgress().done[activeChallenge!.id] || []);
-                        const willComplete = doneNow.size + 1 >= activeChallenge!.tasks.length;
-                        onAdvanceChallenge?.(nextStep.id, null);
-                        setCelebrate({
-                          title: willComplete ? `「${activeChallenge!.badgeName}」獲得！` : `${nextStep.title} 達成！`,
-                          icon: willComplete ? activeChallenge!.badgeIcon : '🔴',
-                          complete: willComplete, trivia: nextStep.trivia, triviaCategory: nextStep.triviaCategory,
-                        });
-                      } else {
-                        // 未取得 → 神のページ（会話タブ）を開いて授かりに行く
-                        const target = (nextStep.spotId ? spots.find((s) => s.id === nextStep.spotId) : null) ?? activeSpot;
-                        if (target) onOpenDetail?.(target);
-                      }
-                    }}
-                    className="w-full text-[15px] font-black py-3 rounded-full transition-all cursor-pointer flex items-center justify-center gap-2 bg-[#2563eb] text-white hover:opacity-90 active:scale-[0.99]"
-                  >
-                    <MessageCircle className="w-4 h-4" />御朱印をもらいに行く
-                  </button>
+                  /* 御朱印は現地（100m以内）に近づくと自動で授かる（別の useEffect が処理） */
+                  <div className="w-full text-[14px] font-black py-3 rounded-full flex items-center justify-center gap-2 bg-amber-50 text-amber-700 border border-amber-200">
+                    <MapPin className="w-4 h-4" />御朱印の場へ — 100m以内で自動授与
+                  </div>
                 ) : (
                   <button
                     onClick={() => {
@@ -1449,9 +1448,6 @@ export default function MapTab({
             <div className="px-4 py-3 overflow-y-auto space-y-3.5">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={pendingPhoto} alt="撮った写真" className="w-full max-h-52 object-cover rounded-2xl border border-black/5" />
-              <div className="bg-amber-50 rounded-xl px-3 py-2">
-                <p className="text-[11px] font-black text-amber-700">📷 お題：{photoPrompt} を探してみよう</p>
-              </div>
               <div>
                 <p className="text-[12px] font-black text-gray-600 mb-1.5">いまどんな気分？</p>
                 <div className="flex flex-wrap gap-1.5">

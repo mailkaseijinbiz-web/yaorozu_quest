@@ -74,9 +74,73 @@ export const AVATAR_QUEST: Quest = {
   source: 'static',
 };
 
-/** 移動をともなわないクエスト（現状はアバター設定クエスト）か。距離表示・地図遷移を出さない判定に使う。 */
+// ── 移動不要のセルフクエスト：プリセット選択で自分のことを神に伝える ──
+// 集めた内容は神（AI）の会話・サジェスト・初回あいさつの参照に使う（userContext 経由）。
+export const CONCERN_PRESETS = {
+  health: ['よく眠れない', '疲れがとれない', '運動不足', '肩こり・腰痛', '体重が気になる', '目の疲れ', '食生活の乱れ', 'ストレスが多い'],
+  life: ['お金のやりくり', '時間が足りない', '人間関係', '家事の負担', '将来への不安', '孤独を感じる', '住まいのこと', '趣味の時間がない'],
+  work: ['仕事が忙しい', '評価が気になる', '人間関係（職場）', 'やりがいが見えない', 'キャリアの方向', '残業が多い', '転職を考えている', '集中できない'],
+} as const;
+export const RECENT_GOOD_PRESETS = ['おいしいものを食べた', 'よく眠れた', '人にやさしくできた', '良い天気だった', '運動できた', '誰かに感謝された', '欲しかったものが手に入った', '小さな目標を達成した'];
+
+// 煩悩（健康/生活/仕事）を打ち明ける移動不要クエスト。
+export const CONCERNS_QUEST: Quest = {
+  id: 'concerns-self',
+  title: 'あなたの煩悩をきかせて',
+  description: '健康・生活・仕事のもやもやを神に打ち明けよう。場所は問わない、いつでもどこでも。',
+  difficulty: 1,
+  minLevel: 0,
+  estMinutes: 2,
+  badgeIcon: '🍃',
+  badgeName: '煩悩を打ち明けし者',
+  goalName: '煩悩の告白',
+  goalLat: 0,
+  goalLng: 0,
+  tasks: [
+    {
+      id: 's0',
+      type: 'concerns_self',
+      kind: TASK_CATALOG.concerns_self.kind,
+      icon: TASK_CATALOG.concerns_self.icon,
+      label: TASK_CATALOG.concerns_self.label,
+      title: TASK_CATALOG.concerns_self.title,
+      reward: TASK_CATALOG.concerns_self.reward,
+    },
+  ],
+  source: 'static',
+};
+
+// 最近良かったことを共有する移動不要クエスト。
+export const GOOD_QUEST: Quest = {
+  id: 'recent-good-self',
+  title: 'あなたの最近良かったことをきかせて',
+  description: '最近うれしかった小さな出来事を神に話そう。場所は問わない、いつでもどこでも。',
+  difficulty: 1,
+  minLevel: 0,
+  estMinutes: 2,
+  badgeIcon: '🌸',
+  badgeName: '喜びを分かちし者',
+  goalName: '喜びの共有',
+  goalLat: 0,
+  goalLng: 0,
+  tasks: [
+    {
+      id: 's0',
+      type: 'recent_good_self',
+      kind: TASK_CATALOG.recent_good_self.kind,
+      icon: TASK_CATALOG.recent_good_self.icon,
+      label: TASK_CATALOG.recent_good_self.label,
+      title: TASK_CATALOG.recent_good_self.title,
+      reward: TASK_CATALOG.recent_good_self.reward,
+    },
+  ],
+  source: 'static',
+};
+
+/** 移動をともなわないクエスト（アバター設定・煩悩・最近良かったこと）か。距離表示・地図遷移を出さない判定に使う。 */
+const STATIONARY_TASK_TYPES = new Set(['avatar_photo', 'concerns_self', 'recent_good_self']);
 export function isStationaryQuest(q: Quest): boolean {
-  return q.tasks.length === 1 && q.tasks[0].type === 'avatar_photo';
+  return q.tasks.length === 1 && STATIONARY_TASK_TYPES.has(q.tasks[0].type);
 }
 
 export function getChallenge(id: string): Quest | undefined {

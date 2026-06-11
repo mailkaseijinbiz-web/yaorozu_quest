@@ -11,6 +11,7 @@ import { getAddress } from '../lib/address';
 import { shareToSns } from '../lib/share';
 import { grantGoShuin, hasGoShuin, getGoShuinList } from '../lib/goshuin';
 import { playChime } from '../lib/sound';
+import { vibrateConversationStart } from '../lib/haptics';
 import { getLevelInfo } from '../data/levels';
 import YaorozuSpirit from './YaorozuSpirit';
 import GoshuinCelebrate from './GoshuinCelebrate';
@@ -93,7 +94,7 @@ function SpotDetailBody({
   onOpenGoshuinBook,
 }: SpotDetailProps) {
   // 詳細ページは「記録」（参拝の記録）がメイン。開いた直後は記録タブを表示する
-  const [tab, setTab] = useState<'chat' | 'requests' | 'photos' | 'records'>('records');
+  const [tab, setTab] = useState<'chat' | 'requests' | 'photos' | 'records' | 'goshuin'>('records');
   const [agent] = useState<Agent>(() => resolveAgent(spot));
   const [isKataribeOpen, setIsKataribeOpen] = useState(false);
   const [activeMeditation, setActiveMeditation] = useState<GodTask | null>(null);
@@ -211,7 +212,7 @@ function SpotDetailBody({
     () => getVisitRecords(currentUser.id).filter((r) => r.spotId === spot.id)
   );
   const refreshRecords = () => setSpotRecords(getVisitRecords(currentUser.id).filter((r) => r.spotId === spot.id));
-  const [recFormOpen, setRecFormOpen] = useState(false);
+  const [recFormOpen, setRecFormOpen] = useState(true); // 詳細を開いたら最初から記録フォームを開いておく
   const [recDate, setRecDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [recNote, setRecNote] = useState('');
   const [recPhotos, setRecPhotos] = useState<string[]>([]);
@@ -299,6 +300,7 @@ function SpotDetailBody({
   // デジタル御朱印を取得（この場から100m未満でのみ）
   const recNear = userLocation ? distanceKm(userLocation.lat, userLocation.lng, spot.latitude, spot.longitude) < 0.1 : false;
   const recHasGoshuin = hasGoShuin(currentUser.id, spot.id);
+  const recGoshuin = recHasGoshuin ? (getGoShuinList(currentUser.id).find((g) => g.spotId === spot.id) ?? null) : null;
   const onGetRecGoshuin = () => {
     if (recHasGoshuin) { flashToast('この場の御朱印はすでに授かっています'); return; }
     if (!recNear) { flashToast('御朱印は100m未満に近づくと授かれます'); return; }
@@ -564,9 +566,17 @@ function SpotDetailBody({
       const greet = nearbyChallenge
         ? `よう参られた、${currentUser.displayName} よ。わしは${spot.name}に宿る「${agent.name}」じゃ。ときに——この界隈で「${nearbyChallenge.title}」という小さな冒険が始まっておる。腕試しに挑んでみぬか？ 下のボタンから、すぐに旅立てるぞ。`
         : `よう参られた、${currentUser.displayName} よ。わしは${spot.name}に宿る「${agent.name}」じゃ。わしへの依頼をこなして徳を積み、この地を共に盛り立ててはくれぬか。`;
+      // 移動不要セルフクエストで打ち明けた“今の心境”があれば、あいさつにそっと寄り添う一文を添える
+      const cc = currentUser.concerns;
+      const hasConcern = !!cc && (cc.health.length > 0 || cc.life.length > 0 || cc.work.length > 0 || !!cc.freeText);
+      const concernHint = hasConcern ? ' 近頃の心のもや、わしはちゃんと覚えておるぞ。無理はせず、ゆるりと参ろう。' : '';
+      const goodHint = (currentUser.recentGood && currentUser.recentGood.length > 0) || currentUser.recentGoodFreeText
+        ? ' そういえば良いことがあったそうじゃな、わしも嬉しいぞ。' : '';
       setMessages([
-        { id: `greet-${Date.now()}`, sender: 'agent', text: greet, createdAt: new Date().toISOString() },
+        { id: `greet-${Date.now()}`, sender: 'agent', text: greet + concernHint + goodHint, createdAt: new Date().toISOString() },
       ]);
+      // 会話が始まった合図に触覚フィードバック（iOS/Android、Web は振動）
+      vibrateConversationStart();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, messages.length, agent.name, spot.name, currentUser.displayName, nearbyChallenge]);
@@ -633,6 +643,16 @@ function SpotDetailBody({
         .map(r => r.note)
         .slice(0, 3); // 最新3件の過去のメモを記憶として渡す
 
+      // 移動不要セルフクエストで集めた“今の心境”（煩悩・最近良かったこと）を平坦化して渡す
+      const cc = currentUser.concerns;
+      const concernList = cc
+        ? [...cc.health, ...cc.life, ...cc.work, ...(cc.freeText ? [cc.freeText] : [])]
+        : [];
+      const recentGoodList = [
+        ...(currentUser.recentGood ?? []),
+        ...(currentUser.recentGoodFreeText ? [currentUser.recentGoodFreeText] : []),
+      ];
+
       const userContext = {
         visitCount: stats.visitedSpotIds.length,
         totalToku: currentUser.totalToku,
@@ -642,6 +662,8 @@ function SpotDetailBody({
         questClearsHere: prog.completed.filter((id) => questsById.get(id)?.spotId === spot.id).length,
         lastVisitedSpotName,
         pastMemories: pastMemories.length > 0 ? pastMemories : undefined,
+        concerns: concernList.length > 0 ? concernList : undefined,
+        recentGood: recentGoodList.length > 0 ? recentGoodList : undefined,
       };
       
       const res = await fetch('/api/chat', {
@@ -739,6 +761,7 @@ function SpotDetailBody({
       <div className="flex border-b border-black/5 bg-white flex-shrink-0">
         {([
           { key: 'records',  label: '記録',   icon: NotebookPen },
+          { key: 'goshuin',  label: '御朱印', icon: Stamp },
           { key: 'photos',   label: '写真',   icon: Camera },
         ] as const).map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setTab(key)} className={`flex-1 py-3 flex flex-row items-center justify-center gap-1.5 text-[12px] font-black transition-all cursor-pointer border-b-2 ${tab === key ? 'text-shrine-red border-shrine-red' : 'text-gray-400 border-transparent hover:text-gray-600'}`}>
@@ -901,6 +924,58 @@ function SpotDetailBody({
               <button onClick={() => setIsCreatorModalOpen(true)} className="w-full bg-gold text-white text-xs font-black py-2.5 rounded-xl shadow-sm hover:opacity-90 transition-all cursor-pointer">神をカスタマイズする</button>
             </div>
           )}
+        </div>
+      ) : tab === 'goshuin' ? (
+        /* ── この場の御朱印（授与済みなら印を表示、未取得なら案内） ── */
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-6 flex flex-col items-center gap-4">
+            {recHasGoshuin ? (
+              <>
+                {recGoshuin?.photo ? (
+                  /* 撮影して保存した実物の御朱印 */
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={recGoshuin.photo} alt={spot.name} className="w-36 h-36 rounded-xl object-cover" />
+                ) : (
+                  /* 朱印円 */
+                  <div className="relative w-36 h-36">
+                    <div className="absolute inset-0 rounded-full border-4 border-red-600/80" />
+                    <div className="absolute inset-2 rounded-full border-2 border-red-600/40" />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
+                      <span className="text-4xl leading-none">{spot.godEmoji || (spot.category === '神社' ? '⛩️' : '🙏')}</span>
+                      <span className="text-[11px] font-black text-red-700 text-center leading-tight px-2">{spot.godName || agent.name}</span>
+                    </div>
+                  </div>
+                )}
+                <p className="text-sm font-black text-gray-800 text-center">{spot.name}</p>
+                <p className="text-[12px] font-black text-emerald-600 flex items-center gap-1"><Stamp className="w-4 h-4" />御朱印を授かっています</p>
+                {recGoshuin?.receivedAt && (
+                  <p className="text-[11px] text-gray-400">{new Date(recGoshuin.receivedAt).toLocaleDateString('ja-JP')} 授与</p>
+                )}
+              </>
+            ) : (
+              <>
+                {/* 未取得：破線のグレー朱印円 */}
+                <div className="relative w-36 h-36 opacity-50">
+                  <div className="absolute inset-0 rounded-full border-4 border-dashed border-gray-300" />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <Stamp className="w-12 h-12 text-gray-300" />
+                  </div>
+                </div>
+                <p className="text-sm font-black text-gray-500 text-center">まだ御朱印を授かっていません</p>
+                <button
+                  onClick={onGetRecGoshuin}
+                  disabled={!recNear}
+                  className={`w-full flex items-center justify-center gap-1.5 text-[13px] font-black py-3 rounded-xl transition-all ${
+                    recNear ? 'bg-rose-600 text-white hover:opacity-90 active:scale-[0.99] cursor-pointer' : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  <Stamp className="w-4 h-4" />
+                  {recNear ? 'デジタル御朱印を取得' : '100m未満に近づくと授かれます'}
+                </button>
+                <p className="text-[11px] text-gray-400 text-center leading-relaxed">この場（100m以内）で参拝するか、<br />神と対話すると御朱印を授かれます。</p>
+              </>
+            )}
+          </div>
         </div>
       ) : tab === 'photos' ? (
         /* ── みんなの写真（タブ） ── */

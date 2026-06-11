@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Sparkles, MessageCircle, HelpCircle, AlertCircle, ShoppingBag, ChevronLeft, MapPin } from 'lucide-react';
 import { Spot, Agent, UgcPost, AffiliateLink, User, db } from '../lib/db';
+import { vibrateConversationStart } from '../lib/haptics';
 
 interface Message {
   id: string;
@@ -102,6 +103,8 @@ export default function ChatTab({
           },
         ],
       }));
+      // 会話が始まった合図に触覚フィードバック（iOS/Android、Web は振動）
+      vibrateConversationStart();
     }
   }, [activeSpotId, agent, activeSpot, messages]);
 
