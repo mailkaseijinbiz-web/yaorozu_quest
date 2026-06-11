@@ -378,7 +378,7 @@ export default function MapTab({
   // ── 指に追従する横スワイプ・カルーセル（次のカードが右にチラ見えする） ──
   // PEEK=右に覗かせる次カードの幅+間隔、GAP=カード間の間隔。実カード幅は計測で決める。
   const CARD_GAP = 10;
-  const CARD_PEEK = 34; // 右に約 (PEEK-GAP)=24px 次カードを覗かせる
+  const CARD_PEEK = 52; // 右に約 (PEEK-GAP)=42px 次カードを覗かせる（角丸まで見せ、画面端で切れて見えないようにする）
   const cardViewportRef = useRef<HTMLDivElement | null>(null);
   const cardTrackRef = useRef<HTMLDivElement | null>(null);
   const [slideW, setSlideW] = useState(0);
@@ -827,7 +827,7 @@ export default function MapTab({
         //   右に次のカードがチラ見えして「横にめくれる」ことが一目で分かる（近い順）。
         <div
           ref={(el) => { overlayElRef.current = el; cardViewportRef.current = el; }}
-          className="absolute bottom-3 left-3 right-3 z-[1000] overflow-hidden touch-pan-y"
+          className="absolute bottom-3 left-4 right-4 z-[1000] overflow-hidden touch-pan-y"
           onTouchStart={onTrackTouchStart}
           onTouchMove={onTrackTouchMove}
           onTouchEnd={onTrackTouchEnd}

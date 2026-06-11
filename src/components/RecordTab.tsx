@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { Search, MapPin, Camera, CalendarDays, Trash2, Check, Stamp, NotebookPen, X } from 'lucide-react';
+import { Search, MapPin, Camera, CalendarDays, Trash2, Check, Stamp, NotebookPen, X, Pencil } from 'lucide-react';
 import { Spot, User as UserType, db } from '../lib/db';
 import { distanceKm } from '../lib/geo';
 import {
   getVisitRecords,
   addVisitRecord,
   deleteVisitRecord,
+  updateVisitRecord,
   countVisitsForSpot,
   hasRecordForSpotOnDate,
   recordPhotos,
@@ -52,6 +53,46 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
   const [photos, setPhotos] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [goshuinMsg, setGoshuinMsg] = useState<string | null>(null); // 御朱印取得のフィードバック
+
+  // 記録の編集（あとから日付・メモ・写真を直せる）
+  const [editingRec, setEditingRec] = useState<VisitRecord | null>(null);
+  const [editDate, setEditDate] = useState('');
+  const [editNote, setEditNote] = useState('');
+  const [editPhotos, setEditPhotos] = useState<string[]>([]);
+  const [editSaving, setEditSaving] = useState(false);
+
+  const openEdit = (rec: VisitRecord) => {
+    setEditingRec(rec);
+    setEditDate(rec.visitedAt.slice(0, 10));
+    setEditNote(rec.note || '');
+    setEditPhotos(recordPhotos(rec));
+  };
+  const onPickEditPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
+    const room = MAX_RECORD_PHOTOS - editPhotos.length;
+    if (room <= 0) return;
+    const added: string[] = [];
+    for (const f of files.slice(0, room)) {
+      try { added.push(await compressImage(f, { maxDim: 900, quality: 0.6 })); } catch { /* skip */ }
+    }
+    if (added.length) setEditPhotos((prev) => [...prev, ...added].slice(0, MAX_RECORD_PHOTOS));
+  };
+  const onSaveEdit = () => {
+    if (!editingRec || editSaving) return;
+    setEditSaving(true);
+    try {
+      const visitedAt = new Date(`${editDate}T12:00:00`).toISOString();
+      const ok = updateVisitRecord(currentUser.id, editingRec.id, { visitedAt, note: editNote, photos: editPhotos });
+      if (!ok) { alert('記録を保存できませんでした。'); return; }
+      refresh();
+      onChanged?.();
+      setEditingRec(null);
+    } finally {
+      setEditSaving(false);
+    }
+  };
 
   // 現在地から近い順の寺社（「ここに行った？」候補）。
   // 最初は3件だけ見せて「もっと見る」で広げる（記録フォームが主役なので控えめに）。
@@ -465,13 +506,22 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
                       </p>
                       {rec.note && <p className="text-[12px] text-gray-600 mt-1 line-clamp-2">{rec.note}</p>}
                     </div>
-                    <button
-                      onClick={() => { deleteVisitRecord(currentUser.id, rec.id); refresh(); }}
-                      className="self-start w-7 h-7 rounded-full hover:bg-rose-50 flex items-center justify-center text-gray-300 hover:text-rose-500 transition-all cursor-pointer"
-                      title="記録を削除"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="self-start flex flex-col items-center gap-1">
+                      <button
+                        onClick={() => openEdit(rec)}
+                        className="w-7 h-7 rounded-full hover:bg-blue-50 flex items-center justify-center text-gray-300 hover:text-blue-500 transition-all cursor-pointer"
+                        title="記録を編集"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => { deleteVisitRecord(currentUser.id, rec.id); refresh(); }}
+                        className="w-7 h-7 rounded-full hover:bg-rose-50 flex items-center justify-center text-gray-300 hover:text-rose-500 transition-all cursor-pointer"
+                        title="記録を削除"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                   );
                 })}
@@ -591,6 +641,60 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* ── 記録の編集モーダル ── */}
+      {editingRec && (
+        <div className="fixed inset-0 z-[4000] bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setEditingRec(null)}>
+          <div
+            className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-xl max-h-[88vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-black/5 sticky top-0 bg-white">
+              <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5"><Pencil className="w-4 h-4 text-blue-500" />記録を編集</h3>
+              <button onClick={() => setEditingRec(null)} className="w-7 h-7 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-400 cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-4 space-y-4">
+              <p className="text-sm font-black text-gray-900">{editingRec.spotName}</p>
+
+              {/* 日付 */}
+              <label className="block">
+                <span className="text-[11px] font-black text-gray-500 flex items-center gap-1 mb-1"><CalendarDays className="w-3 h-3" />参拝日</span>
+                <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-shrine-red" />
+              </label>
+
+              {/* メモ */}
+              <label className="block">
+                <span className="text-[11px] font-black text-gray-500 mb-1 block">メモ</span>
+                <textarea value={editNote} onChange={(e) => setEditNote(e.target.value)} rows={3} placeholder="参拝の思い出を残そう" className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-shrine-red resize-none" />
+              </label>
+
+              {/* 写真 */}
+              <div>
+                <span className="text-[11px] font-black text-gray-500 mb-1.5 block">写真（{editPhotos.length}/{MAX_RECORD_PHOTOS}）</span>
+                <div className="flex flex-wrap gap-2">
+                  {editPhotos.map((p, i) => (
+                    <div key={i} className="relative w-16 h-16">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p} alt="" className="w-16 h-16 rounded-xl object-cover" />
+                      <button onClick={() => setEditPhotos((prev) => prev.filter((_, j) => j !== i))} className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-rose-500 text-white flex items-center justify-center shadow cursor-pointer"><X className="w-3 h-3" /></button>
+                    </div>
+                  ))}
+                  {editPhotos.length < MAX_RECORD_PHOTOS && (
+                    <label className="w-16 h-16 rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-300 hover:text-shrine-red hover:border-shrine-red cursor-pointer transition-all">
+                      <Camera className="w-5 h-5" />
+                      <input type="file" accept="image/*" multiple className="hidden" onChange={onPickEditPhoto} />
+                    </label>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 p-4 border-t border-black/5 sticky bottom-0 bg-white">
+              <button onClick={() => setEditingRec(null)} className="flex-1 py-2.5 rounded-full text-sm font-black text-gray-500 bg-gray-100 hover:bg-gray-200 transition-all cursor-pointer">キャンセル</button>
+              <button onClick={onSaveEdit} disabled={editSaving} className="flex-1 py-2.5 rounded-full text-sm font-black text-white bg-shrine-red hover:opacity-90 disabled:opacity-50 transition-all cursor-pointer flex items-center justify-center gap-1.5"><Check className="w-4 h-4" />保存</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
