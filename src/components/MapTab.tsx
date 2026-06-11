@@ -59,6 +59,7 @@ interface MapTabProps {
   onClearChallenge?: () => void;
   onAdvanceChallenge?: (stepId: string, photo?: string | null) => void; // 次の目的地ステップを達成（証拠写真つき）
   onCompleteChallenge?: () => void; // 目的地100m到達＝御朱印取得でクエストを達成扱いにする
+  trail?: { lat: number; lng: number }[]; // クエスト中に通ったルートの軌跡（親が保持＝タブ遷移で消えない）
   currentUser: User; // 近くの場カード表示用
   onMapMove?: (center: { lat: number; lng: number }) => void; // 地図を移動させたとき（アクティビティログ用）
   deviceHeading?: number | null; // 端末の向き（方位磁針）。ナビ矢印のコンパス補正と現在地マーカーに使う
@@ -77,6 +78,7 @@ export default function MapTab({
   onClearChallenge,
   onAdvanceChallenge,
   onCompleteChallenge,
+  trail = [],
   currentUser,
   onMapMove,
   deviceHeading = null,
@@ -196,9 +198,6 @@ export default function MapTab({
   // 100m到達での御朱印自動授与＝クエスト達成
   const [goshuinCelebrate, setGoshuinCelebrate] = useState<{ spot: Spot; godName: string } | null>(null);
   const arrivalDoneRef = useRef(false);
-  // クエスト中に通ったルートの軌跡（地図にポリラインで描く）
-  const trailRef = useRef<{ lat: number; lng: number }[]>([]);
-  const [trail, setTrail] = useState<{ lat: number; lng: number }[]>([]);
   // 上部ガイドのフキダシ本文（3行＋スクロール）の自動スクロール用
   const guideScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -588,7 +587,6 @@ export default function MapTab({
   useEffect(() => {
     setChatExtra([]); setChatOpen(false); setChatInput(''); setPendingShareKind(null);
     arrivalDoneRef.current = false; setGoshuinCelebrate(null);
-    trailRef.current = []; setTrail([]);
   }, [activeChallenge?.id]);
   // 新着・送信中で最下部へスクロール
   useEffect(() => {
@@ -596,17 +594,6 @@ export default function MapTab({
     const el = chatScrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [chatOpen, chatExtra.length, chatSending]);
-
-  // クエスト中、現在地が約8m以上動いたら軌跡に点を足す（地図にポリラインで描く）
-  useEffect(() => {
-    if (!activeChallenge) return;
-    const pts = trailRef.current;
-    const last = pts[pts.length - 1];
-    if (!last || distanceKm(last.lat, last.lng, userLocation.lat, userLocation.lng) > 0.008) {
-      trailRef.current = [...pts, { lat: userLocation.lat, lng: userLocation.lng }];
-      setTrail(trailRef.current);
-    }
-  }, [userLocation, activeChallenge?.id]);
 
   // 目的地100m未満に入ったら御朱印を自動授与し、祝祭モーダルを出す（OKで達成確定）。
   useEffect(() => {

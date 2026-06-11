@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Trophy, Flag, Clock, X, Check, Hourglass } from 'lucide-react';
 import { User, db, QUEST_TTL_MS } from '../lib/db';
-import { difficultyLabel, terrainLabel, Challenge } from '../data/challenges';
+import { difficultyLabel, terrainLabel, Challenge, AVATAR_QUEST, isStationaryQuest } from '../data/challenges';
 import { getLevelInfo } from '../data/levels';
 import { distanceKm } from '../lib/geo';
 
@@ -61,8 +61,17 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
     { key: 'done', label: '達成', n: progress.completed.length },
   ] as const;
 
-  // フィルタ → 第1ソート＝参加できるもの、第2ソート＝距離の近い順
-  const nearChallenges = db.getAllQuests()
+  // 同じ場所のクエストは見出しでまとめる（グルーピング）。場の代表距離が近い順に並べ、
+  // 場の中は距離順。移動なしクエスト（アバター設定）は「どこでも」グループとして末尾に置く。
+  const groupKeyOf = (ch: Challenge) => (isStationaryQuest(ch) ? '__stationary__' : (ch.spotId || ch.goalName || ch.id));
+  const groupLabelOf = (ch: Challenge): { emoji: string; name: string } => {
+    if (isStationaryQuest(ch)) return { emoji: '✨', name: 'どこでも（移動不要）' };
+    const s = ch.spotId ? db.getSpot(ch.spotId) : null;
+    return { emoji: s?.godEmoji || '📍', name: s?.name || ch.goalName || 'その他の場' };
+  };
+
+  // フィルタ → 場ごとにクラスタリング（場は近い順、場内は距離順）。移動なしクエストも候補に含める。
+  const scored = [...db.getAllQuests(), AVATAR_QUEST]
     .filter((ch) => {
       const completed = progress.completed.includes(ch.id);
       const ok = userLevel >= ch.minLevel;
@@ -73,15 +82,22 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
     })
     .map((ch) => ({
       ch,
-      d: distanceKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng),
+      d: isStationaryQuest(ch) ? Infinity : distanceKm(userLocation.lat, userLocation.lng, ch.goalLat, ch.goalLng),
       ok: userLevel >= ch.minLevel,
-    }))
-    .sort((a, b) => {
-      if (a.ok !== b.ok) return a.ok ? -1 : 1;
-      return a.d - b.d;
-    })
-    .slice(0, 20)
-    .map((x) => x.ch);
+    }));
+  const placeMap = new Map<string, typeof scored>();
+  for (const it of scored) {
+    const k = groupKeyOf(it.ch);
+    const arr = placeMap.get(k);
+    if (arr) arr.push(it); else placeMap.set(k, [it]);
+  }
+  const nearChallenges = [...placeMap.values()]
+    .map((items) => ({ items, anyOk: items.some((i) => i.ok), minD: Math.min(...items.map((i) => i.d)) }))
+    .sort((a, b) => (a.anyOk !== b.anyOk ? (a.anyOk ? -1 : 1) : a.minD - b.minD))
+    .flatMap((g) => g.items.sort((a, b) => a.d - b.d).map((i) => i.ch))
+    .slice(0, 20);
+  // 場の自動生成判定は「移動をともなう実クエスト」の有無で行う（アバター等の常設クエストで隠さない）
+  const realQuestCount = nearChallenges.filter((c) => !isStationaryQuest(c)).length;
   const visibleChallenges = nearChallenges.slice(0, visibleCount);
   // 初回ガイド中は最寄りの1件だけに集中させる（最初の一手を明確にする）
   const shown = guided ? nearChallenges.slice(0, 1) : visibleChallenges;
@@ -129,9 +145,9 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
   useEffect(() => {
     if (!mounted) return;
     if (filter === 'done') return;
-    if (nearChallenges.length === 0) onNeedSpots?.();
+    if (realQuestCount === 0) onNeedSpots?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, nearChallenges.length, filter]);
+  }, [mounted, realQuestCount, filter]);
 
   return (
     <div className="flex flex-col h-full overflow-y-auto bg-[#f5f7fa]">
@@ -200,7 +216,7 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
           </div>
         ) : (
         <div className="flex flex-col gap-3">
-          {renderItems.map(({ ch, entering, exiting }) => {
+          {(() => { let lastGroup: string | null = null; return renderItems.map(({ ch, entering, exiting }) => {
             const diff = difficultyLabel(ch.difficulty);
             const qSpot = ch.spotId ? db.getSpot(ch.spotId) : null; // 神名＋地形バッジ用
             const terRaw = qSpot ? terrainLabel(qSpot.terrain) : null;
@@ -216,10 +232,22 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
             const doneN = (progress.done[ch.id] || []).length;
             // 縁の刻限：未参加の生成クエストだけに残り寿命を出す（参加すれば恒久保持）
             const ttl = !active && !completed && doneN === 0 ? ttlLabel(ch.createdAt, nowTick) : null;
+            // 同じ場所のまとまりに見出しを差し込む（退場アニメ中の項目は見出し判定に使わない）
+            const gKey = groupKeyOf(ch);
+            const showHeading = !exiting && gKey !== lastGroup;
+            if (!exiting) lastGroup = gKey;
+            const gl = showHeading ? groupLabelOf(ch) : null;
             // カードをタップするとモーダル（参加/終了ボタンはモーダル内）。
             return (
+              <React.Fragment key={ch.id}>
+                {gl && (
+                  <div className="flex items-center gap-1.5 px-1 pt-1 first:pt-0">
+                    <span className="text-sm">{gl.emoji}</span>
+                    <h4 className="text-[12px] font-black text-gray-500 truncate max-w-[70%]">{gl.name}</h4>
+                    <span className="flex-1 h-px bg-gray-200" />
+                  </div>
+                )}
               <button
-                key={ch.id}
                 onClick={() => !exiting && setConfirmCh(ch)}
                 aria-label={`クエスト「${ch.title}」を開く`}
                 onAnimationEnd={(e) => { if (entering && e.target === e.currentTarget) clearEntering(ch.id); }}
@@ -261,11 +289,15 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
                       <span className={`text-[13px] flex items-center gap-0.5 ${active ? 'text-white/80' : 'text-gray-400'}`}>
                         <Clock className="w-3 h-3" />約{ch.estMinutes}分
                       </span>
-                      <span className={`text-[13px] font-black flex items-center gap-0.5 ${active ? 'text-white' : 'text-shrine-red'}`}>
-                        <MapPin className="w-3 h-3" />
-                        <span className="tabular-nums">{distValue}</span>
-                        <span className="text-[11px]">{distUnit}</span>
-                      </span>
+                      {isStationaryQuest(ch) ? (
+                        <span className={`text-[12px] font-black px-1.5 py-0.5 rounded-full ${active ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}`}>✨ 移動不要</span>
+                      ) : (
+                        <span className={`text-[13px] font-black flex items-center gap-0.5 ${active ? 'text-white' : 'text-shrine-red'}`}>
+                          <MapPin className="w-3 h-3" />
+                          <span className="tabular-nums">{distValue}</span>
+                          <span className="text-[11px]">{distUnit}</span>
+                        </span>
+                      )}
                       {ter && (
                         <span className={`text-[12px] font-black px-1.5 py-0.5 rounded-full ${active ? 'bg-white/20 text-white' : ter.tone}`}>🥾 {ter.label}</span>
                       )}
@@ -298,8 +330,9 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
                   {completed && <Trophy className={`w-6 h-6 flex-shrink-0 self-center mr-3.5 ${active ? 'text-white' : 'text-gold'}`} />}
                 </div>
               </button>
+              </React.Fragment>
             );
-          })}
+          }); })()}
           {!guided && visibleCount < nearChallenges.length && (
             <button
               onClick={() => setVisibleCount((c) => c + 5)}

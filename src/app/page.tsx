@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { UserCircle2, MapPin, Check, Flag, Pencil, Share2, X, Stamp, NotebookPen, Mail } from 'lucide-react';
+import { UserCircle2, MapPin, Check, Flag, Pencil, Share2, X, Stamp, NotebookPen, Mail, Camera } from 'lucide-react';
 import { db, Spot, Agent, User as UserType, UserContribution, SPOT_TTL_MS } from '../lib/db';
 import { getGoShuinList, Goshuin } from '../lib/goshuin';
 import { addVisitRecord, hasRecordForSpotOnDate } from '../lib/visit-records';
@@ -21,7 +21,8 @@ import AltruismDividendCelebrate from '../components/AltruismDividendCelebrate';
 import { isDebugEnabled, getDebugLocation, setDebugLocation, type DebugLatLng } from '../lib/debug';
 import { getLevelInfo } from '../data/levels';
 import { getBadgeStates, godAvatarEmoji, type BadgeState } from '../data/badges';
-import { Challenge } from '../data/challenges';
+import { Challenge, AVATAR_QUEST } from '../data/challenges';
+import { uploadImage } from '../lib/upload';
 import type { Quest } from '../data/tasks';
 import { subscribePush } from '../lib/push-client';
 import { useDeviceHeading } from '../lib/use-device-heading';
@@ -84,6 +85,11 @@ export default function HomePage() {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [detailSpot, setDetailSpot] = useState<Spot | null>(null);
   const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
+  const [avatarQuestOpen, setAvatarQuestOpen] = useState(false); // 移動なしクエスト：アバター設定モーダル
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  // クエスト中に通ったルートの軌跡。MapTab ではなくここ（常時マウント）で保持し、タブ遷移でも消えない。
+  const [questTrail, setQuestTrail] = useState<{ lat: number; lng: number }[]>([]);
+  const questTrailRef = useRef<{ lat: number; lng: number }[]>([]);
   const deviceHeading = useDeviceHeading(); // 端末の向き（方位磁針）。地図のナビ矢印・現在地マーカーで共有
 
   // 詳細ページをブラウザの「戻る」で閉じられるように履歴に積む
@@ -106,6 +112,17 @@ export default function HomePage() {
   const [userStats, setUserStats] = useState<UserContribution | null>(null);
   const [creatorProfiles, setCreatorProfiles] = useState<{ [userId: string]: UserType }>({});
   const [userLocation, setUserLocation] = useState({ lat: 35.6580, lng: 139.7514 });
+  // クエスト開始/切替で軌跡をリセット。クエスト中は現在地が約8m以上動くたびに点を足す。
+  useEffect(() => { questTrailRef.current = []; setQuestTrail([]); }, [activeChallengeId]);
+  useEffect(() => {
+    if (!activeChallengeId) return;
+    const pts = questTrailRef.current;
+    const last = pts[pts.length - 1];
+    if (!last || distanceKm(last.lat, last.lng, userLocation.lat, userLocation.lng) > 0.008) {
+      questTrailRef.current = [...pts, { lat: userLocation.lat, lng: userLocation.lng }];
+      setQuestTrail(questTrailRef.current);
+    }
+  }, [userLocation, activeChallengeId]);
   // GPS 取得状態（失敗時にユーザーへ明示する）
   const [geoStatus, setGeoStatus] = useState<'locating' | 'ok' | 'denied' | 'error'>('locating');
   // 位置情報を「あとで」にしたユーザーへ、直後に OS ダイアログを出し直さないためのフラグ
@@ -734,6 +751,8 @@ export default function HomePage() {
                 isGeneratingQuests={isGeneratingQuests}
                 guided={firstPilgrimageGuided}
                 onStartChallenge={(cid) => {
+                  // 移動をともなわないクエスト（アバター設定）は地図に行かず、その場で設定モーダルを開く
+                  if (cid === AVATAR_QUEST.id) { setAvatarQuestOpen(true); return; }
                   // クエスト参加を機に通知購読（以降サーバ自動プッシュが届く）。
                   // 拒否されても旅は続けられることを明示し、「無視された/壊れた」という不安を残さない。
                   subscribePush().then((r) => {
@@ -811,14 +830,19 @@ export default function HomePage() {
                     db.completeChallengeStep(currentUser.id, activeChallengeId, stepId, ch.tasks.length, task?.reward);
                     refreshDatabaseStates();
                   }}
+                  trail={questTrail}
                   onCompleteChallenge={() => {
                     if (!activeChallengeId || !currentUser) return;
                     const ch = db.getQuest(activeChallengeId);
                     const goalSpot = ch?.spotId ? db.getSpot(ch.spotId) : null;
+                    const trailSnapshot = questTrailRef.current.slice(); // 達成時点の軌跡（リセット前に控える）
                     db.completeChallenge(currentUser.id, activeChallengeId);
-                    // クエスト達成を「参拝の記録」にも残す（同じ場・同日の重複は避ける）
+                    // クエスト達成を「参拝の記録」にも残す（軌跡つき・同じ場・同日の重複は避ける）
                     if (goalSpot && !hasRecordForSpotOnDate(currentUser.id, goalSpot.id, new Date().toISOString())) {
-                      addVisitRecord(currentUser.id, goalSpot, { note: ch ? `クエスト「${ch.title}」を達成して参拝` : 'クエストを達成して参拝' });
+                      addVisitRecord(currentUser.id, goalSpot, {
+                        note: ch ? `クエスト「${ch.title}」を達成して参拝` : 'クエストを達成して参拝',
+                        trail: trailSnapshot.length > 1 ? trailSnapshot : undefined,
+                      });
                     }
                     setActiveChallengeId(null);
                     refreshDatabaseStates();
@@ -1168,6 +1192,49 @@ export default function HomePage() {
         {/* ── 御朱印帳 modal（授与式の「御朱印帳を見る」から開く） ── */}
         {goshuinBookOpen && (
           <GoshuinBookModal goShuinList={goShuinList} onClose={() => setGoshuinBookOpen(false)} />
+        )}
+
+        {/* ── 移動なしクエスト：アバター画像の設定 ── */}
+        {avatarQuestOpen && currentUser && (
+          <div className="absolute inset-0 z-[4200] bg-black/50 flex items-center justify-center p-5" onClick={() => !avatarUploading && setAvatarQuestOpen(false)}>
+            <div className="relative w-full max-w-[320px] bg-white rounded-3xl shadow-2xl px-6 py-7 text-center" onClick={(e) => e.stopPropagation()}>
+              <button onClick={() => !avatarUploading && setAvatarQuestOpen(false)} aria-label="閉じる" className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/5 hover:bg-black/10 flex items-center justify-center text-gray-500 cursor-pointer"><X className="w-4 h-4" /></button>
+              <div className="text-4xl mb-2">🤳</div>
+              <h3 className="text-lg font-black text-gray-900 leading-tight">{AVATAR_QUEST.title}</h3>
+              <p className="text-[13px] text-gray-500 mt-1.5 leading-snug">{AVATAR_QUEST.description}</p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={currentUser.avatarUrl} alt="現在のアバター" className="w-24 h-24 rounded-full object-cover mx-auto mt-4 border-2" style={{ borderColor: currentUser.avatarFrameColor || '#e5e7eb' }} />
+              <label className={`mt-5 w-full inline-flex items-center justify-center gap-2 text-[15px] font-black py-3 rounded-full transition-all ${avatarUploading ? 'bg-gray-200 text-gray-400' : 'bg-shrine-red text-white hover:opacity-90 active:scale-[0.99] cursor-pointer'}`}>
+                <Camera className="w-4 h-4" />{avatarUploading ? '設定中…' : '写真を選んで設定する'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={avatarUploading}
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!file || !currentUser) return;
+                    setAvatarUploading(true);
+                    try {
+                      const url = await uploadImage(file, `avatar-${currentUser.id}`);
+                      db.setUserAvatar(currentUser.id, url);
+                      db.completeChallenge(currentUser.id, AVATAR_QUEST.id);
+                      refreshDatabaseStates();
+                      setProfileSaved(true);
+                      setTimeout(() => setProfileSaved(false), 2000);
+                      setAvatarQuestOpen(false);
+                    } catch {
+                      alert('画像の設定に失敗しました。もう一度お試しください。');
+                    } finally {
+                      setAvatarUploading(false);
+                    }
+                  }}
+                />
+              </label>
+              <p className="text-[11px] text-gray-400 mt-2">設定すると「{AVATAR_QUEST.badgeName}」バッジと徳がもらえます</p>
+            </div>
+          </div>
         )}
 
         {/* ── 神様からの手紙 受信箱（週次） ── */}
