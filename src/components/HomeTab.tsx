@@ -2,24 +2,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Trophy, Flag, Clock, X, Check, Hourglass } from 'lucide-react';
-import { User, db, QUEST_TTL_MS } from '../lib/db';
+import { User, db } from '../lib/db';
 import { difficultyLabel, terrainLabel, Challenge, AVATAR_QUEST, isStationaryQuest } from '../data/challenges';
 import { getLevelInfo } from '../data/levels';
 import { distanceKm } from '../lib/geo';
-
-/** 未参加クエストの残り寿命ラベル（期限切れ・createdAt 無しの旧データは null） */
-function ttlLabel(createdAt: string | undefined, now: number): { text: string; urgent: boolean } | null {
-  if (!createdAt) return null;
-  const remaining = new Date(createdAt).getTime() + QUEST_TTL_MS - now;
-  if (remaining <= 0) return null;
-  const hours = Math.floor(remaining / 3_600_000);
-  // 期限切れ直前でも「残り0分」にしない（最小表示は残り1分）
-  const minutes = Math.max(1, Math.ceil((remaining % 3_600_000) / 60_000));
-  return {
-    text: hours >= 1 ? `残り${hours}時間` : `残り${minutes}分`,
-    urgent: remaining < 2 * 3_600_000,
-  };
-}
+import { ttlInfo, matchesDifficulty, matchesEstTime, TIME_FILTERS, type DiffSel, type TimeSel } from '../lib/quest-ui';
 
 interface HomeTabProps {
   currentUser: User;
@@ -29,21 +16,30 @@ interface HomeTabProps {
   onEndChallenge?: () => void;
   onChanged?: () => void;
   onNeedSpots?: () => void;
+  /** 周辺の場とクエストをまとめて生成（「他のクエストを探す」） */
+  onExploreMore?: () => void;
   /** 初回ガイド: フィルタを畳み、最寄り1件だけをコーチマーク付きで提示する */
   guided?: boolean;
 }
 
-export default function HomeTab({ currentUser, userLocation, isGeneratingQuests, onStartChallenge, onEndChallenge, onNeedSpots, guided }: HomeTabProps) {
+export default function HomeTab({ currentUser, userLocation, isGeneratingQuests, onStartChallenge, onEndChallenge, onNeedSpots, onExploreMore, guided }: HomeTabProps) {
   // localStorage 依存のため、マウント後にのみ動的レンダリング（ハイドレーション不一致回避）
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
   // フィルタ：すべて / 未達成のみ / 達成したもの / 参加できるもの
   const [filter, setFilter] = useState<'all' | 'todo' | 'done' | 'joinable'>('todo');
+  // 難易度・所要時間の絞り込み（null=すべて。再タップで解除のトグル）
+  const [diffFilter, setDiffFilter] = useState<DiffSel>(null);
+  const [timeFilter, setTimeFilter] = useState<TimeSel>(null);
+  const hasDetailFilter = diffFilter != null || timeFilter != null;
+  const clearDetailFilters = () => { setDiffFilter(null); setTimeFilter(null); };
   const [confirmCh, setConfirmCh] = useState<Challenge | null>(null); // 参加確認モーダル
+  const [confirmQuit, setConfirmQuit] = useState(false); // 終了の二段階確認
+  const openConfirm = (ch: Challenge | null) => { setConfirmQuit(false); setConfirmCh(ch); };
   // 最初は5個。「もっと見る」で +5
   const [visibleCount, setVisibleCount] = useState(5);
-  useEffect(() => { setVisibleCount(5); }, [filter]);
+  useEffect(() => { setVisibleCount(5); }, [filter, diffFilter, timeFilter]);
 
   // 刻限チップ用の現在時刻（カードごとではなくタブで1本だけ更新）
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -73,6 +69,9 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
   // フィルタ → 場ごとにクラスタリング（場は近い順、場内は距離順）。移動なしクエストも候補に含める。
   const scored = [...db.getAllQuests(), AVATAR_QUEST]
     .filter((ch) => {
+      // 難易度・所要時間の絞り込み（移動不要クエストは難易度／時間の概念が薄いので絞り込みからは除外しない）
+      if (!matchesDifficulty(ch.difficulty, diffFilter)) return false;
+      if (!matchesEstTime(ch.estMinutes, timeFilter)) return false;
       const completed = progress.completed.includes(ch.id);
       const ok = userLevel >= ch.minLevel;
       if (filter === 'todo') return !completed;
@@ -141,13 +140,15 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
   // 入場アニメーション完了後に entering フラグを下ろす（再生は一度だけ）
   const clearEntering = (id: string) => setRenderItems((cur) => cur.map((it) => (it.ch.id === id ? { ...it, entering: false } : it)));
 
-  // クエストが表示されていないとき（'done'フィルタ除く）、場の生成をリクエスト
+  // クエストが表示されていないとき（'done'フィルタ除く）、場の生成をリクエスト。
+  // ただし難易度・時間で絞り込んだ結果の0件では生成APIを叩かない（絞り込みすぎ対策）。
   useEffect(() => {
     if (!mounted) return;
     if (filter === 'done') return;
+    if (hasDetailFilter) return;
     if (realQuestCount === 0) onNeedSpots?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, realQuestCount, filter]);
+  }, [mounted, realQuestCount, filter, hasDetailFilter]);
 
   return (
     <div className="flex flex-col h-full overflow-y-auto bg-[#f5f7fa]">
@@ -198,6 +199,42 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
           </div>
         )}
 
+        {/* 難易度・所要時間チップ（初回ガイド中は出さない。再タップで解除） */}
+        {!guided && (
+          <div className="flex items-center gap-1.5 mb-3 overflow-x-auto scrollbar-none">
+            {([1, 2, 3] as const).map((d) => {
+              const dl = difficultyLabel(d);
+              const on = diffFilter === d;
+              return (
+                <button
+                  key={`diff-${d}`}
+                  onClick={() => setDiffFilter(on ? null : d)}
+                  className={`flex-shrink-0 text-[12px] font-black px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
+                    on ? 'bg-shrine-red text-white border-shrine-red' : 'bg-white text-gray-500 border-gray-200 hover:border-shrine-red/40'
+                  }`}
+                >
+                  <span className="mr-0.5">{dl.stars}</span>{dl.label}
+                </button>
+              );
+            })}
+            <span className="flex-shrink-0 w-px h-4 bg-gray-200 mx-0.5" />
+            {TIME_FILTERS.map((tf) => {
+              const on = timeFilter === tf.key;
+              return (
+                <button
+                  key={`time-${tf.key}`}
+                  onClick={() => setTimeFilter(on ? null : tf.key)}
+                  className={`flex-shrink-0 text-[12px] font-black px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
+                    on ? 'bg-shrine-red text-white border-shrine-red' : 'bg-white text-gray-500 border-gray-200 hover:border-shrine-red/40'
+                  }`}
+                >
+                  {tf.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {!mounted ? (
           <div className="text-center py-10 text-xs text-gray-400">読み込み中…</div>
         ) : nearChallenges.length === 0 ? (
@@ -208,10 +245,28 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
                 <p className="text-sm font-bold text-shrine-red">近くの場からクエストを生成中…</p>
                 <p className="text-xs text-gray-400 mt-1">しばらくお待ちください</p>
               </>
+            ) : filter === 'done' ? (
+              <p className="text-sm text-gray-400">まだ達成したクエストがありません。</p>
+            ) : hasDetailFilter ? (
+              <>
+                <p className="text-sm text-gray-400">条件に合うクエストがありません。</p>
+                <button
+                  onClick={clearDetailFilters}
+                  className="mt-3 inline-flex items-center gap-1 bg-gray-100 text-gray-600 text-sm font-black px-5 py-2.5 rounded-full hover:bg-gray-200 cursor-pointer"
+                >
+                  条件をクリア
+                </button>
+              </>
             ) : (
-              <p className="text-sm text-gray-400">
-                {filter === 'done' ? 'まだ達成したクエストがありません。' : '該当するクエストがありません。'}
-              </p>
+              <>
+                <p className="text-sm text-gray-400">近くにクエストが見つかりません。</p>
+                <button
+                  onClick={() => onExploreMore?.()}
+                  className="mt-3 inline-flex items-center gap-1 bg-shrine-red text-white text-sm font-black px-5 py-2.5 rounded-full hover:opacity-90 cursor-pointer"
+                >
+                  🔍 他のクエストを探す
+                </button>
+              </>
             )}
           </div>
         ) : (
@@ -231,7 +286,7 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
             const total = ch.tasks.length;
             const doneN = (progress.done[ch.id] || []).length;
             // 縁の刻限：未参加の生成クエストだけに残り寿命を出す（参加すれば恒久保持）
-            const ttl = !active && !completed && doneN === 0 ? ttlLabel(ch.createdAt, nowTick) : null;
+            const ttl = !active && !completed && doneN === 0 ? ttlInfo(ch.createdAt, nowTick) : null;
             // 同じ場所のまとまりに見出しを差し込む（退場アニメ中の項目は見出し判定に使わない）
             const gKey = groupKeyOf(ch);
             const showHeading = !exiting && gKey !== lastGroup;
@@ -248,7 +303,7 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
                   </div>
                 )}
               <button
-                onClick={() => !exiting && setConfirmCh(ch)}
+                onClick={() => !exiting && openConfirm(ch)}
                 aria-label={`クエスト「${ch.title}」を開く`}
                 onAnimationEnd={(e) => { if (entering && e.target === e.currentTarget) clearEntering(ch.id); }}
                 className={`w-full text-left rounded-2xl overflow-hidden transition-all cursor-pointer active:scale-[0.99] ${
@@ -304,11 +359,15 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
                       {ttl && (
                         <span
                           className={`text-[11px] font-black flex items-center gap-0.5 px-1.5 py-0.5 rounded-full ${
-                            ttl.urgent ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-400'
+                            ttl.tier === 'critical' ? 'bg-rose-100 text-rose-700 animate-pulse'
+                              : ttl.tier === 'urgent' ? 'bg-amber-100 text-amber-700'
+                              : 'bg-gray-100 text-gray-400'
                           }`}
                         >
                           <Hourglass className="w-3 h-3" />
-                          {ttl.urgent ? `まもなく縁が切れる・${ttl.text}` : ttl.text}
+                          {ttl.tier === 'critical' ? `まもなく消える・${ttl.text}`
+                            : ttl.tier === 'urgent' ? `まもなく縁が切れる・${ttl.text}`
+                            : ttl.text}
                         </span>
                       )}
                     </div>
@@ -341,6 +400,16 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
               もっと見る（残り{nearChallenges.length - visibleCount}件）
             </button>
           )}
+          {/* 全件表示しきったら、控えめに「他のクエストを探す」を置く（達成タブ・絞り込み中は出さない） */}
+          {!guided && filter !== 'done' && !hasDetailFilter && visibleCount >= nearChallenges.length && (
+            <button
+              onClick={() => onExploreMore?.()}
+              disabled={isGeneratingQuests}
+              className="mx-auto mt-2 inline-flex items-center gap-1 text-[13px] font-black text-shrine-red border border-shrine-red/30 rounded-full px-4 py-2 hover:bg-shrine-red/5 disabled:opacity-50 disabled:cursor-default cursor-pointer"
+            >
+              {isGeneratingQuests ? '近くの場から生成中…' : '🔍 他のクエストを探す'}
+            </button>
+          )}
         </div>
         )}
       </div>
@@ -349,6 +418,10 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
       {confirmCh && (() => {
         const isActive = progress.activeId === confirmCh.id;
         const ok = userLevel >= confirmCh.minLevel;
+        const mDoneN = (progress.done[confirmCh.id] || []).length;
+        const mTotal = confirmCh.tasks.length;
+        // 未参加クエストの刻限（参加・達成済みは恒久保持なので出さない）
+        const mTtl = !isActive && !progress.completed.includes(confirmCh.id) ? ttlInfo(confirmCh.createdAt, nowTick) : null;
         return (
           <div
             className="fixed inset-0 z-[4000] bg-black/40 flex items-center justify-center px-6"
@@ -356,7 +429,7 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
               paddingTop: 'calc(env(safe-area-inset-top, 0px) + 1.5rem)',
               paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 6.5rem)',
             }}
-            onClick={() => setConfirmCh(null)}
+            onClick={() => openConfirm(null)}
           >
             <div className="w-full max-w-[320px] max-h-full overflow-y-auto bg-white rounded-3xl p-5 text-center animate-in" onClick={(e) => e.stopPropagation()}>
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-100 to-amber-100 flex items-center justify-center text-4xl mx-auto mb-3">{confirmCh.badgeIcon}</div>
@@ -391,20 +464,50 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
 
               <div className="mt-4">
                 {isActive ? (
-                  <button
-                    onClick={() => { setConfirmCh(null); onEndChallenge?.(); }}
-                    className="w-full bg-rose-600 text-white text-base font-black py-3 rounded-xl hover:opacity-90 cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <X className="w-4 h-4" />チャレンジを終了する
-                  </button>
+                  confirmQuit ? (
+                    <div className="rounded-xl bg-rose-50 border border-rose-200 p-3 text-left">
+                      <p className="text-[12px] font-black text-rose-700 mb-1">チャレンジを終了する？</p>
+                      <p className="text-[11px] text-rose-700/80 leading-relaxed mb-3">
+                        {mDoneN > 0
+                          ? `達成済みのステップ（${mDoneN}/${mTotal}）は保存され、また参加すれば続きから再開できます。`
+                          : '進捗はまだありません。'}
+                        道中の写真と軌跡は消えます。
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setConfirmQuit(false)}
+                          className="flex-1 bg-gray-100 text-gray-600 text-sm font-black py-2.5 rounded-lg hover:bg-gray-200 cursor-pointer"
+                        >
+                          やめておく
+                        </button>
+                        <button
+                          onClick={() => { openConfirm(null); onEndChallenge?.(); }}
+                          className="flex-1 bg-rose-600 text-white text-sm font-black py-2.5 rounded-lg hover:opacity-90 cursor-pointer"
+                        >
+                          終了する
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmQuit(true)}
+                      className="w-full bg-rose-600 text-white text-base font-black py-3 rounded-xl hover:opacity-90 cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <X className="w-4 h-4" />チャレンジを終了する
+                    </button>
+                  )
                 ) : ok ? (
                   <>
-                    {confirmCh.createdAt && (
+                    {mTtl && (mTtl.tier === 'critical' || mTtl.tier === 'urgent') ? (
+                      <div className={`rounded-xl border px-3 py-2 mb-2 text-left ${mTtl.tier === 'critical' ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
+                        <p className="text-[11px] font-black leading-snug">⏳ このクエストは{mTtl.text}で消えます。参加すれば縁は永く結ばれます。</p>
+                      </div>
+                    ) : confirmCh.createdAt ? (
                       <p className="text-[11px] text-gray-400 mb-1.5">⏳ 参加すればこの縁は刻限から守られ、永く結ばれる</p>
-                    )}
+                    ) : null}
                     <p className="text-[11px] text-gray-400 mb-2">📯 参加すると、神からの新しいクエストの知らせを届けるため通知の許可を聞かれます</p>
                     <button
-                      onClick={() => { const id = confirmCh.id; setConfirmCh(null); onStartChallenge(id); }}
+                      onClick={() => { const id = confirmCh.id; openConfirm(null); onStartChallenge(id); }}
                       className="w-full bg-shrine-red text-white text-base font-black py-3 rounded-xl hover:opacity-90 cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <Flag className="w-4 h-4" />このチャレンジに参加

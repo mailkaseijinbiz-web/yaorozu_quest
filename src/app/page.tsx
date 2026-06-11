@@ -165,6 +165,13 @@ export default function HomePage() {
   const lastQuestGenRef = useRef<number>(0);
   // クエスト生成中フラグ（HomeTab のスピナー表示用）
   const [isGeneratingQuests, setIsGeneratingQuests] = useState(false);
+  // 生成中フラグを参照カウントで管理（バッチ生成で複数の生成が重なってもスピナーが瞬断しない）
+  const genCounterRef = useRef(0);
+  const beginQuestGen = useCallback(() => { genCounterRef.current++; setIsGeneratingQuests(true); }, []);
+  const endQuestGen = useCallback(() => {
+    genCounterRef.current = Math.max(0, genCounterRef.current - 1);
+    if (genCounterRef.current === 0) setIsGeneratingQuests(false);
+  }, []);
   // useCallback 内から最新の activeSpot を参照するための ref
   const activeSpotRef = useRef<Spot | null>(null);
   // state との同期（毎レンダリング更新）
@@ -175,7 +182,7 @@ export default function HomePage() {
     const now = Date.now();
     if (!force && now - lastQuestGenRef.current < 30_000) return; // 30 秒クールダウン
     lastQuestGenRef.current = now;
-    setIsGeneratingQuests(true);
+    beginQuestGen();
     try {
       const res = await fetch('/api/generate-quest', {
         method: 'POST',
@@ -208,8 +215,8 @@ export default function HomePage() {
         }
       }
     } catch { /* ネットワークエラーは無視 */ }
-    finally { setIsGeneratingQuests(false); }
-  }, []);
+    finally { endQuestGen(); }
+  }, [beginQuestGen, endQuestGen]);
 
   /**
    * 指定座標に場と神を1件生成・保存する（スロットルなし・低レベル）。
@@ -769,6 +776,13 @@ export default function HomePage() {
                 }}
                 onEndChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
                 onChanged={refreshDatabaseStates}
+                onExploreMore={async () => {
+                  // 明示操作なので 5 分スロットルを無視（force=true）して周辺バッチ生成。
+                  // スピナーは生成カウンタで一連の間ずっと点灯させる。
+                  beginQuestGen();
+                  try { await generateVariedSpots(userLocation.lat, userLocation.lng, true); }
+                  finally { endQuestGen(); }
+                }}
                 onNeedSpots={() => {
                   const existingSpots = db.getSpots();
                   if (existingSpots.length === 0) {
