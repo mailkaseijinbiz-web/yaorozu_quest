@@ -10,6 +10,7 @@ import { getVisitRecords, addVisitRecord, deleteVisitRecord, updateVisitRecord, 
 import { getAddress } from '../lib/address';
 import { shareToSns } from '../lib/share';
 import { grantGoShuin, hasGoShuin, getGoShuinList } from '../lib/goshuin';
+import { playChime } from '../lib/sound';
 import { getLevelInfo } from '../data/levels';
 import YaorozuSpirit from './YaorozuSpirit';
 import GoshuinCelebrate from './GoshuinCelebrate';
@@ -663,6 +664,7 @@ function SpotDetailBody({
       const data = await res.json();
       db.trackApiCall('ai_chat');
       setMessages((prev) => [...prev, { id: `a-${Date.now()}`, sender: 'agent', text: data.response, createdAt: new Date().toISOString(), mode: data.mode }]);
+      playChime(); // 神の言葉が届いた合図の「ポーン」
       if (typeof navigator !== 'undefined' && navigator.vibrate) {
         navigator.vibrate([15]); // 返信が届いた軽いトントンという感触
       }

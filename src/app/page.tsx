@@ -810,6 +810,12 @@ export default function HomePage() {
                     db.completeChallengeStep(currentUser.id, activeChallengeId, stepId, ch.tasks.length, task?.reward);
                     refreshDatabaseStates();
                   }}
+                  onCompleteChallenge={() => {
+                    if (!activeChallengeId || !currentUser) return;
+                    db.completeChallenge(currentUser.id, activeChallengeId);
+                    setActiveChallengeId(null);
+                    refreshDatabaseStates();
+                  }}
                 />
               </div>
             )}

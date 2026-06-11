@@ -5,7 +5,9 @@ import { Compass, ChevronRight, Flag, X, Camera, Check, MapPin, Clock, Navigatio
 import dynamic from 'next/dynamic';
 import { Spot, User, db } from '../lib/db';
 import { uploadImage, compressImage } from '../lib/upload';
-import { hasGoShuin } from '../lib/goshuin';
+import { hasGoShuin, grantGoShuin } from '../lib/goshuin';
+import { playChime } from '../lib/sound';
+import GoshuinCelebrate from './GoshuinCelebrate';
 import { distanceKm, bearingDeg } from '../lib/geo';
 import { getHeartVoices } from '../data/god-tasks';
 import { composeWalkGuide, nextGuideStage } from '../lib/walk-guide';
@@ -32,7 +34,8 @@ function composeGuideText(step: ChallengeStep): string {
   return `${intro}${action}${photoLine}`;
 }
 
-type GuideMsg = { role: 'spirit' | 'user'; text: string };
+type GuideMsg = { role: 'spirit' | 'user'; text: string; photo?: string };
+type ShareKind = 'self' | 'scene' | 'photo';
 
 // 現在のクエスト進捗から、精霊が語ってきた会話ログを再構成する（序章→現在の目的地まで）。
 function buildGuideLog(ch: Challenge, doneIds: Set<string>): GuideMsg[] {
@@ -55,6 +58,7 @@ interface MapTabProps {
   activeChallenge?: Challenge | null; // 今挑戦中のチャレンジ（上部バナー＋ゴール表示）
   onClearChallenge?: () => void;
   onAdvanceChallenge?: (stepId: string, photo?: string | null) => void; // 次の目的地ステップを達成（証拠写真つき）
+  onCompleteChallenge?: () => void; // 目的地100m到達＝御朱印取得でクエストを達成扱いにする
   currentUser: User; // 近くの場カード表示用
   onMapMove?: (center: { lat: number; lng: number }) => void; // 地図を移動させたとき（アクティビティログ用）
   deviceHeading?: number | null; // 端末の向き（方位磁針）。ナビ矢印のコンパス補正と現在地マーカーに使う
@@ -72,6 +76,7 @@ export default function MapTab({
   activeChallenge,
   onClearChallenge,
   onAdvanceChallenge,
+  onCompleteChallenge,
   currentUser,
   onMapMove,
   deviceHeading = null,
@@ -184,6 +189,16 @@ export default function MapTab({
   const [chatInput, setChatInput] = useState('');
   const [chatSending, setChatSending] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  // 道中の「神様に伝える」寄り道：チップ起点の共有種別（徳のスロットル判定に使う）
+  const [pendingShareKind, setPendingShareKind] = useState<ShareKind | null>(null);
+  const godPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const [shareToast, setShareToast] = useState<string | null>(null);
+  // 100m到達での御朱印自動授与＝クエスト達成
+  const [goshuinCelebrate, setGoshuinCelebrate] = useState<{ spot: Spot; godName: string } | null>(null);
+  const arrivalDoneRef = useRef(false);
+  // クエスト中に通ったルートの軌跡（地図にポリラインで描く）
+  const trailRef = useRef<{ lat: number; lng: number }[]>([]);
+  const [trail, setTrail] = useState<{ lat: number; lng: number }[]>([]);
   // 上部ガイドのフキダシ本文（3行＋スクロール）の自動スクロール用
   const guideScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -357,6 +372,16 @@ export default function MapTab({
       ? { lat: nextStep.lat, lng: nextStep.lng, name: nextStep.title, godEmoji: challengeGodEmoji }
       : { lat: activeChallenge.goalLat, lng: activeChallenge.goalLng, name: activeChallenge.goalName, godEmoji: challengeGodEmoji }
     : null;
+
+  // ── 目的地の八百万神（道中の語りかけ相手＋100m自動御朱印の対象）──
+  const destSpot = activeChallenge
+    ? ((activeChallenge.spotId ? db.getSpot(activeChallenge.spotId) : null)
+        ?? (nextStep?.spotId ? db.getSpot(nextStep.spotId) : null)
+        ?? null)
+    : null;
+  const destAgent = destSpot ? db.getAgentBySpot(destSpot.id) : undefined;
+  const destGodName = destSpot?.godName || destAgent?.name || '八百万の神';
+  const destGodEmoji = destSpot ? (destSpot.godEmoji || (destSpot.category === '神社' ? '⛩️' : '🙏')) : '⛩️';
 
   const activeDist = activeSpot ? distanceKm(userLocation.lat, userLocation.lng, activeSpot.latitude, activeSpot.longitude) : 0;
   const activeNear = activeDist <= 1.0;
@@ -551,8 +576,12 @@ export default function MapTab({
   const chatMessages: GuideMsg[] = activeChallenge
     ? [...buildGuideLog(activeChallenge, chDone ?? new Set<string>()), ...chatExtra]
     : [];
-  // チャレンジが変わったら会話をリセット
-  useEffect(() => { setChatExtra([]); setChatOpen(false); setChatInput(''); }, [activeChallenge?.id]);
+  // チャレンジが変わったら会話・寄り道・軌跡・御朱印演出をリセット
+  useEffect(() => {
+    setChatExtra([]); setChatOpen(false); setChatInput(''); setPendingShareKind(null);
+    arrivalDoneRef.current = false; setGoshuinCelebrate(null);
+    trailRef.current = []; setTrail([]);
+  }, [activeChallenge?.id]);
   // 新着・送信中で最下部へスクロール
   useEffect(() => {
     if (!chatOpen) return;
@@ -560,38 +589,130 @@ export default function MapTab({
     if (el) el.scrollTop = el.scrollHeight;
   }, [chatOpen, chatExtra.length, chatSending]);
 
+  // クエスト中、現在地が約8m以上動いたら軌跡に点を足す（地図にポリラインで描く）
+  useEffect(() => {
+    if (!activeChallenge) return;
+    const pts = trailRef.current;
+    const last = pts[pts.length - 1];
+    if (!last || distanceKm(last.lat, last.lng, userLocation.lat, userLocation.lng) > 0.008) {
+      trailRef.current = [...pts, { lat: userLocation.lat, lng: userLocation.lng }];
+      setTrail(trailRef.current);
+    }
+  }, [userLocation, activeChallenge?.id]);
+
+  // 目的地100m未満に入ったら御朱印を自動授与し、祝祭モーダルを出す（OKで達成確定）。
+  useEffect(() => {
+    if (!activeChallenge || !destSpot || arrivalDoneRef.current) return;
+    const d = distanceKm(userLocation.lat, userLocation.lng, destSpot.latitude, destSpot.longitude);
+    if (d >= 0.1) return; // 100m ゲート（SpotDetail と同じ閾値）
+    arrivalDoneRef.current = true; // 一度きり
+    grantGoShuin(
+      currentUser.id,
+      { id: destSpot.id, name: destSpot.name, category: destSpot.category, godEmoji: destGodEmoji },
+      destGodName,
+    ); // 既取得時は null。授与可否に関わらず達成へ進む
+    const target = destSpot;
+    const name = destGodName;
+    setTimeout(() => { playChime(); setGoshuinCelebrate({ spot: target, godName: name }); }, 600);
+  }, [userLocation, destSpot?.id, activeChallenge?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 神の言葉が届いた瞬間の共通処理：ポーン音を鳴らし、チップ起点の共有なら徳を授ける
+  // （1目的地・種別ごと1日1回まで＝farming 防止）。
+  const finalizeGodReply = (kind: ShareKind | null) => {
+    playChime();
+    if (destSpot && kind && !db.isTaskDoneToday(destSpot.id, `wayside-${kind}`)) {
+      db.grantToku(currentUser.id, 5, '寄り道：神に伝える');
+      db.markTaskDoneToday(destSpot.id, `wayside-${kind}`);
+      setShareToast('徳 +5');
+      setTimeout(() => setShareToast(null), 2200);
+    }
+    setPendingShareKind(null);
+  };
+
   const sendChat = async () => {
     const text = chatInput.trim();
     if (!text || chatSending || !activeChallenge) return;
+    const kind = pendingShareKind;
     setChatInput('');
     setChatExtra((prev) => [...prev, { role: 'user', text }]);
     setChatSending(true);
     try {
       const history = chatMessages.map((m) => ({ sender: m.role === 'user' ? 'user' : 'agent', text: m.text }));
+      // 目的地の場があれば「目的地の八百万神」が応答。無ければ従来の道案内の精霊。
+      const agent = destSpot
+        ? (destAgent ?? {
+            id: `agent-synthetic-${destSpot.id}`,
+            name: destGodName,
+            systemPrompt: `あなたは「${destSpot.name}」に宿る八百万の神「${destGodName}」。いま、あなたのもとへ向かって歩いている巡礼者が、道中で見た景色や自分のことを語りかけています。その言葉を温かく受けとめ、土地や相手の心に寄り添って、200文字以内・少し古風でやさしい神の口調（「〜じゃ」「〜のう」）で返してください。`,
+            voiceTone: '神',
+          })
+        : {
+            id: 'agent-guide-spirit',
+            name: '道案内の精霊',
+            systemPrompt: `あなたは「道案内の精霊」。狐の姿をした町歩きクエストの案内役です。いまは「${activeChallenge.title}」を巡る旅の途中。旅人に寄り添い、土地の歴史・地形・建築・道の蘊蓄を、やさしく簡潔に語ります。現在の目的地は「${nextStep?.title ?? '最終地点'}」。質問には親切に、200文字以内で、温かく少し古風な精霊らしい口調（「〜じゃ」「〜ぞ」）で答えてください。`,
+            voiceTone: '案内役',
+          };
+      const spotPayload = destSpot
+        ? { name: destSpot.name, category: destSpot.category, description: destSpot.description, enjoyments: [], godName: destSpot.godName, latitude: destSpot.latitude, longitude: destSpot.longitude }
+        : { name: activeChallenge.title, category: 'クエスト', description: activeChallenge.description, enjoyments: [] };
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
           history,
-          agent: {
-            id: 'agent-guide-spirit',
-            name: '道案内の精霊',
-            systemPrompt: `あなたは「道案内の精霊」。狐の姿をした町歩きクエストの案内役です。いまは「${activeChallenge.title}」を巡る旅の途中。旅人に寄り添い、土地の歴史・地形・建築・道の蘊蓄を、やさしく簡潔に語ります。現在の目的地は「${nextStep?.title ?? '最終地点'}」。質問には親切に、200文字以内で、温かく少し古風な精霊らしい口調（「〜じゃ」「〜ぞ」）で答えてください。`,
-            voiceTone: '案内役',
-          },
+          agent,
+          spotId: destSpot?.id,
           ugc: [],
           affiliates: [],
           userName: currentUser.displayName || '旅人',
-          spot: { name: activeChallenge.title, category: 'クエスト', description: activeChallenge.description, enjoyments: [] },
-          // 現在地。サーバ側で「土地の実在豆知識」を引き、精霊が道中の土地の話をできるようにする
+          spot: spotPayload,
+          // 現在地。サーバ側で「土地の実在豆知識」を引き、神/精霊が道中の土地の話をできるようにする
           location: { lat: userLocation.lat, lng: userLocation.lng },
         }),
       });
       const data = await res.json();
-      setChatExtra((prev) => [...prev, { role: 'spirit', text: data?.response || '…（精霊は静かに微笑んでいる）' }]);
+      setChatExtra((prev) => [...prev, { role: 'spirit', text: data?.response || (destSpot ? '…（神は静かに目を細めている）' : '…（精霊は静かに微笑んでいる）') }]);
+      finalizeGodReply(kind);
     } catch {
       setChatExtra((prev) => [...prev, { role: 'spirit', text: 'すまぬ、いまは声が届かぬようじゃ。もう一度試しておくれ。' }]);
+      setPendingShareKind(null);
+    } finally {
+      setChatSending(false);
+    }
+  };
+
+  // 寄り道チップ（テキスト）：神に伝える足場文をプレフィルしてシートを開く
+  const startGodShare = (kind: 'self' | 'scene') => {
+    setPendingShareKind(kind);
+    setChatInput(kind === 'self'
+      ? 'いまそちらへ向かっています。私のことを少し聞いてください。'
+      : '道中で見つけた、気になる風景について話します。');
+    setChatOpen(true);
+  };
+
+  // 寄り道チップ（写真）：撮った写真の内容に目的地の神がコメント（vision）
+  const onPickGodPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !destSpot || chatSending) return;
+    setChatOpen(true);
+    setChatSending(true);
+    let dataUrl = '';
+    try { dataUrl = await compressImage(file, { maxDim: 900, quality: 0.6 }); } catch { setChatSending(false); return; }
+    setChatExtra((prev) => [...prev, { role: 'user', text: '（気になる風景を撮って奉納した）', photo: dataUrl }]);
+    try {
+      const res = await fetch('/api/photo-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photoDataUrl: dataUrl, context: { spotName: destSpot.name, taskTitle: '気になる風景・もの', godName: destGodName } }),
+        signal: AbortSignal.timeout(12_000),
+      });
+      const data = await res.json();
+      setChatExtra((prev) => [...prev, { role: 'spirit', text: data?.feedback || 'ほう、よき眺めじゃ。心に残る一枚じゃな。' }]);
+      finalizeGodReply('photo');
+    } catch {
+      setChatExtra((prev) => [...prev, { role: 'spirit', text: 'すまぬ、写真がうまく届かなんだ。' }]);
     } finally {
       setChatSending(false);
     }
@@ -611,6 +732,7 @@ export default function MapTab({
           setUserLocation={setUserLocation}
           ugcCounts={ugcCounts}
           goal={challengeGoal}
+          trail={trail}
           controlsBottom={controlsBottom}
           focusGoalToken={focusGoalToken}
           hideControls={introShowing}
@@ -1087,16 +1209,16 @@ export default function MapTab({
         </div>
       )}
 
-      {/* 道案内の精霊との会話（狐アイコンのタップで開く・これまでの語りログ＋参加） */}
+      {/* 道中の会話（目的地の場があれば「目的地の八百万神」／無ければ道案内の精霊） */}
       {chatOpen && activeChallenge && (
         <div className="absolute inset-0 z-[2300] bg-black/50 flex items-end" onClick={() => setChatOpen(false)}>
           <div className="w-full bg-white rounded-t-3xl flex flex-col max-h-[82%] animate-in" onClick={(e) => e.stopPropagation()}>
             {/* ヘッダー */}
             <div className="flex items-center gap-2 px-4 pt-3 pb-2.5 border-b border-black/5">
-              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-100 to-orange-50 border border-white shadow flex items-center justify-center text-xl flex-shrink-0">🦊</div>
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-100 to-orange-50 border border-white shadow flex items-center justify-center text-xl flex-shrink-0">{destSpot ? destGodEmoji : '🦊'}</div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-black text-gray-900">道案内の精霊</p>
-                <p className="text-[11px] text-gray-400 truncate">{activeChallenge.title}・会話のログ</p>
+                <p className="text-sm font-black text-gray-900 truncate">{destSpot ? destGodName : '道案内の精霊'}</p>
+                <p className="text-[11px] text-gray-400 truncate">{destSpot ? `${destSpot.name}・道中の語らい` : `${activeChallenge.title}・会話のログ`}</p>
               </div>
               <button onClick={() => setChatOpen(false)} aria-label="閉じる" className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center cursor-pointer"><X className="w-4 h-4 text-gray-500" /></button>
             </div>
@@ -1104,25 +1226,40 @@ export default function MapTab({
             <div ref={chatScrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
               {chatMessages.map((m, i) => m.role === 'user' ? (
                 <div key={i} className="flex justify-end">
-                  <div className="max-w-[80%] bg-[#2563eb] text-white rounded-2xl rounded-br-sm px-3.5 py-2 text-[13px] leading-relaxed">{m.text}</div>
+                  <div className="max-w-[80%] flex flex-col items-end gap-1">
+                    {m.photo && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={m.photo} alt="奉納した写真" className="w-32 h-32 rounded-2xl object-cover border border-black/5" />
+                    )}
+                    {m.text && <div className="bg-[#2563eb] text-white rounded-2xl rounded-br-sm px-3.5 py-2 text-[13px] leading-relaxed">{m.text}</div>}
+                  </div>
                 </div>
               ) : (
                 <div key={i} className="flex items-start gap-2">
-                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-100 to-orange-50 flex items-center justify-center text-base flex-shrink-0">🦊</div>
+                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-100 to-orange-50 flex items-center justify-center text-base flex-shrink-0">{destSpot ? destGodEmoji : '🦊'}</div>
                   <div className="max-w-[80%] bg-gray-100 text-gray-800 rounded-2xl rounded-tl-sm px-3.5 py-2 text-[13px] leading-relaxed whitespace-pre-line">{m.text}</div>
                 </div>
               ))}
               {chatSending && (
-                <div className="flex items-center gap-2 pl-9 text-gray-400 text-[12px]"><span className="animate-pulse">精霊が考えている…</span></div>
+                <div className="flex items-center gap-2 pl-9 text-gray-400 text-[12px]"><span className="animate-pulse">{destSpot ? '神が耳を傾けている…' : '精霊が考えている…'}</span></div>
               )}
             </div>
+            {/* 寄り道チップ（目的地の場がある時だけ：あなたのこと／気になる風景／写真） */}
+            {destSpot && (
+              <div className="px-3 pt-2.5 flex items-center gap-2 overflow-x-auto scrollbar-none">
+                <button onClick={() => startGodShare('self')} disabled={chatSending} className="flex-shrink-0 text-[12px] font-black text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-full disabled:opacity-40 cursor-pointer">⛩️ あなたのこと</button>
+                <button onClick={() => startGodShare('scene')} disabled={chatSending} className="flex-shrink-0 text-[12px] font-black text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-full disabled:opacity-40 cursor-pointer">👀 気になる風景</button>
+                <button onClick={() => godPhotoInputRef.current?.click()} disabled={chatSending} className="flex-shrink-0 text-[12px] font-black text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-full disabled:opacity-40 cursor-pointer flex items-center gap-1"><Camera className="w-3.5 h-3.5" />写真を撮る</button>
+                <input ref={godPhotoInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPickGodPhoto} />
+              </div>
+            )}
             {/* 入力（会話に参加） */}
             <div className="px-3 pt-2 border-t border-black/5 flex items-center gap-2" style={{ paddingBottom: 'calc(0.625rem + env(safe-area-inset-bottom))' }}>
               <input
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) sendChat(); }}
-                placeholder="精霊に話しかける…"
+                placeholder={destSpot ? `${destGodName} に伝える…` : '精霊に話しかける…'}
                 className="flex-1 bg-gray-100 rounded-full px-4 py-2.5 text-[14px] text-gray-900 placeholder:text-gray-400 outline-none focus:ring-2 focus:ring-[#2563eb]/30"
               />
               <button onClick={sendChat} disabled={!chatInput.trim() || chatSending} aria-label="送信" className="w-10 h-10 rounded-full bg-[#2563eb] text-white flex items-center justify-center disabled:opacity-40 cursor-pointer flex-shrink-0">
@@ -1131,6 +1268,24 @@ export default function MapTab({
             </div>
           </div>
         </div>
+      )}
+
+      {/* 道中の寄り道で徳を授かったときの小トースト */}
+      {shareToast && (
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[2400] bg-gray-900/90 text-white text-[13px] font-black px-4 py-2 rounded-full shadow-lg celebrate-pop">{shareToast}</div>
+      )}
+
+      {/* 目的地100m到達：御朱印を自動授与（OKでクエスト達成・解除） */}
+      {goshuinCelebrate && (
+        <GoshuinCelebrate
+          seed={goshuinCelebrate.godName || goshuinCelebrate.spot.name}
+          godEmoji={goshuinCelebrate.spot.godEmoji || '🙏'}
+          stampLabel={goshuinCelebrate.godName}
+          spotName={goshuinCelebrate.spot.name}
+          variant="near"
+          position="absolute"
+          onClose={() => { setGoshuinCelebrate(null); onCompleteChallenge?.(); }}
+        />
       )}
 
       {/* ── 隠れスポット提案モーダル ── */}

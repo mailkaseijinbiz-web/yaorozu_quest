@@ -38,6 +38,7 @@ interface LeafletMapProps {
   setUserLocation: (loc: { lat: number; lng: number }) => void;
   ugcCounts: { [spotId: string]: number };
   goal?: { lat: number; lng: number; name: string; godEmoji?: string } | null; // チャレンジのゴール（godEmoji=挑戦中の神のアイコン）
+  trail?: { lat: number; lng: number }[]; // クエスト中に通ったルートの軌跡（ポリラインで描く）
   controlsBottom?: number; // 現在地ボタンの下端からの位置（下部オーバーレイの上端+余白）
   focusGoalToken?: number; // 値が変わると目的地を地図中央へ寄せる
   hideControls?: boolean; // 導入表示中は現在地ボタンを隠し、解除時にふわっと出す
@@ -58,6 +59,7 @@ export default function LeafletMap({
   setUserLocation,
   ugcCounts,
   goal,
+  trail,
   controlsBottom = 210,
   focusGoalToken,
   hideControls = false,
@@ -73,6 +75,7 @@ export default function LeafletMap({
   const userMarkerRef = useRef<L.Marker | null>(null);
   const markersRef = useRef<{ [spotId: string]: L.Marker }>({});
   const goalMarkerRef = useRef<L.Marker | null>(null);
+  const trailLayerRef = useRef<L.Polyline | null>(null);
   // フキダシのつぶやきを動的に切り替えるため、スポット毎の声リストを保持
   const voicesRef = useRef<{ [spotId: string]: string[] }>({});
   // 最新の現在地を参照（再生成を避けつつ、ゴール演出で使う）
@@ -291,6 +294,25 @@ export default function LeafletMap({
     }, 1700);
     return () => clearTimeout(t);
   }, [goalLat, goalLng, goalName, goalEmoji]);
+
+  // 2.6 クエスト中に通ったルートの軌跡（青い破線のポリライン）
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const pts = (trail ?? []).map((p) => [p.lat, p.lng] as [number, number]);
+    if (pts.length < 2) {
+      // 軌跡なし（クエスト外・リセット直後）は線を消す
+      if (trailLayerRef.current) { trailLayerRef.current.remove(); trailLayerRef.current = null; }
+      return;
+    }
+    if (!trailLayerRef.current) {
+      trailLayerRef.current = L.polyline(pts, {
+        color: '#2563eb', weight: 4, opacity: 0.7, dashArray: '1,8', lineCap: 'round', lineJoin: 'round',
+      }).addTo(map);
+    } else {
+      trailLayerRef.current.setLatLngs(pts);
+    }
+  }, [trail]);
 
   // 「次の目的地」タップ：目的地を地図中央へ寄せる（初回トークンは無視）
   const focusInitRef = useRef(true);

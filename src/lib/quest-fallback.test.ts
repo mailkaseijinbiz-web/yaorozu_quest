@@ -36,19 +36,16 @@ describe('buildFallbackQuest（町歩きフォールバック）', () => {
     }
   });
 
-  it('課題があるとき task[3] は resolveIssue で issueRef を持つ（既存挙動の保護）', () => {
-    const quests = buildFallbackQuest({ ...nezu, issues: ['参道の落ち葉', '掲示が剥がれている'] }, 2, 1);
-    for (const [n, q] of quests.entries()) {
-      const t = q.tasks[3];
-      expect(t.type).toBe('resolveIssue');
-      expect(t.issueRef?.issueIndex).toBe(n % 2);
-      expect(t.issueRef?.issueText).toBeTruthy();
+  it('結びの task[3] は gratitude（課題の解決・SNS投稿はフローに含めない）', () => {
+    // 課題があっても resolveIssue は出さない
+    const withIssues = buildFallbackQuest({ ...nezu, issues: ['参道の落ち葉', '掲示が剥がれている'] }, 2, 1);
+    for (const q of withIssues) {
+      expect(q.tasks[3].type).toBe('gratitude');
+      expect(q.tasks.some((t) => t.type === 'resolveIssue' || t.type === 'sns')).toBe(false);
     }
-  });
-
-  it('課題が無ければ task[3] は sns', () => {
-    const quests = buildFallbackQuest(nezu, 1, 1);
-    expect(quests[0].tasks[3].type).toBe('sns');
+    // 課題が無くても sns は出さない
+    const noIssues = buildFallbackQuest(nezu, 1, 1);
+    expect(noIssues[0].tasks[3].type).toBe('gratitude');
   });
 
   it('決定論: 同一入力 → 同一出力、クエスト番号間で観察ミッションが変化する', () => {

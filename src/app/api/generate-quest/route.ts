@@ -70,7 +70,12 @@ function coerceQuest(raw: unknown, n: number, spot: SpotInput, ts: number): Ques
   const r = (raw ?? {}) as Record<string, unknown>;
   const rawTasks = Array.isArray(r.tasks) ? r.tasks : [];
   if (rawTasks.length === 0) return null;
-  const tasks = rawTasks.slice(0, 3).map((t, i) => coerceTask(t, i, spot)); // クエストはタスク1〜2メイン（上限3）
+  // 課題の解決(resolveIssue)・SNS投稿(sns)は道中フローに含めないため除外
+  const tasks = rawTasks
+    .slice(0, 3)
+    .map((t, i) => coerceTask(t, i, spot))
+    .filter((t) => t.type !== 'resolveIssue' && t.type !== 'sns'); // クエストはタスク1〜2メイン（上限3）
+  if (tasks.length === 0) return null;
   const difficulty = ([1, 2, 3].includes(Number(r.difficulty)) ? Number(r.difficulty) : 1) as 1 | 2 | 3;
   return {
     id: `uq-${spot.id || 'spot'}-${ts}-${n}`,
@@ -118,11 +123,11 @@ function buildPrompt(spot: SpotInput, count: number, rules: string, godRules = '
 クエストは「タスクの集まり」です。各タスクは「世界の値（活気=価値−課題 / 覚り=徳−煩悩）を調整する」か「調整に必要なコンテキストを生成する」かのいずれかで、神の3つの働きに属します:
 - 情報収集(sense)＝コンテキスト生成: visit(来訪), photo(写真), context(今の様子), event(できごと), cleaning(清掃確認), weather(天気), value_ask(この場の価値を人間に尋ねる→活気を上げる素材), issue_ask(この場の課題を人間に尋ねる→解決の素材), discover(隠れた魅力を発見→価値追加), bonnou_ask(人間の煩悩を尋ねる→覚りの素材), wish(願いを書く), gratitude(感謝を捧げる), avatar_photo(巡礼者自身の姿を撮りアバターにする)
 - 理解判断(understand): review(口コミ), eat(実食の声), evaluate(写真を評価), judge(投稿をジャッジ), recommend(一番を選ぶ), verify(情報を確かめる)
-- 操作(act)＝世界の値を直接調整: resolveIssue(課題を解決し活気+2), cleanup(掃除をして場を整える), buy(買物報告), sns(価値を外へ拡散), donate(寄進), guide(道案内), bonnou_resolve(人間の煩悩を一つ手放し覚り+1), walk(散歩で心を整え覚り+1), meditate(瞑想で煩悩を手放し覚り+1)
+- 操作(act)＝世界の値を直接調整: cleanup(掃除をして場を整える), buy(買物報告), donate(寄進), guide(道案内), bonnou_resolve(人間の煩悩を一つ手放し覚り+1), walk(散歩で心を整え覚り+1), meditate(瞑想で煩悩を手放し覚り+1)
 
 各クエストは「1〜2タスク」の軽量構成をメインにしてください（大半は1〜2タスク。特に意味がある場合のみ最大3タスクまで可）。2タスクのときは、なるべく「情報収集」と「操作」を組み合わせて、コンテキスト収集→世界の値の調整、の流れになるようにします。
 生成の制約条件:
-- resolveIssue は「課題」が存在する場合のみ使用し、issueIndex で何番目の課題かを必ず示す（課題が無ければ使わない）。
+- 課題の解決(resolveIssue)・SNS投稿(sns)はクエストに含めないでください。
 - value_ask / issue_ask は、価値・課題がまだ薄い場で特に有効（人間から集めて充実させる）。
 - 過去の巡礼者の声（UGC）がある場合、それを元に「この声は本当か確かめよう（verify）」や「この人が見つけたものを探そう（discover）」といったタスクを作り、JSONの sourceUgcId フィールドにそのUGCのIDを入れてください。
 - 価値タスクは「楽しみ方」から、操作タスクは「課題」から作ってください。
