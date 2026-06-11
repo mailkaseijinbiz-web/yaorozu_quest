@@ -3,6 +3,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { Search, MapPin, Camera, CalendarDays, Trash2, Check, Stamp, NotebookPen, X, Pencil } from 'lucide-react';
+import PullToRefresh from './PullToRefresh';
 
 const GoshuinJapanMap = dynamic(() => import('./GoshuinJapanMap'), {
   ssr: false,
@@ -34,6 +35,7 @@ interface RecordTabProps {
   spots: Spot[];
   onOpenDetail?: (spot: Spot) => void;
   onChanged?: () => void; // 徳の更新などを親へ通知
+  onRefresh?: () => void | Promise<void>; // 下に引っぱって更新（クラウド再取得）
   section?: 'visits' | 'goshuin'; // 指定時はそのセクションのみ表示し、内部の切替タブを隠す
 }
 
@@ -70,7 +72,7 @@ function TrailMini({ points }: { points: { lat: number; lng: number }[] }) {
   );
 }
 
-export default function RecordTab({ currentUser, userLocation, spots, onOpenDetail, onChanged, section }: RecordTabProps) {
+export default function RecordTab({ currentUser, userLocation, spots, onOpenDetail, onChanged, onRefresh, section }: RecordTabProps) {
   const [topTab, setTopTab] = useState<'visits' | 'goshuin'>(section ?? 'visits');
   // section 固定時は内部の切替に追従させる（メインタブとして単独表示するため）
   const effectiveTab = section ?? topTab;
@@ -344,7 +346,10 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
     }
   };
   return (
-    <div className="h-full overflow-y-auto bg-[#f5f7fa] pb-6">
+    <PullToRefresh
+      className="bg-[#f5f7fa] pb-6"
+      onRefresh={async () => { await onRefresh?.(); refresh(); refreshGoshuin(); }}
+    >
       {/* 上部タブ（メインタブとして単独表示するときは隠す） */}
       {!section && (
       <div className="flex border-b border-black/5 bg-white sticky top-0 z-10">
@@ -801,6 +806,6 @@ export default function RecordTab({ currentUser, userLocation, spots, onOpenDeta
           </div>
         </div>
       )}
-    </div>
+    </PullToRefresh>
   );
 }
