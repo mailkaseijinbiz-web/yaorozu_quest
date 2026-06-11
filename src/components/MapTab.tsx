@@ -63,16 +63,6 @@ const MOOD_PRESETS = [
   { emoji: '🤔', label: '考え中' },
 ];
 
-// 「何を撮る？」のネタ振り（道中で目を向ける先のヒント）。神社/寺院/共通で出し分ける。
-const PHOTO_PROMPTS_SHRINE = ['狛犬の阿吽の表情', '鳥居の形や色あい', '手水舎や灯籠のたたずまい', '境内のご神木・大木', '絵馬や提灯のにぎわい'];
-const PHOTO_PROMPTS_TEMPLE = ['山門や仁王像の迫力', '瓦や彫刻の意匠', '苔むした石畳や石仏', '鐘楼や五重塔の姿', '庭園の静けさ'];
-const PHOTO_PROMPTS_COMMON = ['路地や坂のある風景', '季節の草花や木々', '古い建物と新しい街の対比', '空や光の様子', '気になる看板やお店'];
-function photoPromptFor(category: string | undefined, n: number): string {
-  const base = category === '神社' ? PHOTO_PROMPTS_SHRINE : category ? PHOTO_PROMPTS_TEMPLE : [];
-  const pool = [...base, ...PHOTO_PROMPTS_COMMON];
-  return pool[Math.abs(n) % pool.length];
-}
-
 // 現在のクエスト進捗から、精霊が語ってきた会話ログを再構成する（序章→現在の目的地まで）。
 function buildGuideLog(ch: Challenge, doneIds: Set<string>): GuideMsg[] {
   const msgs: GuideMsg[] = [{ role: 'spirit', text: ch.description }];
@@ -444,8 +434,6 @@ export default function MapTab({
   const destAgent = destSpot ? db.getAgentBySpot(destSpot.id) : undefined;
   const destGodName = destSpot?.godName || destAgent?.name || '八百万の神';
   const destGodEmoji = destSpot ? (destSpot.godEmoji || (destSpot.category === '神社' ? '⛩️' : '🙏')) : '⛩️';
-  // 「何を撮る？」のネタ振り。撮った枚数で替わる。
-  const photoPrompt = destSpot ? photoPromptFor(destSpot.category, questPhotos.length) : '';
 
   const activeDist = activeSpot ? distanceKm(userLocation.lat, userLocation.lng, activeSpot.latitude, activeSpot.longitude) : 0;
   const activeNear = activeDist <= 1.0;
@@ -1064,7 +1052,6 @@ export default function MapTab({
                     >
                       <Camera className="w-4 h-4" />{photoSending ? '神が眺めている…' : '気になる風景・ものを撮る'}
                     </button>
-                    <p className="text-center text-[11px] text-gray-400 mt-1.5">📷 お題：{photoPrompt}｜{destGodName}が応えてくれる（任意）</p>
                   </>
                 ) : nextStep.type === 'goshuin' ? (
                   <button
@@ -1449,9 +1436,6 @@ export default function MapTab({
             <div className="px-4 py-3 overflow-y-auto space-y-3.5">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={pendingPhoto} alt="撮った写真" className="w-full max-h-52 object-cover rounded-2xl border border-black/5" />
-              <div className="bg-amber-50 rounded-xl px-3 py-2">
-                <p className="text-[11px] font-black text-amber-700">📷 お題：{photoPrompt} を探してみよう</p>
-              </div>
               <div>
                 <p className="text-[12px] font-black text-gray-600 mb-1.5">いまどんな気分？</p>
                 <div className="flex flex-wrap gap-1.5">

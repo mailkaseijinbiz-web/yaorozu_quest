@@ -6,7 +6,7 @@ import { User, db } from '../lib/db';
 import { difficultyLabel, terrainLabel, Challenge, AVATAR_QUEST, isStationaryQuest } from '../data/challenges';
 import { getLevelInfo } from '../data/levels';
 import { distanceKm } from '../lib/geo';
-import { ttlInfo, matchesDifficulty, matchesEstTime, TIME_FILTERS, type DiffSel, type TimeSel } from '../lib/quest-ui';
+import { ttlInfo } from '../lib/quest-ui';
 
 interface HomeTabProps {
   currentUser: User;
@@ -29,17 +29,12 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
 
   // フィルタ：すべて / 未達成のみ / 達成したもの / 参加できるもの
   const [filter, setFilter] = useState<'all' | 'todo' | 'done' | 'joinable'>('todo');
-  // 難易度・所要時間の絞り込み（null=すべて。再タップで解除のトグル）
-  const [diffFilter, setDiffFilter] = useState<DiffSel>(null);
-  const [timeFilter, setTimeFilter] = useState<TimeSel>(null);
-  const hasDetailFilter = diffFilter != null || timeFilter != null;
-  const clearDetailFilters = () => { setDiffFilter(null); setTimeFilter(null); };
   const [confirmCh, setConfirmCh] = useState<Challenge | null>(null); // 参加確認モーダル
   const [confirmQuit, setConfirmQuit] = useState(false); // 終了の二段階確認
   const openConfirm = (ch: Challenge | null) => { setConfirmQuit(false); setConfirmCh(ch); };
   // 最初は5個。「もっと見る」で +5
   const [visibleCount, setVisibleCount] = useState(5);
-  useEffect(() => { setVisibleCount(5); }, [filter, diffFilter, timeFilter]);
+  useEffect(() => { setVisibleCount(5); }, [filter]);
 
   // 刻限チップ用の現在時刻（カードごとではなくタブで1本だけ更新）
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -69,9 +64,6 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
   // フィルタ → 場ごとにクラスタリング（場は近い順、場内は距離順）。移動なしクエストも候補に含める。
   const scored = [...db.getAllQuests(), AVATAR_QUEST]
     .filter((ch) => {
-      // 難易度・所要時間の絞り込み（移動不要クエストは難易度／時間の概念が薄いので絞り込みからは除外しない）
-      if (!matchesDifficulty(ch.difficulty, diffFilter)) return false;
-      if (!matchesEstTime(ch.estMinutes, timeFilter)) return false;
       const completed = progress.completed.includes(ch.id);
       const ok = userLevel >= ch.minLevel;
       if (filter === 'todo') return !completed;
@@ -141,14 +133,12 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
   const clearEntering = (id: string) => setRenderItems((cur) => cur.map((it) => (it.ch.id === id ? { ...it, entering: false } : it)));
 
   // クエストが表示されていないとき（'done'フィルタ除く）、場の生成をリクエスト。
-  // ただし難易度・時間で絞り込んだ結果の0件では生成APIを叩かない（絞り込みすぎ対策）。
   useEffect(() => {
     if (!mounted) return;
     if (filter === 'done') return;
-    if (hasDetailFilter) return;
     if (realQuestCount === 0) onNeedSpots?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, realQuestCount, filter, hasDetailFilter]);
+  }, [mounted, realQuestCount, filter]);
 
   return (
     <div className="flex flex-col h-full overflow-y-auto bg-[#f5f7fa]">
@@ -199,42 +189,6 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
           </div>
         )}
 
-        {/* 難易度・所要時間チップ（初回ガイド中は出さない。再タップで解除） */}
-        {!guided && (
-          <div className="flex items-center gap-1.5 mb-3 overflow-x-auto scrollbar-none">
-            {([1, 2, 3] as const).map((d) => {
-              const dl = difficultyLabel(d);
-              const on = diffFilter === d;
-              return (
-                <button
-                  key={`diff-${d}`}
-                  onClick={() => setDiffFilter(on ? null : d)}
-                  className={`flex-shrink-0 text-[12px] font-black px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
-                    on ? 'bg-shrine-red text-white border-shrine-red' : 'bg-white text-gray-500 border-gray-200 hover:border-shrine-red/40'
-                  }`}
-                >
-                  <span className="mr-0.5">{dl.stars}</span>{dl.label}
-                </button>
-              );
-            })}
-            <span className="flex-shrink-0 w-px h-4 bg-gray-200 mx-0.5" />
-            {TIME_FILTERS.map((tf) => {
-              const on = timeFilter === tf.key;
-              return (
-                <button
-                  key={`time-${tf.key}`}
-                  onClick={() => setTimeFilter(on ? null : tf.key)}
-                  className={`flex-shrink-0 text-[12px] font-black px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
-                    on ? 'bg-shrine-red text-white border-shrine-red' : 'bg-white text-gray-500 border-gray-200 hover:border-shrine-red/40'
-                  }`}
-                >
-                  {tf.label}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
         {!mounted ? (
           <div className="text-center py-10 text-xs text-gray-400">読み込み中…</div>
         ) : nearChallenges.length === 0 ? (
@@ -247,16 +201,6 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
               </>
             ) : filter === 'done' ? (
               <p className="text-sm text-gray-400">まだ達成したクエストがありません。</p>
-            ) : hasDetailFilter ? (
-              <>
-                <p className="text-sm text-gray-400">条件に合うクエストがありません。</p>
-                <button
-                  onClick={clearDetailFilters}
-                  className="mt-3 inline-flex items-center gap-1 bg-gray-100 text-gray-600 text-sm font-black px-5 py-2.5 rounded-full hover:bg-gray-200 cursor-pointer"
-                >
-                  条件をクリア
-                </button>
-              </>
             ) : (
               <>
                 <p className="text-sm text-gray-400">近くにクエストが見つかりません。</p>
@@ -400,8 +344,8 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
               もっと見る（残り{nearChallenges.length - visibleCount}件）
             </button>
           )}
-          {/* 全件表示しきったら、控えめに「他のクエストを探す」を置く（達成タブ・絞り込み中は出さない） */}
-          {!guided && filter !== 'done' && !hasDetailFilter && visibleCount >= nearChallenges.length && (
+          {/* 全件表示しきったら、控えめに「他のクエストを探す」を置く（達成タブでは出さない） */}
+          {!guided && filter !== 'done' && visibleCount >= nearChallenges.length && (
             <button
               onClick={() => onExploreMore?.()}
               disabled={isGeneratingQuests}

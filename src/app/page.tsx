@@ -8,6 +8,7 @@ import { addVisitRecord, hasRecordForSpotOnDate } from '../lib/visit-records';
 import { pullSnapshot, setSyncUser } from '../lib/cloud-sync';
 import { isAuthConfigured, getSupabaseBrowser, signInWithProvider, signOutAuth, profileFromUser, type AuthProfile } from '../lib/supabase-browser';
 import { distanceKm, destinationPoint } from '../lib/geo';
+import { vibrateConversationStart } from '../lib/haptics';
 import HomeTab from '../components/HomeTab';
 import MapTab, { type QuestPhoto } from '../components/MapTab';
 import RecordTab from '../components/RecordTab';
@@ -773,6 +774,8 @@ export default function HomePage() {
                   db.setActiveChallenge(cid);
                   setActiveChallengeId(cid);
                   setActiveTab('quest');
+                  // 道中の精霊との語らいが始まる合図に触覚フィードバック
+                  vibrateConversationStart();
                 }}
                 onEndChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
                 onChanged={refreshDatabaseStates}
@@ -1183,6 +1186,8 @@ export default function HomePage() {
               setActiveChallengeId(cid);
               window.history.back();
               setActiveTab('quest');
+              // 道中の精霊との語らいが始まる合図に触覚フィードバック
+              vibrateConversationStart();
             }}
             onMessageSent={() => {
               if (!hasChatted) {

@@ -11,6 +11,7 @@ import { getAddress } from '../lib/address';
 import { shareToSns } from '../lib/share';
 import { grantGoShuin, hasGoShuin, getGoShuinList } from '../lib/goshuin';
 import { playChime } from '../lib/sound';
+import { vibrateConversationStart } from '../lib/haptics';
 import { getLevelInfo } from '../data/levels';
 import YaorozuSpirit from './YaorozuSpirit';
 import GoshuinCelebrate from './GoshuinCelebrate';
@@ -567,6 +568,8 @@ function SpotDetailBody({
       setMessages([
         { id: `greet-${Date.now()}`, sender: 'agent', text: greet, createdAt: new Date().toISOString() },
       ]);
+      // 会話が始まった合図に触覚フィードバック（iOS/Android、Web は振動）
+      vibrateConversationStart();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, messages.length, agent.name, spot.name, currentUser.displayName, nearbyChallenge]);
