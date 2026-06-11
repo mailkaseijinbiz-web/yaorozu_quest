@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, Clock, Share2, X, Stamp, NotebookPen } from 'lucide-react';
+import { UserCircle2, Trophy, MapPin, Check, Flag, Pencil, Clock, Share2, X, Stamp, NotebookPen, Mail } from 'lucide-react';
 import { db, Spot, Agent, User as UserType, UserContribution, Activity, SPOT_TTL_MS } from '../lib/db';
 import { getGoShuinList, Goshuin } from '../lib/goshuin';
 import { pullSnapshot, setSyncUser } from '../lib/cloud-sync';
@@ -12,6 +12,8 @@ import MapTab from '../components/MapTab';
 import RecordTab from '../components/RecordTab';
 import SpotDetail from '../components/SpotDetail';
 import GoshuinBookModal from '../components/GoshuinBookModal';
+import LetterInbox from '../components/LetterInbox';
+import { getLetters, markLetterRead, type Letter } from '../lib/letters';
 import DebugPanel from '../components/DebugPanel';
 import OnboardingFlow from '../components/OnboardingFlow';
 import AltruismDividendCelebrate from '../components/AltruismDividendCelebrate';
@@ -129,6 +131,12 @@ export default function HomePage() {
   const [goShuinList, setGoShuinList] = useState<Goshuin[]>([]);
   // 御朱印帳 modal（授与式の「御朱印帳を見る」から開く）
   const [goshuinBookOpen, setGoshuinBookOpen] = useState(false);
+  // 神様からの手紙（週次 cron が綴る・受信箱で読み返す）
+  const [letters, setLetters] = useState<Letter[]>([]);
+  // 手紙プッシュ（url: '/?letters=1'）から起動したら受信箱を最初から開いておく。
+  const [lettersOpen, setLettersOpen] = useState(
+    () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('letters') === '1',
+  );
   // 達成クエストの振り返り modal
   const [reviewQuest, setReviewQuest] = useState<Challenge | null>(null);
 
@@ -192,7 +200,7 @@ export default function HomePage() {
   const generateSpotAt = useCallback(async (
     lat: number,
     lng: number,
-    opts: { selectActive?: boolean; chainQuests?: boolean } = {},
+    opts: { selectActive?: boolean; chainQuests?: boolean; notify?: boolean } = {},
   ) => {
     // 既存スポットを再利用するときの共通処理：アクティブ選択し、クエストが無ければ生成する
     // （chainQuests を取りこぼさない＝場はあるがクエスト0、を防ぐ）。
@@ -212,7 +220,7 @@ export default function HomePage() {
       const res = await fetch('/api/generate-spot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lat, lng }),
+        body: JSON.stringify({ lat, lng, notify: !!opts.notify }),
       });
       if (!res.ok) return;
       const { spot: rawSpot, agent, extras = [] } = await res.json() as {
@@ -247,6 +255,8 @@ export default function HomePage() {
       db.trackApiCall('ai_generate');
       db.logActivity({ type: 'spot_generate', userId: 'system', source: 'system', spotId: spot.id, detail: spot.name });
       db.logActivity({ type: 'god_generate', userId: 'system', source: 'system', spotId: spot.id, detail: agent.name || spot.godName });
+      // 近接の主生成のみ、アプリ内に「新しい神様が現れた」と知らせる（#170）。
+      if (opts.notify) setPushNotice(`${spot.godEmoji || '⛩️'} 近くに新しい神様が現れました: ${spot.name}`);
       refreshDatabaseStates();
       // アクティブスポットが未設定なら生成した場を選択（地図がその位置にパンされる）
       if (opts.selectActive && !activeSpotRef.current) {
@@ -266,7 +276,7 @@ export default function HomePage() {
     if (!force && prev && now - prev.at < 5 * 60_000 && distanceKm(lat, lng, prev.lat, prev.lng) < 0.5) return;
     lastGenRef.current = { lat, lng, at: now };
     // 場を生成後、クエストが無い or force 時はこの場のクエストも生成する
-    await generateSpotAt(lat, lng, { selectActive: true, chainQuests: force || db.getAllQuests().length === 0 });
+    await generateSpotAt(lat, lng, { selectActive: true, chainQuests: force || db.getAllQuests().length === 0, notify: true });
   }, [generateSpotAt]);
 
   /**
@@ -283,7 +293,8 @@ export default function HomePage() {
     // 直列実行：Overpass を同一 IP から同時多発で叩いて「busy/429」を自分で誘発しないため。
     for (let i = 0; i < VARIED_SPOT_DISTANCES_KM.length; i++) {
       const { lat, lng } = destinationPoint(centerLat, centerLng, VARIED_SPOT_DISTANCES_KM[i], Math.random() * 360);
-      await generateSpotAt(lat, lng, { selectActive: i === 0, chainQuests: true });
+      // 最寄りの1件目のみ通知（遠距離バッチは静かに生成）
+      await generateSpotAt(lat, lng, { selectActive: i === 0, chainQuests: true, notify: i === 0 });
     }
   }, [generateSpotAt]);
 
@@ -332,6 +343,7 @@ export default function HomePage() {
       setHasChatted(localStorage.getItem('yaorozu_quest_chatted') === 'true');
       setHasTakenPhoto(localStorage.getItem('yaorozu_quest_photo') === 'true');
       setGoShuinList(getGoShuinList('user-self'));
+      setLetters(getLetters());
     }
 
     // 初回の場・クエスト生成はここでは行わない。
@@ -520,6 +532,7 @@ export default function HomePage() {
     const stats = db.getUserStats('user-self');
     setUserStats(stats);
     setGoShuinList(getGoShuinList('user-self')); // 撮影御朱印など追加分をマイページ・御朱印帳へ反映
+    setLetters(getLetters()); // クラウドから届いた週次の手紙を反映
     if (activeSpot) {
       const refreshedSpot = db.getSpot(activeSpot.id);
       if (refreshedSpot) setActiveSpot(refreshedSpot);
@@ -542,6 +555,7 @@ export default function HomePage() {
     const t = setTimeout(() => setPushNotice(null), 4000);
     return () => clearTimeout(t);
   }, [pushNotice]);
+
 
   // 達成クエストを写真とともに振り返りシェア（Web Share API、非対応時はクリップボード）
   const shareQuest = async (title: string, badgeName: string, badgeIcon: string, photos: string[]) => {
@@ -1172,6 +1186,23 @@ export default function HomePage() {
 
         </div>
 
+        {/* 神様からの手紙 受信箱を開くフローティングボタン（手紙があるときだけ表示） */}
+        {needsOnboard === false && letters.length > 0 && (
+          <button
+            onClick={() => setLettersOpen(true)}
+            aria-label="神様からの手紙"
+            className="absolute z-[3300] w-11 h-11 rounded-full bg-white/95 shadow-lg border border-amber-100 flex items-center justify-center text-amber-700 cursor-pointer hover:scale-105 transition-transform"
+            style={{ top: 'calc(env(safe-area-inset-top, 0px) + 12px)', right: '12px' }}
+          >
+            <Mail className="w-5 h-5" />
+            {letters.some((l) => !l.read) && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-shrine-red text-white text-[10px] font-black flex items-center justify-center">
+                {letters.filter((l) => !l.read).length}
+              </span>
+            )}
+          </button>
+        )}
+
         {/* 通知購読の結果トースト（参加フローを妨げない軽量ピル） */}
         {pushNotice && (
           <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[3500] max-w-[85%] celebrate-pop">
@@ -1284,6 +1315,15 @@ export default function HomePage() {
         {/* ── 御朱印帳 modal（授与式の「御朱印帳を見る」から開く） ── */}
         {goshuinBookOpen && (
           <GoshuinBookModal goShuinList={goShuinList} onClose={() => setGoshuinBookOpen(false)} />
+        )}
+
+        {/* ── 神様からの手紙 受信箱（週次） ── */}
+        {lettersOpen && (
+          <LetterInbox
+            letters={letters}
+            onClose={() => setLettersOpen(false)}
+            onRead={(id) => { markLetterRead(id); setLetters(getLetters()); }}
+          />
         )}
 
         {/* ── 達成クエストの振り返り modal（写真・物語を振り返り、#YAOROZUQUEST でシェア） ── */}

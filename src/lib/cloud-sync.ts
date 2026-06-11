@@ -16,6 +16,7 @@ const SYNC_KEYS = [
   'yaorozu_visit_records_user-self', // 参拝記録（RecordTab）
   'yaorozu_daily_v1',      // 参拝ストリーク・カムバック（日付キーマップ）
   'yaorozu_god_tasks_v1',  // 場の御用の本日達成（日付キーマップ）
+  'yaorozu_letters',       // 神様からの手紙（週次・cron が追記／既読は client が同期）
   // 管理者が作成するコンテンツ
   'yaorozu_spots_v4',
   'yaorozu_agents_v2',

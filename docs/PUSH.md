@@ -35,3 +35,24 @@ node -e "console.log(require('web-push').generateVAPIDKeys())"
 ## 注意
 - iOS は **ホーム画面に追加した PWA（standalone）** かつ iOS 16.4+ で Web Push 対応。
 - 新クエストのサーバ自動通知を行う場合は、サーバ側の生成処理や Cron から `/api/push/send` を呼び出してください。
+
+## 自動プッシュ（リテンション）
+ユーザーが操作しなくても届く、サーバー駆動の通知が3種ある。いずれもプッシュ鍵
+（VAPID/APNs）未設定なら静かにスキップ（best-effort）。
+
+| 種別 | きっかけ | 実装 |
+|---|---|---|
+| 新しい神様が現れた | 近接の主スポット生成時 | `POST /api/generate-spot`（body `notify:true` のときのみ送信）＋アプリ内トースト |
+| 神様からの手紙（週次） | Cron（既定: 月曜 08:00 JST） | `GET /api/cron/weekly-letter` → 先週の巡礼を要約・AI で物語化し各スナップショットへ追記 → user-self へプッシュ |
+| ストリークリマインダー（日次） | Cron（既定: 19:00 JST） | `GET /api/cron/streak-reminder` → 連続参拝中かつ本日未参拝なら1通だけプッシュ |
+
+### Cron の構成
+- スケジュールは `vercel.json` の `crons`（UTC 表記）。
+- 認可は `CRON_SECRET`。**未設定だと cron ルートは 503 で no-op**（安全側）。Vercel は
+  `CRON_SECRET` を登録すると実行時に `Authorization: Bearer <CRON_SECRET>` を自動付与する。
+  手動・外部 cron からは `?key=<CRON_SECRET>` でも叩ける。
+- 手紙は同期キー `yaorozu_letters` としてスナップショットへ追記され、クライアントは起動時の
+  `pullSnapshot` で受け取り、受信箱（`LetterInbox`）で読み返す。プッシュ `url:'/?letters=1'`
+  から起動すると受信箱が自動で開く。
+- プッシュは現状ブロードキャスト（購読↔userId 紐付けが無い）。そのためストリーク／手紙の
+  プッシュはデモの基準ユーザー `user-self` を起点に1回だけ送る。個別配信は将来の課題。
