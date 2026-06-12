@@ -21,12 +21,18 @@ export default function VintageCameraOverlay({ vintageImageUrl, onCapture, onCan
 
   useEffect(() => {
     let activeStream: MediaStream | null = null;
+    let cancelled = false; // getUserMedia 解決前のアンマウントを検知（カメラ点きっぱなしを防ぐ）
 
     const startCamera = async () => {
       try {
         const s = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment' }
         });
+        if (cancelled) {
+          // 解決前に外れていたら、取得したストリームは即停止して破棄する
+          s.getTracks().forEach(t => t.stop());
+          return;
+        }
         activeStream = s;
         setStream(s);
         if (videoRef.current) {
@@ -34,13 +40,14 @@ export default function VintageCameraOverlay({ vintageImageUrl, onCapture, onCan
         }
       } catch (err) {
         console.error(err);
-        setErrorMsg('カメラの起動に失敗しました。権限を確認してください。');
+        if (!cancelled) setErrorMsg('カメラの起動に失敗しました。権限を確認してください。');
       }
     };
 
     startCamera();
 
     return () => {
+      cancelled = true;
       if (activeStream) {
         activeStream.getTracks().forEach(t => t.stop());
       }

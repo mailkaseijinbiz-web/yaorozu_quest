@@ -17,6 +17,7 @@ export default function KataribePlayer({ ugcList, onClose }: KataribePlayerProps
   // 現在の読み上げ（Gemini TTS → speechSynthesis フォールバック）の制御ハンドル
   const controllerRef = useRef<SpeechController | null>(null);
   const stoppedRef = useRef(false);
+  const startedRef = useRef(false); // 再生開始は一度きり（ugcList 参照の差し替えで先頭へ戻さない）
   // 再帰呼び出し用に最新の playNext を保持（自己参照を避ける）
   const playNextRef = useRef<(index: number) => void>(() => {});
 
@@ -59,11 +60,14 @@ export default function KataribePlayer({ ugcList, onClose }: KataribePlayerProps
   }, [ugcList]);
   playNextRef.current = playNext;
 
-  // 初回マウント時に少し遅延させてから再生開始（ユーザーアクション後なので自動再生ポリシーを回避しやすい）
+  // 初回マウント時に一度だけ再生開始（ユーザーアクション後なので自動再生ポリシーを回避しやすい）。
+  // ugcList の参照が差し替わっても startedRef で先頭からの再生し直し・setTimeout の多重化を防ぐ。
   useEffect(() => {
+    if (startedRef.current) return;
     if (ugcList.length > 0 && !isFinished) {
       // モバイルブラウザによっては最初のタップイベント内での同期的な呼び出しが必要な場合があるため
       // 呼び出し元でこのコンポーネントをマウントする際に onClick イベントの延長線上になるようにする
+      startedRef.current = true;
       playNext(0);
     }
   }, [ugcList, playNext, isFinished]);
