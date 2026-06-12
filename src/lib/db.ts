@@ -6,6 +6,7 @@ import { distanceKm } from './geo';
 import type { Quest } from '../data/tasks';
 import { CHALLENGES, buildGoshuinQuest } from '../data/challenges';
 import { hasGoShuin } from './goshuin';
+import { getLevelInfo } from '../data/levels';
 
 export interface User {
   id: string;
@@ -1868,26 +1869,13 @@ class MockDatabase {
     if (index === -1) return;
 
     users[index].totalToku = Math.max(0, users[index].totalToku + amount);
-    
-    // Title mapping
-    // 0-99: 見習い巡礼者
-    // 100-299: 巡礼ガイド
-    // 300-499: 徳高き修行僧
-    // 500+: 大創世神
-    const toku = users[index].totalToku;
-    if (toku >= 500) {
-      users[index].currentTitle = '大創世神';
-      users[index].avatarFrameColor = '#FFD700'; // Gold glow
-    } else if (toku >= 300) {
-      users[index].currentTitle = '徳高き修行僧';
-      users[index].avatarFrameColor = '#A020F0'; // Purple glow
-    } else if (toku >= 100) {
-      users[index].currentTitle = '巡礼ガイド';
-      users[index].avatarFrameColor = '#00BFFF'; // Blue glow
-    } else {
-      users[index].currentTitle = '見習い巡礼者';
-      users[index].avatarFrameColor = undefined;
-    }
+
+    // 称号・フレーム色は levels.ts を唯一の正本として算出する。
+    // （以前はここに別マッピングが焼き込まれており、'大創世神'(500頭打ち・色違い)など
+    //  getLevelInfo と食い違っていた。書込経路で表示称号がブレるのを防ぐため一本化。）
+    const { current } = getLevelInfo(users[index].totalToku);
+    users[index].currentTitle = current.title;
+    users[index].avatarFrameColor = current.frameColor;
 
     this.save(KEYS.USERS, users);
   }
