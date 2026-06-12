@@ -16,6 +16,11 @@ export async function POST(request: Request) {
   const title = (body.title || '八百万クエスト').slice(0, 80);
   const text = (body.body || '新しいクエストが現れました。').slice(0, 200);
   const url = body.url || '/';
-  const result = await sendToAll({ title, body: text, url });
-  return NextResponse.json({ ok: true, ...result });
+  try {
+    const result = await sendToAll({ title, body: text, url });
+    return NextResponse.json({ ok: true, ...result });
+  } catch (e) {
+    // 想定外の例外でも 500 のまま返さず、原因を JSON で返して管理画面に表示できるようにする。
+    return NextResponse.json({ ok: false, error: (e as Error)?.message || 'send failed' }, { status: 500 });
+  }
 }

@@ -16,11 +16,21 @@ function configure(): boolean {
   if (configured) return true;
   const pub = process.env.VAPID_PUBLIC_KEY;
   const priv = process.env.VAPID_PRIVATE_KEY;
-  const subject = process.env.VAPID_SUBJECT || 'mailto:admin@example.com';
   if (!pub || !priv) return false;
-  webpush.setVapidDetails(subject, pub, priv);
-  configured = true;
-  return true;
+  // VAPID subject は mailto: か https(s): URL でなければ web-push が例外を投げる。
+  // 不正・素のメールアドレス・未設定でも 500 にせず安全な値へ正規化する。
+  let subject = (process.env.VAPID_SUBJECT || '').trim();
+  if (!/^mailto:/i.test(subject) && !/^https?:\/\//i.test(subject)) {
+    subject = subject.includes('@') ? `mailto:${subject}` : 'mailto:admin@example.com';
+  }
+  try {
+    webpush.setVapidDetails(subject, pub, priv);
+    configured = true;
+    return true;
+  } catch {
+    // 鍵や subject が不正でも送信ルートを 500 にせず、未設定扱い（503）で安全側に倒す。
+    return false;
+  }
 }
 
 /** VAPID 鍵が設定されているか。 */
