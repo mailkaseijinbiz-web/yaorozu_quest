@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark, Crown, NotebookPen, CalendarDays, Volume2, Stamp, Pencil } from 'lucide-react';
+import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark, Crown, NotebookPen, CalendarDays, Volume2, Stamp, Pencil, Navigation, Check } from 'lucide-react';
 import { Spot, Agent, User, db, isVerifiedSpot, isQuotaError, type UgcVisibility } from '../lib/db';
 import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
@@ -756,6 +756,31 @@ function SpotDetailBody({
             </button>
           )}
         </div>
+      </div>
+
+      {/* ── 行動ボタン（ここに行く＝地図アプリで経路案内／行った＝参拝記録を書く） ── */}
+      <div className="flex gap-2 px-4 py-2.5 bg-white border-b border-black/5 flex-shrink-0">
+        <button
+          onClick={() => {
+            // 端末の地図アプリ（iOS は Apple マップ／他は Google マップ）へ目的地つきで遷移。
+            const dest = `${spot.latitude},${spot.longitude}`;
+            const label = encodeURIComponent(spot.name);
+            const isIOS = typeof navigator !== 'undefined' && /iP(hone|ad|od)/.test(navigator.userAgent);
+            const url = isIOS
+              ? `https://maps.apple.com/?daddr=${dest}&q=${label}`
+              : `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+            window.open(url, '_blank', 'noopener,noreferrer');
+          }}
+          className="flex-1 flex items-center justify-center gap-1.5 text-[13px] font-black text-white bg-shrine-red py-2.5 rounded-full hover:opacity-90 active:scale-[0.97] transition-all cursor-pointer"
+        >
+          <Navigation className="w-4 h-4" />ここに行く
+        </button>
+        <button
+          onClick={() => { setTab('records'); setRecFormOpen(true); }}
+          className="flex-1 flex items-center justify-center gap-1.5 text-[13px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 py-2.5 rounded-full hover:bg-emerald-100 active:scale-[0.97] transition-all cursor-pointer"
+        >
+          <Check className="w-4 h-4" />行った
+        </button>
       </div>
 
       {/* ── タブ切替 ── */}
