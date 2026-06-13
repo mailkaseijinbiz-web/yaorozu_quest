@@ -5,7 +5,7 @@ import { UserCircle2, MapPin, Check, Flag, Pencil, Share2, X, Stamp, NotebookPen
 import { db, Spot, Agent, User as UserType, UserContribution, SPOT_TTL_MS } from '../lib/db';
 import { getGoShuinList, Goshuin } from '../lib/goshuin';
 import { addVisitRecord, hasRecordForSpotOnDate } from '../lib/visit-records';
-import { pullSnapshot, setSyncUser } from '../lib/cloud-sync';
+import { pullSnapshot, setSyncUser, flushPush } from '../lib/cloud-sync';
 import { isAuthConfigured, getSupabaseBrowser, signInWithProvider, signOutAuth, profileFromUser, type AuthProfile } from '../lib/supabase-browser';
 import { distanceKm, destinationPoint } from '../lib/geo';
 import { vibrateConversationStart } from '../lib/haptics';
@@ -578,9 +578,11 @@ export default function HomePage() {
     if (fresh.length) setEarnedBadge(fresh[0]);
   };
 
-  // 下に引っぱって更新：クラウドの最新スナップショットを取り込み、ローカル状態を再描画する
+  // 下に引っぱって更新：クラウドの最新スナップショットを取り込み、ローカル状態を再描画する。
+  // 先に保留中の push を確定させ、直前の削除などがクラウド未反映のまま pull で
+  // 巻き戻る（御朱印の復活など）のを防ぐ。
   const handlePullRefresh = async () => {
-    try { await pullSnapshot(); } catch { /* ネットワークエラーは無視 */ }
+    try { await flushPush(); await pullSnapshot(); } catch { /* ネットワークエラーは無視 */ }
     refreshDatabaseStates();
   };
 
