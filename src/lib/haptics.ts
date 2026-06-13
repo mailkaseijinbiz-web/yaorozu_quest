@@ -35,3 +35,19 @@ export async function vibrate(webPattern: number | number[] = 30): Promise<void>
 export function vibrateConversationStart(): void {
   void vibrate([40, 60, 40]);
 }
+
+/** そっと気づかせる単発の軽い触覚（バナー出現・遠ざかり確認など）。発火は投げっぱなしでよい。 */
+export function vibrateGentle(): void {
+  void (async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const { Haptics, ImpactStyle } = await import('@capacitor/haptics');
+        await Haptics.impact({ style: ImpactStyle.Light });
+        return;
+      } catch {
+        // プラグイン未同期などで失敗したら Web フォールバックを試みる
+      }
+    }
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate(20);
+  })();
+}

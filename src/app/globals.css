@@ -183,6 +183,14 @@
 .quest-overlay-in { animation: quest-overlay-in 0.5s cubic-bezier(0.2, 0.9, 0.2, 1) 0.08s both; }
 @keyframes quest-overlay-in { from { transform: translateY(130%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
+/* 確認ダイアログの暗幕：瞬時に黒くせず、やさしくフェードインさせる */
+.modal-backdrop-in { animation: modal-backdrop-in 0.22s ease-out both; }
+@keyframes modal-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* 下部から立ち上がる提案バナー（より近い新しい場の案内など） */
+.banner-rise { animation: banner-rise 0.42s cubic-bezier(0.2, 0.9, 0.2, 1) both; }
+@keyframes banner-rise { from { transform: translateY(28px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
 /* スポット名（フキダシ外の縁取り文字・Google Map ラベル風） */
 .map-spot-name {
   margin-top: 2px;

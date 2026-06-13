@@ -7,6 +7,7 @@ import { Spot, User, db } from '../lib/db';
 import { uploadImage, compressImage } from '../lib/upload';
 import { hasGoShuin, grantGoShuin } from '../lib/goshuin';
 import { playChime } from '../lib/sound';
+import { vibrateGentle } from '../lib/haptics';
 import GoshuinCelebrate from './GoshuinCelebrate';
 import { distanceKm, bearingDeg } from '../lib/geo';
 import { ttlInfo } from '../lib/quest-ui';
@@ -697,6 +698,9 @@ export default function MapTab({
     if (!a.prompted && a.streak >= 3 && nextDist - a.base >= 0.15 && nextDist > 0.15) {
       a.prompted = true;
       setAwayConfirm(true);
+      // 歩行中で画面を見ていなくても気づけるよう、やさしい音と触覚で知らせる
+      playChime();
+      vibrateGentle();
     }
   }, [nextDist, chAllDone]);
 
@@ -720,8 +724,18 @@ export default function MapTab({
     if (best) {
       seen.add(best.spot.id); // 一度提案したら再提案しない
       setNewSpotPrompt({ spot: best.spot, questId: best.questId });
+      // そっと気づかせる（やさしい音＋軽い触覚）。見ていなければ自動で引っ込む。
+      playChime();
+      vibrateGentle();
     }
   }, [spots, nextDist, activeChallenge?.id, newSpotPrompt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 提案バナーは地図を塞ぎ続けないよう、操作が無ければ約12秒で自動的に引っ込める
+  useEffect(() => {
+    if (!newSpotPrompt) return;
+    const id = setTimeout(() => setNewSpotPrompt(null), 12_000);
+    return () => clearTimeout(id);
+  }, [newSpotPrompt]);
 
   // ── 道案内の精霊との会話（これまでの語りログ＋参加分）──
   const chatMessages: GuideMsg[] = activeChallenge
@@ -1582,7 +1596,7 @@ export default function MapTab({
       {/* より近い新しい場が現れたら、クエスト変更を尋ねる（タップで切替） */}
       {newSpotPrompt && activeChallenge && (
         <div className="absolute left-0 right-0 bottom-28 z-[1400] px-4 flex justify-center pointer-events-none">
-          <div className="w-full max-w-sm bg-white rounded-2xl shadow-xl border border-[#2563eb]/20 px-4 py-3 pointer-events-auto celebrate-pop">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-xl border border-[#2563eb]/20 px-4 py-3 pointer-events-auto banner-rise">
             <div className="flex items-start gap-2">
               <span className="text-2xl flex-shrink-0">{newSpotPrompt.spot.godEmoji || '✨'}</span>
               <div className="flex-1 min-w-0">
@@ -1611,7 +1625,7 @@ export default function MapTab({
 
       {/* 目的地から遠ざかり続けたとき：クエストを中断するか確認 */}
       {awayConfirm && activeChallenge && (
-        <div className="absolute inset-0 z-[2500] bg-black/50 flex items-center justify-center p-6" onClick={() => { awayRef.current.prompted = false; awayRef.current.streak = 0; awayRef.current.base = awayRef.current.last ?? 0; setAwayConfirm(false); }}>
+        <div className="absolute inset-0 z-[2500] bg-black/50 flex items-center justify-center p-6 modal-backdrop-in" onClick={() => { awayRef.current.prompted = false; awayRef.current.streak = 0; awayRef.current.base = awayRef.current.last ?? 0; setAwayConfirm(false); }}>
           <div className="w-full max-w-[320px] bg-white rounded-3xl p-5 text-left celebrate-pop" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-black text-gray-900 mb-2">目的地から遠ざかっています</h3>
             <p className="text-[13px] text-gray-600 leading-relaxed mb-1">
@@ -1645,7 +1659,7 @@ export default function MapTab({
         // 未参加に戻る生成クエストの刻限（達成済みステップが無いと TTL 免除を失う）
         const ttl = doneN === 0 && !isCompleted ? ttlInfo(activeChallenge.createdAt, Date.now()) : null;
         return (
-          <div className="absolute inset-0 z-[2500] bg-black/50 flex items-center justify-center p-6" onClick={() => setQuitConfirm(false)}>
+          <div className="absolute inset-0 z-[2500] bg-black/50 flex items-center justify-center p-6 modal-backdrop-in" onClick={() => setQuitConfirm(false)}>
             <div className="w-full max-w-[320px] bg-white rounded-3xl p-5 text-left celebrate-pop" onClick={(e) => e.stopPropagation()}>
               <h3 className="text-base font-black text-gray-900 mb-2">チャレンジを中断する？</h3>
               <p className="text-[13px] text-gray-600 leading-relaxed mb-1">
