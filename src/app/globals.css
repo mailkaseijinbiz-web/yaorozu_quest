@@ -15,6 +15,7 @@
 
   html {
     height: 100%;
+    scroll-behavior: smooth;
   }
 
   body {
@@ -182,6 +183,73 @@
 @keyframes quest-header-in { from { transform: translateY(-110%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 .quest-overlay-in { animation: quest-overlay-in 0.5s cubic-bezier(0.2, 0.9, 0.2, 1) 0.08s both; }
 @keyframes quest-overlay-in { from { transform: translateY(130%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* 確認ダイアログの暗幕：瞬時に黒くせず、やさしくフェードインさせる */
+.modal-backdrop-in { animation: modal-backdrop-in 0.22s ease-out both; }
+@keyframes modal-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* 下部から立ち上がる提案バナー（より近い新しい場の案内など） */
+.banner-rise { animation: banner-rise 0.42s cubic-bezier(0.2, 0.9, 0.2, 1) both; }
+@keyframes banner-rise { from { transform: translateY(28px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* トースト：出現でふわっと、寿命の終わりにそっと消える（瞬時の消滅を避ける）。
+   尺は --toast-life（既定4s）で指定。中央寄せの translateX を奪わないよう、
+   位置決めは外側の要素に任せ、これは中身のピルにだけ当てる。 */
+.toast-life { animation: toast-life var(--toast-life, 4s) ease-in-out both; }
+@keyframes toast-life {
+  0%   { opacity: 0; transform: translateY(8px); }
+  6%   { opacity: 1; transform: translateY(0); }
+  90%  { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-4px); }
+}
+
+/* ── 登場アニメーション（tailwindcss-animate 互換の最小実装）──
+   このリポジトリは Tailwind v4 でアニメプラグイン未導入のため、コード全体で使われている
+   animate-in / fade-in / slide-in-from-bottom-4 / zoom-in / duration-* が無効（瞬時表示）
+   になっていた。素の CSS で同等のやさしい登場を効かせ、シート・モーダル・各演出を滑らかにする。 */
+@keyframes enter {
+  from {
+    opacity: var(--tw-enter-opacity, 1);
+    transform: translate3d(var(--tw-enter-translate-x, 0), var(--tw-enter-translate-y, 0), 0)
+      scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), 1)
+      rotate(var(--tw-enter-rotate, 0));
+  }
+}
+.animate-in {
+  animation-name: enter;
+  animation-duration: 0.28s;
+  animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+  animation-fill-mode: both;
+  /* 単体でもやさしくフェード＋わずかに浮き上がる既定。修飾クラスで上書き可。 */
+  --tw-enter-opacity: 0;
+  --tw-enter-translate-y: 0.5rem;
+  --tw-enter-scale: initial;
+  --tw-enter-rotate: initial;
+  --tw-enter-translate-x: initial;
+}
+.fade-in { --tw-enter-opacity: 0; }
+.zoom-in { --tw-enter-scale: 0.95; }
+.slide-in-from-bottom-4 { --tw-enter-translate-y: 1rem; }
+/* animate-in と併用したときはアニメーションの尺として効かせる（素の Tailwind の
+   duration-* は transition 用なので別プロパティ＝衝突しない） */
+.duration-500 { animation-duration: 0.5s; }
+.duration-1000 { animation-duration: 1s; }
+
+/* 動きを抑える設定の利用者には、登場・移動系アニメをほぼ瞬時にして負担を減らす
+   （達成・バッジ等の意図的な祝祭演出は残し、画面遷移の大きな移動だけを和らげる）。 */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .animate-in,
+  .banner-rise,
+  .modal-backdrop-in,
+  .toast-life,
+  .quest-card-in,
+  .quest-card-out,
+  .quest-header-in,
+  .quest-overlay-in {
+    animation-duration: 0.01ms !important;
+  }
+}
 
 /* スポット名（フキダシ外の縁取り文字・Google Map ラベル風） */
 .map-spot-name {

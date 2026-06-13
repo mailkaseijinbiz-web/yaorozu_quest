@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark, Crown, NotebookPen, CalendarDays, Volume2, Stamp, Pencil } from 'lucide-react';
+import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera, Flag, Landmark, Crown, NotebookPen, CalendarDays, Volume2, Stamp, Pencil, Navigation, Check } from 'lucide-react';
 import { Spot, Agent, User, db, isVerifiedSpot, isQuotaError, type UgcVisibility } from '../lib/db';
 import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
@@ -13,6 +13,7 @@ import { grantGoShuin, hasGoShuin, getGoShuinList } from '../lib/goshuin';
 import { playChime } from '../lib/sound';
 import { vibrateConversationStart } from '../lib/haptics';
 import { getLevelInfo } from '../data/levels';
+import FadeImg from './FadeImg';
 import YaorozuSpirit from './YaorozuSpirit';
 import GoshuinCelebrate from './GoshuinCelebrate';
 import KataribePlayer from './KataribePlayer';
@@ -716,7 +717,7 @@ function SpotDetailBody({
       <div className="relative h-52 flex-shrink-0 bg-gray-200">
         {heroPhoto ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={heroPhoto} alt={spot.name} className="w-full h-full object-cover" />
+          <FadeImg src={heroPhoto} alt={spot.name} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-100 via-amber-50 to-amber-100">
             <span className="text-7xl opacity-80">{godEmoji}</span>
@@ -755,6 +756,31 @@ function SpotDetailBody({
             </button>
           )}
         </div>
+      </div>
+
+      {/* ── 行動ボタン（ここに行く＝地図アプリで経路案内／行った＝参拝記録を書く） ── */}
+      <div className="flex gap-2 px-4 py-2.5 bg-white border-b border-black/5 flex-shrink-0">
+        <button
+          onClick={() => {
+            // 端末の地図アプリ（iOS は Apple マップ／他は Google マップ）へ目的地つきで遷移。
+            const dest = `${spot.latitude},${spot.longitude}`;
+            const label = encodeURIComponent(spot.name);
+            const isIOS = typeof navigator !== 'undefined' && /iP(hone|ad|od)/.test(navigator.userAgent);
+            const url = isIOS
+              ? `https://maps.apple.com/?daddr=${dest}&q=${label}`
+              : `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+            window.open(url, '_blank', 'noopener,noreferrer');
+          }}
+          className="flex-1 flex items-center justify-center gap-1.5 text-[13px] font-black text-white bg-shrine-red py-2.5 rounded-full hover:opacity-90 active:scale-[0.97] transition-all cursor-pointer"
+        >
+          <Navigation className="w-4 h-4" />ここに行く
+        </button>
+        <button
+          onClick={() => { setTab('records'); setRecFormOpen(true); }}
+          className="flex-1 flex items-center justify-center gap-1.5 text-[13px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 py-2.5 rounded-full hover:bg-emerald-100 active:scale-[0.97] transition-all cursor-pointer"
+        >
+          <Check className="w-4 h-4" />行った
+        </button>
       </div>
 
       {/* ── タブ切替 ── */}
@@ -808,7 +834,7 @@ function SpotDetailBody({
                     {recPhotos.map((p, i) => (
                       <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-black/10">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={p} alt={`記録の写真${i + 1}`} className="w-full h-full object-cover" />
+                        <FadeImg src={p} alt={`記録の写真${i + 1}`} className="w-full h-full object-cover" />
                         <button
                           onClick={() => setRecPhotos((prev) => prev.filter((_, j) => j !== i))}
                           className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/50 text-white flex items-center justify-center cursor-pointer"
@@ -907,7 +933,7 @@ function SpotDetailBody({
                           <div className="grid grid-cols-3 gap-1.5 mt-2">
                             {pics.map((p, j) => (
                               // eslint-disable-next-line @next/next/no-img-element
-                              <img key={j} src={p} alt={`参拝の写真${j + 1}`} className="aspect-square w-full object-cover rounded-lg" />
+                              <FadeImg key={j} src={p} alt={`参拝の写真${j + 1}`} className="aspect-square w-full object-cover rounded-lg" />
                             ))}
                           </div>
                         );
@@ -1003,7 +1029,7 @@ function SpotDetailBody({
                 {photos.map((url) => (
                   <div key={url} className="relative aspect-square rounded-lg overflow-hidden border border-black/5">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={url} alt="投稿写真" className="w-full h-full object-cover" />
+                    <FadeImg src={url} alt="投稿写真" className="w-full h-full object-cover" />
                     <button
                       onClick={() => handleRejectPhoto(url)}
                       title="不適切な写真を却下"
@@ -1341,7 +1367,7 @@ export default function SpotDetail(props: SpotDetailProps) {
           <div className="relative h-52 flex-shrink-0 bg-gray-200">
             {heroPhoto ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={heroPhoto} alt={spot.name} className="w-full h-full object-cover" />
+              <FadeImg src={heroPhoto} alt={spot.name} className="w-full h-full object-cover" />
             ) : (
               <div className="w-full h-full bg-gray-100" />
             )}
