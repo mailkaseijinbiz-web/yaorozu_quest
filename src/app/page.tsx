@@ -872,6 +872,7 @@ export default function HomePage() {
                   currentUser={currentUser || FALLBACK_CURRENT_USER}
                   activeChallenge={activeChallengeId ? db.getQuest(activeChallengeId) ?? null : null}
                   onClearChallenge={() => { db.setActiveChallenge(null); setActiveChallengeId(null); }}
+                  onStartChallenge={(cid) => { db.setActiveChallenge(cid); setActiveChallengeId(cid); vibrateConversationStart(); }}
                   onMapMove={(center) => {
                     if (currentUser) db.logActivity({ type: 'map_move', userId: currentUser.id, source: 'human' });
                     generateSpotNearby(center.lat, center.lng);

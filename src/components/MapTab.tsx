@@ -87,6 +87,7 @@ interface MapTabProps {
   onClearChallenge?: () => void;
   onAdvanceChallenge?: (stepId: string, photo?: string | null) => void; // 次の目的地ステップを達成（証拠写真つき）
   onCompleteChallenge?: () => void; // 目的地100m到達＝御朱印取得でクエストを達成扱いにする
+  onStartChallenge?: (questId: string) => void; // 別のクエストに切り替える（より近い新しい場へ）
   trail?: { lat: number; lng: number }[]; // クエスト中に通ったルートの軌跡（親が保持＝タブ遷移で消えない）
   questPhotos?: QuestPhoto[]; // クエスト中に撮った道中写真（親が保持）。地図にマーク表示
   onAddQuestPhoto?: (p: QuestPhoto) => void; // 道中写真を追加
@@ -109,6 +110,7 @@ export default function MapTab({
   onClearChallenge,
   onAdvanceChallenge,
   onCompleteChallenge,
+  onStartChallenge,
   trail = [],
   questPhotos = [],
   onAddQuestPhoto,
@@ -253,6 +255,12 @@ export default function MapTab({
   // 100m到達での御朱印自動授与＝クエスト達成
   const [goshuinCelebrate, setGoshuinCelebrate] = useState<{ spot: Spot; godName: string } | null>(null);
   const [quitConfirm, setQuitConfirm] = useState(false); // 「中断」確認モーダル
+  const [awayConfirm, setAwayConfirm] = useState(false); // 目的地から遠ざかり続けたときの中断確認
+  // 距離の遠ざかり検知（直近の目的地距離・連続して遠ざかった回数・基準距離・通知済みか）
+  const awayRef = useRef<{ last: number | null; streak: number; base: number; prompted: boolean }>({ last: null, streak: 0, base: 0, prompted: false });
+  // より近い新しい場ができたらクエスト変更を尋ねる
+  const [newSpotPrompt, setNewSpotPrompt] = useState<{ spot: Spot; questId: string } | null>(null);
+  const seenSpotsRef = useRef<Set<string> | null>(null); // クエスト開始時点で存在した場のid（以降に現れた=新しい場）
   const arrivalDoneRef = useRef(false);
   const goshuinStepDoneRef = useRef<string | null>(null); // 自動授与済みの御朱印ステップID（多重発火防止）
   // 上部ガイドのフキダシ本文（3行＋スクロール）の自動スクロール用
@@ -663,6 +671,57 @@ export default function MapTab({
     const id = setTimeout(() => setFarNotice(false), 2800);
     return () => clearTimeout(id);
   }, [farNotice]);
+
+  // 目的地が変わった/クエストが変わったら、遠ざかり検知・新しい場の提案をリセット
+  useEffect(() => {
+    awayRef.current = { last: null, streak: 0, base: 0, prompted: false };
+    setAwayConfirm(false);
+    seenSpotsRef.current = null; // 次の検知で「現時点の場」を基準に取り直す
+    setNewSpotPrompt(null);
+  }, [nextStep?.id, activeChallenge?.id]);
+
+  // ── 目的地から「だんだん遠ざかる」検知 → 中断するか確認 ──
+  // GPS 更新ごとに目的地までの距離を見て、連続して遠ざかり、かつ一定以上離れたら一度だけ確認を出す。
+  useEffect(() => {
+    const a = awayRef.current;
+    if (nextDist == null || chAllDone) { a.last = null; a.streak = 0; a.base = 0; return; }
+    if (a.last == null) { a.last = nextDist; a.base = nextDist; return; }
+    const NOISE = 0.005; // 5m 未満のゆらぎは GPS ノイズとして無視
+    if (nextDist > a.last + NOISE) {
+      a.streak += 1;
+    } else if (nextDist < a.last - NOISE) {
+      a.streak = 0; a.base = nextDist; a.prompted = false; // 近づいたらリセット（再び遠ざかれば再通知可）
+    }
+    a.last = nextDist;
+    // 3回以上連続で遠ざかり、基準から +150m 以上、かつ目的地まで 150m 超のときに一度だけ確認
+    if (!a.prompted && a.streak >= 3 && nextDist - a.base >= 0.15 && nextDist > 0.15) {
+      a.prompted = true;
+      setAwayConfirm(true);
+    }
+  }, [nextDist, chAllDone]);
+
+  // ── より近い新しい場ができたらクエスト変更を尋ねる ──
+  // クエスト開始時点の場 id を記録し、以降に現れた場のうち「現在の目的地より近く・クエストを持つ」ものを提案。
+  useEffect(() => {
+    if (!activeChallenge) { setNewSpotPrompt(null); return; }
+    if (seenSpotsRef.current == null) { seenSpotsRef.current = new Set(spots.map((s) => s.id)); return; }
+    if (newSpotPrompt) return; // すでに提案中なら上書きしない
+    const seen = seenSpotsRef.current;
+    const goalDist = nextDist ?? Infinity; // 座標の無いステップでは「より近い新場」は出さない
+    let best: { spot: Spot; questId: string; d: number } | null = null;
+    for (const s of spots) {
+      if (seen.has(s.id) || s.id === activeChallenge.spotId) continue;
+      const d = distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude);
+      if (d >= goalDist) continue; // 目的地より近い場のみ
+      const quest = db.getQuestsForSpot(s.id).find((q) => q.tasks.length > 0);
+      if (!quest) continue; // クエストがまだ無い（生成中）場は対象外
+      if (!best || d < best.d) best = { spot: s, questId: quest.id, d };
+    }
+    if (best) {
+      seen.add(best.spot.id); // 一度提案したら再提案しない
+      setNewSpotPrompt({ spot: best.spot, questId: best.questId });
+    }
+  }, [spots, nextDist, activeChallenge?.id, newSpotPrompt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── 道案内の精霊との会話（これまでの語りログ＋参加分）──
   const chatMessages: GuideMsg[] = activeChallenge
@@ -1520,6 +1579,65 @@ export default function MapTab({
       )}
 
       {/* チャレンジ中断の確認（達成済みステップは保存・再参加で再開できることを明示） */}
+      {/* より近い新しい場が現れたら、クエスト変更を尋ねる（タップで切替） */}
+      {newSpotPrompt && activeChallenge && (
+        <div className="absolute left-0 right-0 bottom-28 z-[1400] px-4 flex justify-center pointer-events-none">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-xl border border-[#2563eb]/20 px-4 py-3 pointer-events-auto celebrate-pop">
+            <div className="flex items-start gap-2">
+              <span className="text-2xl flex-shrink-0">{newSpotPrompt.spot.godEmoji || '✨'}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-black text-gray-900 leading-snug">近くに新しい場が現れました</p>
+                <p className="text-[12px] font-bold text-gray-500 truncate">{newSpotPrompt.spot.name} ・ こちらのクエストに変更しますか？</p>
+              </div>
+              <button onClick={() => setNewSpotPrompt(null)} aria-label="閉じる" className="flex-shrink-0 text-gray-400 hover:text-gray-600 cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="flex gap-2 mt-2.5">
+              <button
+                onClick={() => setNewSpotPrompt(null)}
+                className="flex-1 bg-gray-100 text-gray-600 text-[13px] font-black py-2 rounded-lg hover:bg-gray-200 cursor-pointer"
+              >
+                今のまま
+              </button>
+              <button
+                onClick={() => { const qid = newSpotPrompt.questId; setNewSpotPrompt(null); onStartChallenge?.(qid); }}
+                className="flex-1 bg-[#2563eb] text-white text-[13px] font-black py-2 rounded-lg hover:opacity-90 cursor-pointer flex items-center justify-center gap-1"
+              >
+                <Flag className="w-3.5 h-3.5" />こちらへ変更
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 目的地から遠ざかり続けたとき：クエストを中断するか確認 */}
+      {awayConfirm && activeChallenge && (
+        <div className="absolute inset-0 z-[2500] bg-black/50 flex items-center justify-center p-6" onClick={() => { awayRef.current.prompted = false; awayRef.current.streak = 0; awayRef.current.base = awayRef.current.last ?? 0; setAwayConfirm(false); }}>
+          <div className="w-full max-w-[320px] bg-white rounded-3xl p-5 text-left celebrate-pop" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-black text-gray-900 mb-2">目的地から遠ざかっています</h3>
+            <p className="text-[13px] text-gray-600 leading-relaxed mb-1">
+              {chDone && chDone.size > 0
+                ? `達成済みのステップ（${chDone.size}/${activeChallenge.tasks.length}）は保存され、また参加すれば続きから再開できます。`
+                : 'このまま続けますか？それともクエストを中断しますか？'}
+            </p>
+            <p className="text-[12px] text-gray-400 leading-relaxed mb-4">中断すると道中の写真と軌跡は消えます。</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { awayRef.current.prompted = false; awayRef.current.streak = 0; awayRef.current.base = awayRef.current.last ?? 0; setAwayConfirm(false); }}
+                className="flex-1 bg-gray-100 text-gray-600 text-sm font-black py-3 rounded-xl hover:bg-gray-200 cursor-pointer"
+              >
+                続ける
+              </button>
+              <button
+                onClick={() => { setAwayConfirm(false); onClearChallenge?.(); }}
+                className="flex-1 bg-rose-600 text-white text-sm font-black py-3 rounded-xl hover:opacity-90 cursor-pointer"
+              >
+                中断する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {quitConfirm && activeChallenge && (() => {
         const doneN = chDone?.size ?? 0;
         const total = activeChallenge.tasks.length;
