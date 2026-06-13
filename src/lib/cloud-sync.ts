@@ -96,6 +96,19 @@ export function schedulePush(): void {
   pushTimer = setTimeout(pushNow, 1500);
 }
 
+/**
+ * 保留中のデバウンス push を即時に確定させる。
+ * pull の直前に呼ぶことで、「削除直後（push 前）に pull してクラウドの
+ * 古い状態で上書き＝削除が巻き戻る」レースを防ぐ。
+ */
+export async function flushPush(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  if (!pushTimer) return;
+  clearTimeout(pushTimer);
+  pushTimer = null;
+  await pushNow();
+}
+
 async function pushNow(): Promise<void> {
   if (typeof window === 'undefined') return;
   const data: Record<string, unknown> = {};

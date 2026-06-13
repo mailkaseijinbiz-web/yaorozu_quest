@@ -14,6 +14,7 @@ export interface Goshuin {
   lng?: number;       // 授かった場の経度
   photo?: string;     // 実物の御朱印を撮影した写真（圧縮 dataURL・任意）
   source?: 'conversation' | 'photo'; // 授与経路。未設定=対話（後方互換）
+  deletedAt?: string; // ISO 8601 — ソフト削除日時。undefined = 生存。
 }
 
 const KEY = 'yaorozu_goshuin';
@@ -22,7 +23,8 @@ function storageKey(userId: string) {
   return `${KEY}_${userId}`;
 }
 
-export function getGoShuinList(userId: string): Goshuin[] {
+/** 保存されている全御朱印（ソフト削除済みも含む）。同期・重複判定の正本。 */
+function getGoShuinRaw(userId: string): Goshuin[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(storageKey(userId));
@@ -34,8 +36,18 @@ export function getGoShuinList(userId: string): Goshuin[] {
   }
 }
 
+/** 表示用の御朱印一覧（ソフト削除済みは除外）。 */
+export function getGoShuinList(userId: string): Goshuin[] {
+  return getGoShuinRaw(userId).filter((g) => !g.deletedAt);
+}
+
+/**
+ * その場の御朱印を「授かったことがある」か（ソフト削除済みも true）。
+ * 削除済みを true 扱いにすることで、削除した御朱印が近接・対話で再付与されて
+ * 復活するのを防ぐ（spots の「削除は尊重する」方針に合わせる）。
+ */
 export function hasGoShuin(userId: string, spotId: string): boolean {
-  return getGoShuinList(userId).some((g) => g.spotId === spotId);
+  return getGoShuinRaw(userId).some((g) => g.spotId === spotId);
 }
 
 function writeList(userId: string, list: Goshuin[]): boolean {
@@ -70,17 +82,23 @@ export function addPhotoGoshuin(
     photo: input.photo,
     source: 'photo',
   };
-  return writeList(userId, [...getGoShuinList(userId), stamp]) ? stamp : null;
+  return writeList(userId, [...getGoShuinRaw(userId), stamp]) ? stamp : null;
 }
 
-/** 御朱印を1件削除する（主に写真御朱印の取り消し用）。 */
+/**
+ * 御朱印を1件削除する（ソフト削除）。要素は消さず deletedAt を打刻する。
+ * ハード削除（要素を消す）だと、クラウド同期の id 和集合マージで
+ * 別端末/クラウド側に残る同じ御朱印が復活してしまうため、墓標を残して
+ * 「削除した」という事実を同期させる。
+ */
 export function deleteGoshuin(userId: string, id: string): void {
-  writeList(userId, getGoShuinList(userId).filter((g) => g.id !== id));
+  const ts = new Date().toISOString();
+  writeList(userId, getGoShuinRaw(userId).map((g) => (g.id === id && !g.deletedAt ? { ...g, deletedAt: ts } : g)));
 }
 
 /** 既存の御朱印に実物写真を保存（差し替え）する。容量超過などで保存できなければ false。 */
 export function setGoshuinPhoto(userId: string, id: string, photo: string): boolean {
-  const list = getGoShuinList(userId);
+  const list = getGoShuinRaw(userId);
   const idx = list.findIndex((g) => g.id === id);
   if (idx < 0) return false;
   const next = [...list];
@@ -107,7 +125,7 @@ export function grantGoShuin(
     lng: spot.longitude,
   };
   try {
-    const list = getGoShuinList(userId);
+    const list = getGoShuinRaw(userId);
     localStorage.setItem(storageKey(userId), JSON.stringify([...list, stamp]));
     // user-self の御朱印キーは SYNC_KEYS 対象。クラウド同期を予約して同期漏れを防ぐ。
     schedulePush();
