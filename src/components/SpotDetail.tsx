@@ -13,6 +13,7 @@ import { grantGoShuin, hasGoShuin, getGoShuinList } from '../lib/goshuin';
 import { playChime } from '../lib/sound';
 import { vibrateConversationStart } from '../lib/haptics';
 import { getLevelInfo } from '../data/levels';
+import FadeImg from './FadeImg';
 import YaorozuSpirit from './YaorozuSpirit';
 import GoshuinCelebrate from './GoshuinCelebrate';
 import KataribePlayer from './KataribePlayer';
@@ -716,7 +717,7 @@ function SpotDetailBody({
       <div className="relative h-52 flex-shrink-0 bg-gray-200">
         {heroPhoto ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={heroPhoto} alt={spot.name} className="w-full h-full object-cover" />
+          <FadeImg src={heroPhoto} alt={spot.name} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-100 via-amber-50 to-amber-100">
             <span className="text-7xl opacity-80">{godEmoji}</span>
@@ -808,7 +809,7 @@ function SpotDetailBody({
                     {recPhotos.map((p, i) => (
                       <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-black/10">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={p} alt={`記録の写真${i + 1}`} className="w-full h-full object-cover" />
+                        <FadeImg src={p} alt={`記録の写真${i + 1}`} className="w-full h-full object-cover" />
                         <button
                           onClick={() => setRecPhotos((prev) => prev.filter((_, j) => j !== i))}
                           className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/50 text-white flex items-center justify-center cursor-pointer"
@@ -907,7 +908,7 @@ function SpotDetailBody({
                           <div className="grid grid-cols-3 gap-1.5 mt-2">
                             {pics.map((p, j) => (
                               // eslint-disable-next-line @next/next/no-img-element
-                              <img key={j} src={p} alt={`参拝の写真${j + 1}`} className="aspect-square w-full object-cover rounded-lg" />
+                              <FadeImg key={j} src={p} alt={`参拝の写真${j + 1}`} className="aspect-square w-full object-cover rounded-lg" />
                             ))}
                           </div>
                         );
@@ -1003,7 +1004,7 @@ function SpotDetailBody({
                 {photos.map((url) => (
                   <div key={url} className="relative aspect-square rounded-lg overflow-hidden border border-black/5">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={url} alt="投稿写真" className="w-full h-full object-cover" />
+                    <FadeImg src={url} alt="投稿写真" className="w-full h-full object-cover" />
                     <button
                       onClick={() => handleRejectPhoto(url)}
                       title="不適切な写真を却下"
@@ -1341,7 +1342,7 @@ export default function SpotDetail(props: SpotDetailProps) {
           <div className="relative h-52 flex-shrink-0 bg-gray-200">
             {heroPhoto ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={heroPhoto} alt={spot.name} className="w-full h-full object-cover" />
+              <FadeImg src={heroPhoto} alt={spot.name} className="w-full h-full object-cover" />
             ) : (
               <div className="w-full h-full bg-gray-100" />
             )}

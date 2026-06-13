@@ -210,7 +210,7 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
               <button
                 key={f.key}
                 onClick={() => setFilter(f.key)}
-                className={`flex-shrink-0 text-[13px] font-black px-3 py-1.5 rounded-full border transition-all cursor-pointer ${
+                className={`flex-shrink-0 text-[13px] font-black px-3 py-1.5 rounded-full border transition-all active:scale-[0.97] cursor-pointer ${
                   filter === f.key
                     ? 'bg-shrine-red text-white border-shrine-red'
                     : 'bg-white text-gray-500 border-gray-200 hover:border-shrine-red/40'
@@ -371,7 +371,7 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
           {!guided && visibleCount < nearChallenges.length && (
             <button
               onClick={() => setVisibleCount((c) => c + 5)}
-              className="mx-auto mt-1 py-2 text-shrine-red text-sm font-black underline underline-offset-4 decoration-shrine-red/40 hover:decoration-shrine-red cursor-pointer"
+              className="mx-auto mt-1 py-2 text-shrine-red text-sm font-black underline underline-offset-4 decoration-shrine-red/40 hover:decoration-shrine-red transition-transform active:scale-[0.97] cursor-pointer"
             >
               もっと見る（残り{nearChallenges.length - visibleCount}件）
             </button>
@@ -381,7 +381,7 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
             <button
               onClick={() => onExploreMore?.()}
               disabled={isGeneratingQuests}
-              className="mx-auto mt-2 inline-flex items-center gap-1 text-[13px] font-black text-shrine-red border border-shrine-red/30 rounded-full px-4 py-2 hover:bg-shrine-red/5 disabled:opacity-50 disabled:cursor-default cursor-pointer"
+              className="mx-auto mt-2 inline-flex items-center gap-1 text-[13px] font-black text-shrine-red border border-shrine-red/30 rounded-full px-4 py-2 hover:bg-shrine-red/5 transition-transform active:scale-[0.97] disabled:opacity-50 disabled:active:scale-100 disabled:cursor-default cursor-pointer"
             >
               {isGeneratingQuests ? '近くの場から生成中…' : '🔍 他のクエストを探す'}
             </button>

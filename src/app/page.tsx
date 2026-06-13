@@ -80,6 +80,7 @@ export default function HomePage() {
   const [authProfile, setAuthProfile] = useState<AuthProfile | null>(null); // OAuthログイン中のユーザー
   const [earnedBadge, setEarnedBadge] = useState<BadgeState | null>(null); // 新規獲得バッジの演出
   const [pushNotice, setPushNotice] = useState<string | null>(null); // 通知購読の結果トースト
+  const [generatingSpot, setGeneratingSpot] = useState(false); // 近くの場(神)を生成中の控えめな表示
   const [comebackDays, setComebackDays] = useState<number | null>(null); // カムバック歓迎（◯日ぶり）
   const [spots, setSpots] = useState<Spot[]>([]);
   const [activeSpot, setActiveSpot] = useState<Spot | null>(null);
@@ -244,6 +245,8 @@ export default function HomePage() {
         generateQuestsForSpot(existing, db.getAgentBySpot(existing.id) ?? null, true);
       }
     };
+    // ユーザーが待っている主生成（アクティブ未設定）だけ、控えめな「探しています…」を出す。
+    const showLoader = !!opts.selectActive;
     try {
       // 実在優先：既に近く（~120m）に場があれば再生成しない（重複・無駄な API 呼び出しを防ぐ）。
       const near = db.getSpots().find(s => distanceKm(lat, lng, s.latitude, s.longitude) < 0.12);
@@ -251,6 +254,7 @@ export default function HomePage() {
         reuseExisting(near);
         return;
       }
+      if (showLoader) setGeneratingSpot(true);
       const res = await fetch('/api/generate-spot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -300,6 +304,7 @@ export default function HomePage() {
         generateQuestsForSpot(spot, agent, true);
       }
     } catch { /* ネットワークエラーは無視 */ }
+    finally { if (showLoader) setGeneratingSpot(false); }
   }, [generateQuestsForSpot]);
 
   /** 現在地周辺に1件だけ場を生成する（スロットルつき・地図移動などの逐次生成用）。 */
@@ -768,7 +773,7 @@ export default function HomePage() {
         <div className="flex-1 relative overflow-hidden bg-[#f5f7fa] flex flex-col">
 
           {/* Tab content */}
-          <div className={`flex-1 h-full overflow-hidden relative z-0 ${activeTab === 'home' ? '' : 'overflow-y-auto'}`}>
+          <div key={activeTab} className={`flex-1 h-full overflow-hidden relative z-0 animate-in fade-in ${activeTab === 'home' ? '' : 'overflow-y-auto'}`}>
 
             {/* ── ホーム (Map) ── */}
             {activeTab === 'home' && (
@@ -1153,12 +1158,23 @@ export default function HomePage() {
           </button>
         )}
 
+        {/* 近くの場（神）を生成中：上部に控えめなピルを出して「無言の待機」をなくす */}
+        {generatingSpot && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[3400] max-w-[85%] animate-in fade-in pointer-events-none">
+            <div className="flex items-center gap-2 bg-gray-900/85 text-white text-[12px] font-bold px-3.5 py-2 rounded-full shadow-lg backdrop-blur-sm">
+              <span className="w-3.5 h-3.5 border-2 border-white/70 border-t-transparent rounded-full animate-spin" />
+              この土地の神を探しています…
+            </div>
+          </div>
+        )}
+
         {/* 通知購読の結果トースト（参加フローを妨げない軽量ピル） */}
         {pushNotice && (
-          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[3500] max-w-[85%] celebrate-pop">
+          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[3500] max-w-[85%]">
             <div
               onClick={() => setPushNotice(null)}
-              className="bg-gray-900/90 text-white text-[12px] font-bold px-4 py-2.5 rounded-full shadow-lg text-center leading-snug cursor-pointer"
+              style={{ ['--toast-life' as string]: '4s' }}
+              className="toast-life bg-gray-900/90 text-white text-[12px] font-bold px-4 py-2.5 rounded-full shadow-lg text-center leading-snug cursor-pointer"
             >
               {pushNotice}
             </div>

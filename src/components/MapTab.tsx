@@ -9,6 +9,7 @@ import { hasGoShuin, grantGoShuin } from '../lib/goshuin';
 import { playChime } from '../lib/sound';
 import { vibrateGentle } from '../lib/haptics';
 import GoshuinCelebrate from './GoshuinCelebrate';
+import FadeImg from './FadeImg';
 import { distanceKm, bearingDeg } from '../lib/geo';
 import { ttlInfo } from '../lib/quest-ui';
 import { photoThemesFor } from '../lib/photo-themes';
@@ -1215,7 +1216,7 @@ export default function MapTab({
                     <div className="w-20 self-stretch rounded-tl-2xl flex items-center justify-center text-4xl flex-shrink-0 bg-gradient-to-br from-blue-100 to-amber-100 relative overflow-hidden">
                       {cardPhoto ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={cardPhoto} alt={s.name} className="absolute inset-0 w-full h-full object-cover" />
+                        <FadeImg src={cardPhoto} alt={s.name} className="absolute inset-0 w-full h-full object-cover" />
                       ) : (
                         godEmoji
                       )}
@@ -1527,7 +1528,9 @@ export default function MapTab({
 
       {/* 道中の寄り道で徳を授かったときの小トースト */}
       {shareToast && (
-        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[2400] bg-gray-900/90 text-white text-[13px] font-black px-4 py-2 rounded-full shadow-lg celebrate-pop">{shareToast}</div>
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[2400]">
+          <div style={{ ['--toast-life' as string]: '2.2s' }} className="toast-life bg-gray-900/90 text-white text-[13px] font-black px-4 py-2 rounded-full shadow-lg">{shareToast}</div>
+        </div>
       )}
 
       {/* 撮影後：気分・ひとことを添えて神に送るシート（ネタ振り付き） */}
@@ -1574,7 +1577,7 @@ export default function MapTab({
           <div className="w-full max-w-sm bg-white rounded-3xl overflow-hidden shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="relative">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={reviewPhoto.photo} alt="道中の写真" className="w-full max-h-72 object-cover" />
+              <FadeImg src={reviewPhoto.photo} alt="道中の写真" className="w-full max-h-72 object-cover" />
               <button onClick={() => setReviewPhoto(null)} aria-label="閉じる" className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/45 text-white flex items-center justify-center cursor-pointer"><X className="w-4 h-4" /></button>
             </div>
             <div className="p-4 space-y-2">
