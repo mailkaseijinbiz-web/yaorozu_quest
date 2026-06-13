@@ -1262,7 +1262,7 @@ export default function MapTab({
 
       {/* 証拠写真モーダル（この目的地を達成するには写真が必要） */}
       {proofStep && (
-        <div className="absolute inset-0 z-[2000] bg-black/50 flex items-end" onClick={() => { setProofStep(null); setProofPhoto(null); setProofComment(''); setProofError(null); }}>
+        <div className="absolute inset-0 z-[2000] bg-black/50 flex items-end modal-backdrop-in" onClick={() => { setProofStep(null); setProofPhoto(null); setProofComment(''); setProofError(null); }}>
           <div className="w-full bg-white rounded-t-3xl p-4 pb-6 animate-in" onClick={(e) => e.stopPropagation()}>
             <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-3" />
             <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5"><Camera className="w-4 h-4 text-[#2563eb]" />証拠写真を撮影</h3>
@@ -1326,7 +1326,7 @@ export default function MapTab({
       {/* 達成ビート（案内役の精霊がコメント＋豆知識をフキダシで語る） */}
       {celebrate && (
         <div className="absolute inset-0 z-[2100] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/55" onClick={() => { if (celebrate.complete) onClearChallenge?.(); setCelebrate(null); }} />
+          <div className="absolute inset-0 bg-black/55 modal-backdrop-in" onClick={() => { if (celebrate.complete) onClearChallenge?.(); setCelebrate(null); }} />
 
           {/* ── バッジ獲得：紙吹雪パーティクル ── */}
           {celebrate.complete && (() => {
@@ -1434,7 +1434,7 @@ export default function MapTab({
       {/* 導入（プロローグ）：案内役の精霊がフキダシで物語を語ってから冒険へ */}
       {activeChallenge && !celebrate && (chDone?.size ?? 0) === 0 && introSeenId !== activeChallenge.id && (
         <div className="absolute inset-0 z-[2050] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/55" onClick={() => markIntroSeen(activeChallenge.id)} />
+          <div className="absolute inset-0 bg-black/55 modal-backdrop-in" onClick={() => markIntroSeen(activeChallenge.id)} />
           <div className="relative w-full max-w-sm celebrate-pop">
             {introStep === 0 ? (
               /* フェーズ0：案内役の精霊がフキダシでシナリオを一文字ずつ語る（中央センタリング・カードは出さない） */
@@ -1468,7 +1468,7 @@ export default function MapTab({
 
       {/* 道中の会話（目的地の場があれば「目的地の八百万神」／無ければ道案内の精霊） */}
       {chatOpen && activeChallenge && (
-        <div className="absolute inset-0 z-[2300] bg-black/50 flex items-end" onClick={() => setChatOpen(false)}>
+        <div className="absolute inset-0 z-[2300] bg-black/50 flex items-end modal-backdrop-in" onClick={() => setChatOpen(false)}>
           <div className="w-full bg-white rounded-t-3xl flex flex-col max-h-[82%] animate-in" onClick={(e) => e.stopPropagation()}>
             {/* ヘッダー */}
             <div className="flex items-center gap-2 px-4 pt-3 pb-2.5 border-b border-black/5">
@@ -1532,7 +1532,7 @@ export default function MapTab({
 
       {/* 撮影後：気分・ひとことを添えて神に送るシート（ネタ振り付き） */}
       {pendingPhoto && destSpot && (
-        <div className="absolute inset-0 z-[2350] bg-black/50 flex items-end" onClick={() => !photoSending && setPendingPhoto(null)}>
+        <div className="absolute inset-0 z-[2350] bg-black/50 flex items-end modal-backdrop-in" onClick={() => !photoSending && setPendingPhoto(null)}>
           <div className="w-full bg-white rounded-t-3xl flex flex-col max-h-[90%] animate-in" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 pt-3 pb-2 border-b border-black/5">
               <h3 className="text-sm font-black text-gray-900 flex items-center gap-1.5">{destGodEmoji} {destGodName}に伝える</h3>
@@ -1570,7 +1570,7 @@ export default function MapTab({
 
       {/* 地図の写真マークをタップ → 振り返りモーダル */}
       {reviewPhoto && (
-        <div className="absolute inset-0 z-[2360] bg-black/60 flex items-center justify-center p-4" onClick={() => setReviewPhoto(null)}>
+        <div className="absolute inset-0 z-[2360] bg-black/60 flex items-center justify-center p-4 modal-backdrop-in" onClick={() => setReviewPhoto(null)}>
           <div className="w-full max-w-sm bg-white rounded-3xl overflow-hidden shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="relative">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1707,8 +1707,8 @@ export default function MapTab({
       {/* ── 隠れスポット提案モーダル ── */}
       {proposingLoc && (
         <div className="absolute inset-0 z-[5000] flex items-center justify-center p-4" onClick={() => setProposingLoc(null)}>
-          <div className="absolute inset-0 bg-black/50" />
-          <div className="relative w-full max-w-sm bg-white rounded-3xl shadow-xl p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="absolute inset-0 bg-black/50 modal-backdrop-in" />
+          <div className="relative w-full max-w-sm bg-white rounded-3xl shadow-xl p-5 animate-in" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-black text-gray-900 mb-1">隠れスポットを提案</h3>
             <p className="text-[12px] text-gray-500 mb-4 leading-snug">地図上のこの場所に、まだ誰も知らない場を創り出しますか？</p>
             

@@ -191,6 +191,52 @@
 .banner-rise { animation: banner-rise 0.42s cubic-bezier(0.2, 0.9, 0.2, 1) both; }
 @keyframes banner-rise { from { transform: translateY(28px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
+/* ── 登場アニメーション（tailwindcss-animate 互換の最小実装）──
+   このリポジトリは Tailwind v4 でアニメプラグイン未導入のため、コード全体で使われている
+   animate-in / fade-in / slide-in-from-bottom-4 / zoom-in / duration-* が無効（瞬時表示）
+   になっていた。素の CSS で同等のやさしい登場を効かせ、シート・モーダル・各演出を滑らかにする。 */
+@keyframes enter {
+  from {
+    opacity: var(--tw-enter-opacity, 1);
+    transform: translate3d(var(--tw-enter-translate-x, 0), var(--tw-enter-translate-y, 0), 0)
+      scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), 1)
+      rotate(var(--tw-enter-rotate, 0));
+  }
+}
+.animate-in {
+  animation-name: enter;
+  animation-duration: 0.28s;
+  animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+  animation-fill-mode: both;
+  /* 単体でもやさしくフェード＋わずかに浮き上がる既定。修飾クラスで上書き可。 */
+  --tw-enter-opacity: 0;
+  --tw-enter-translate-y: 0.5rem;
+  --tw-enter-scale: initial;
+  --tw-enter-rotate: initial;
+  --tw-enter-translate-x: initial;
+}
+.fade-in { --tw-enter-opacity: 0; }
+.zoom-in { --tw-enter-scale: 0.95; }
+.slide-in-from-bottom-4 { --tw-enter-translate-y: 1rem; }
+/* animate-in と併用したときはアニメーションの尺として効かせる（素の Tailwind の
+   duration-* は transition 用なので別プロパティ＝衝突しない） */
+.duration-500 { animation-duration: 0.5s; }
+.duration-1000 { animation-duration: 1s; }
+
+/* 動きを抑える設定の利用者には、登場・移動系アニメをほぼ瞬時にして負担を減らす
+   （達成・バッジ等の意図的な祝祭演出は残し、画面遷移の大きな移動だけを和らげる）。 */
+@media (prefers-reduced-motion: reduce) {
+  .animate-in,
+  .banner-rise,
+  .modal-backdrop-in,
+  .quest-card-in,
+  .quest-card-out,
+  .quest-header-in,
+  .quest-overlay-in {
+    animation-duration: 0.01ms !important;
+  }
+}
+
 /* スポット名（フキダシ外の縁取り文字・Google Map ラベル風） */
 .map-spot-name {
   margin-top: 2px;
