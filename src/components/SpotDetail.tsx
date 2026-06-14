@@ -19,6 +19,7 @@ import GoshuinCelebrate from './GoshuinCelebrate';
 import KataribePlayer from './KataribePlayer';
 import MeditationQuest from './MeditationQuest';
 import VintageCameraOverlay from './VintageCameraOverlay';
+import { useSwipeNav } from '../lib/useSwipeNav';
 
 interface Message {
   id: string;
@@ -135,6 +136,15 @@ function SpotDetailBody({
   // 創世主設定
   const [isCreatorModalOpen, setIsCreatorModalOpen] = useState(false);
   const [creatorFirstMessage, setCreatorFirstMessage] = useState(agent.firstMessage || '');
+
+  // 右へ横スワイプすると詳細ページを閉じる（指追従。スワイプ中は縦スクロールをロック）。
+  // 左方向は戻る先がないので引っぱり抵抗のみ。全画面のオーバーレイ表示中は無効化する。
+  const swipeRef = useSwipeNav<HTMLDivElement>({
+    enabled: !isKataribeOpen && !activeMeditation && !isVintageCameraOpen && !goshuinCelebrate && !postingTask && !isCreatorModalOpen,
+    allowLeft: false,
+    animateOut: true,
+    onCommitRight: onClose,
+  });
 
   // チャット。会話履歴はスポット毎に localStorage で保持し、再訪時に続きから話せる
   // （純ローカル・直近20件。キーがスポット毎に動的なため SYNC_KEYS（クラウド同期）には含めない）。
@@ -712,7 +722,7 @@ function SpotDetailBody({
   };
 
   return (
-    <div className="absolute inset-0 bg-[#f5f7fa] flex flex-col">
+    <div ref={swipeRef} className="absolute inset-0 bg-[#f5f7fa] flex flex-col">
       {/* ── ヒーロー写真（無ければ神の絵文字を据えた飾り背景。文字は出さない） ── */}
       <div className="relative h-52 flex-shrink-0 bg-gray-200">
         {heroPhoto ? (
