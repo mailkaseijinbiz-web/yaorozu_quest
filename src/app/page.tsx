@@ -685,6 +685,84 @@ export default function HomePage() {
     { key: 'mypage' as TabType, label: 'マイページ', icon: UserCircle2 },
   ];
 
+  // ── タブの横スワイプ（指に追従）。マップ(quest)は地図のパン操作を優先するため対象外。 ──
+  // スワイプで移動できるのはこの並び（マップを挟まない4タブ）。
+  const SWIPE_TABS: TabType[] = ['home', 'record', 'goshuin', 'mypage'];
+  const swipeRef = useRef<HTMLDivElement | null>(null);
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  const swipeAxis = useRef<'h' | 'v' | null>(null); // 最初の動きで縦/横どちらの操作か確定
+  const swipeMoved = useRef(false);                  // 横ドラッグが発生したか
+  const swipeSkip = useRef(false);                   // 横スクロール要素の上では乗っ取らない
+
+  // タッチ開始点から容器までの間に、横スクロール可能な要素（フィルタの帯・カルーセル等）が
+  // あれば、その要素にスクロールを譲ってタブスワイプを抑止する。
+  const hasScrollableX = (from: EventTarget | null) => {
+    let el = from as HTMLElement | null;
+    while (el && el !== swipeRef.current) {
+      const ox = getComputedStyle(el).overflowX;
+      if ((ox === 'auto' || ox === 'scroll') && el.scrollWidth > el.clientWidth + 2) return true;
+      el = el.parentElement;
+    }
+    return false;
+  };
+
+  const onSwipeStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!SWIPE_TABS.includes(activeTab) || e.touches.length !== 1) { swipeSkip.current = true; return; }
+    swipeSkip.current = hasScrollableX(e.target);
+    swipeStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    swipeAxis.current = null;
+    swipeMoved.current = false;
+  };
+
+  const onSwipeMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (swipeSkip.current || !swipeStart.current) return;
+    const dx = e.touches[0].clientX - swipeStart.current.x;
+    const dy = e.touches[0].clientY - swipeStart.current.y;
+    if (!swipeAxis.current) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return; // まだ向きが定まらない
+      swipeAxis.current = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+    }
+    if (swipeAxis.current !== 'h') return; // 縦操作はそのまま縦スクロールへ
+    swipeMoved.current = true;
+    const idx = SWIPE_TABS.indexOf(activeTab);
+    // 端では引っぱり抵抗（ラバーバンド）で「これ以上ない」ことを伝える。
+    const atEdge = (idx === 0 && dx > 0) || (idx === SWIPE_TABS.length - 1 && dx < 0);
+    const shift = atEdge ? dx * 0.3 : dx;
+    const el = swipeRef.current;
+    if (el) {
+      el.style.transition = 'none';
+      el.style.transform = `translateX(${shift}px)`;
+      el.style.willChange = 'transform';
+    }
+  };
+
+  const onSwipeEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    const el = swipeRef.current;
+    const start = swipeStart.current;
+    const moved = swipeMoved.current;
+    swipeStart.current = null;
+    swipeAxis.current = null;
+    swipeMoved.current = false;
+    if (!moved || !el || !start) return;
+    const dx = e.changedTouches[0].clientX - start.x;
+    const w = el.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 360);
+    const threshold = Math.min(80, w * 0.22); // 画面幅の22%（最大80px）越えで確定
+    const idx = SWIPE_TABS.indexOf(activeTab);
+    let target: TabType | null = null;
+    if (dx <= -threshold && idx < SWIPE_TABS.length - 1) target = SWIPE_TABS[idx + 1];
+    else if (dx >= threshold && idx > 0) target = SWIPE_TABS[idx - 1];
+    if (target) {
+      // 切替：keyed コンテナが差し替わりクロスフェード。inline transform は旧要素ごと消える。
+      el.style.willChange = '';
+      setActiveTab(target);
+    } else {
+      // しきい値未満：指の位置から 0 へバネで戻す。
+      el.style.transition = 'transform 0.25s cubic-bezier(0.2, 0.9, 0.2, 1)';
+      el.style.transform = 'translateX(0)';
+      el.style.willChange = '';
+    }
+  };
+
   // アカウント削除 → 再ログイン画面
   if (isRevoked) {
     return (
@@ -773,7 +851,15 @@ export default function HomePage() {
         <div className="flex-1 relative overflow-hidden bg-[#f5f7fa] flex flex-col">
 
           {/* Tab content */}
-          <div key={activeTab} className={`flex-1 h-full overflow-hidden relative z-0 animate-in fade-in ${activeTab === 'home' ? '' : 'overflow-y-auto'}`}>
+          <div
+            key={activeTab}
+            ref={swipeRef}
+            onTouchStart={onSwipeStart}
+            onTouchMove={onSwipeMove}
+            onTouchEnd={onSwipeEnd}
+            onTouchCancel={onSwipeEnd}
+            className={`flex-1 h-full overflow-hidden relative z-0 animate-in fade-in ${activeTab === 'home' ? '' : 'overflow-y-auto'}`}
+          >
 
             {/* ── ホーム (Map) ── */}
             {activeTab === 'home' && (
