@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* 端末枠の出し分け用カスタムバリアント（Tailwind は幅のみのため高さ条件をここで定義）。
+   ・frame: 横幅640px以上 かつ 高さ720px以上＝デスクトップ/タブレット。
+     携帯を横向きにすると幅は640px超でも高さが足りないため frame は効かず、全画面表示を維持する。
+   ・deskpanel: 横幅1024px以上 かつ 高さ720px以上＝左の案内サイドパネルを出せる広さ。 */
+@custom-variant frame (@media (min-width: 640px) and (min-height: 720px));
+@custom-variant deskpanel (@media (min-width: 1024px) and (min-height: 720px));
+
 @layer base {
   :root {
     --background: #f5f7fa;
