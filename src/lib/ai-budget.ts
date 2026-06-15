@@ -8,17 +8,26 @@
 //   AI_CHAT_HISTORY_TURNS   … チャットでモデルへ渡す直近履歴の件数
 //   AI_CHAT_MAX_TOKENS      … チャット応答の最大出力トークン
 //   AI_CHAT_TOPIC_SEED_TURNS… 会話序盤のみ「話題シード」を入れる閾値（この件数未満で付与）
-//   AI_PHOTO_FEEDBACK       … 写真フィードバックに生成AI(ビジョン)を使うか（'0'/'false'で無効）
+//   AI_PHOTO_FEEDBACK       … 写真フィードバックのビジョン利用範囲。'casual-only'|'all'|'off'
 
 function numEnv(name: string, def: number): number {
   const v = Number(process.env[name]);
   return Number.isFinite(v) && v > 0 ? v : def;
 }
 
-function boolEnv(name: string, def: boolean): boolean {
-  const v = process.env[name];
-  if (v == null || v === '') return def;
-  return v === '1' || v.toLowerCase() === 'true';
+/** 写真フィードバックでビジョンAIを使う範囲。 */
+export type PhotoFeedbackMode =
+  | 'all'         // 証拠写真も道中共有も AI
+  | 'casual-only' // 道中の共有写真のみ AI（クエスト証拠はルールベース）＝節約寄りの既定
+  | 'off';        // すべてルールベース（ビジョン呼び出し0）
+
+function photoModeEnv(def: PhotoFeedbackMode): PhotoFeedbackMode {
+  const v = (process.env.AI_PHOTO_FEEDBACK ?? '').toLowerCase();
+  if (v === 'all' || v === 'casual-only' || v === 'off') return v;
+  // 旧来の真偽値表記も許容（true=all / false=off）
+  if (v === '1' || v === 'true') return 'all';
+  if (v === '0' || v === 'false') return 'off';
+  return def;
 }
 
 export const AI_BUDGET = {
@@ -28,6 +37,12 @@ export const AI_BUDGET = {
   chatMaxOutputTokens: numEnv('AI_CHAT_MAX_TOKENS', 320),
   /** 会話序盤（履歴がこの件数未満）のみ「話題シード」をプロンプトへ含める。既定4。 */
   chatTopicSeedUntilTurns: numEnv('AI_CHAT_TOPIC_SEED_TURNS', 4),
-  /** 写真フィードバックに生成AI(ビジョン)を使う。false ならルールベースのみ（ビジョン呼び出し0）。 */
-  photoFeedbackAI: boolEnv('AI_PHOTO_FEEDBACK', true),
+  /** 写真フィードバックのビジョン利用範囲。既定は道中共有のみ AI（クエスト証拠は節約）。 */
+  photoFeedbackMode: photoModeEnv('casual-only'),
 };
+
+/** この写真フィードバック要求でビジョンAIを呼ぶべきか（casual=道中の共有写真）。 */
+export function shouldUsePhotoVision(casual: boolean): boolean {
+  const m = AI_BUDGET.photoFeedbackMode;
+  return m === 'all' || (m === 'casual-only' && casual);
+}
