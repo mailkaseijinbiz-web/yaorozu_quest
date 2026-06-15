@@ -16,7 +16,8 @@ interface DesktopSidePanelProps {
 /**
  * 大画面（lg〜）で電話枠の左に置く案内パネル。
  * 横長スペースを活かし、ロゴ・説明・現在地/巡礼の進捗などのライブ情報を見せる。
- * モバイル幅では非表示（hidden lg:flex）。本体の操作はあくまで右の電話枠で行う。
+ * モバイル幅・低い画面では非表示（hidden deskpanel:flex＝幅1024px以上かつ高さ720px以上）。
+ * 本体の操作はあくまで右の電話枠で行う。
  */
 export default function DesktopSidePanel({
   currentUser,
@@ -38,7 +39,7 @@ export default function DesktopSidePanel({
       : '現在地を取得できませんでした';
 
   return (
-    <aside className="hidden lg:flex flex-col justify-center w-[340px] h-[840px] shrink-0 z-10 select-none">
+    <aside className="hidden deskpanel:flex flex-col justify-center w-[340px] h-[min(840px,calc(100dvh-3rem))] shrink-0 z-10 select-none">
       {/* ブランド */}
       <div className="px-2">
         <div className="flex items-center gap-3">

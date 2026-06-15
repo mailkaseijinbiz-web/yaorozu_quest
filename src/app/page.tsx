@@ -763,7 +763,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="flex-1 min-h-dvh bg-[#eaecef] flex items-center justify-center font-sans overflow-hidden p-0 sm:p-4 md:p-8 lg:gap-10 relative">
+    <div className="flex-1 min-h-dvh bg-[#eaecef] flex items-center justify-center font-sans overflow-hidden p-0 frame:p-6 deskpanel:gap-10 relative">
       {/* Background glows */}
       <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-[#e60012]/3 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-[#c5a028]/3 blur-[120px] rounded-full pointer-events-none" />
@@ -777,11 +777,12 @@ export default function HomePage() {
         goshuinCount={goShuinList.length}
       />
 
-      {/* Phone frame */}
-      <div className="w-full h-dvh sm:h-[840px] sm:max-w-[395px] sm:rounded-[48px] sm:border-[11px] sm:border-[#1E2024] sm:shadow-[0_24px_80px_rgba(0,0,0,0.15)] relative overflow-hidden flex flex-col bg-[#f5f7fa] z-10 sm:scale-[0.98] lg:scale-100 transition-all duration-300">
+      {/* Phone frame。frame バリアント（幅640px以上 かつ 高さ720px以上）でのみ枠を出す。
+          携帯の横向き（高さ不足）では全画面のまま見切れを防ぐ。枠の高さは画面に収まるよう上限を付ける。 */}
+      <div className="w-full h-dvh frame:h-[min(840px,calc(100dvh-3rem))] frame:max-w-[395px] frame:rounded-[48px] frame:border-[11px] frame:border-[#1E2024] frame:shadow-[0_24px_80px_rgba(0,0,0,0.15)] relative overflow-hidden flex flex-col bg-[#f5f7fa] z-10 frame:scale-[0.98] deskpanel:scale-100 transition-all duration-300">
 
-        {/* iOS Dynamic Island */}
-        <div className="hidden sm:block absolute top-0 left-1/2 -translate-x-1/2 w-28 h-5.5 bg-[#1E2024] rounded-b-2xl z-50 pointer-events-none" />
+        {/* iOS Dynamic Island（枠表示時のみ） */}
+        <div className="hidden frame:block absolute top-0 left-1/2 -translate-x-1/2 w-28 h-5.5 bg-[#1E2024] rounded-b-2xl z-50 pointer-events-none" />
 
         {/* デバッグパネル（?debug=1 で有効化。位置情報なしでも現在地を手動指定してテスト可能） */}
         {debugMode && (
