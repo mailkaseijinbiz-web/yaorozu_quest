@@ -15,6 +15,7 @@ import MapTab, { type QuestPhoto } from '../components/MapTab';
 import RecordTab from '../components/RecordTab';
 import SpotDetail from '../components/SpotDetail';
 import GoshuinBookModal from '../components/GoshuinBookModal';
+import DesktopSidePanel from '../components/DesktopSidePanel';
 import LetterInbox from '../components/LetterInbox';
 import { getLetters, markLetterRead, type Letter } from '../lib/letters';
 import DebugPanel from '../components/DebugPanel';
@@ -762,10 +763,19 @@ export default function HomePage() {
   }
 
   return (
-    <div className="flex-1 min-h-dvh bg-[#eaecef] flex items-center justify-center font-sans overflow-hidden p-0 sm:p-4 md:p-8 relative">
+    <div className="flex-1 min-h-dvh bg-[#eaecef] flex items-center justify-center font-sans overflow-hidden p-0 sm:p-4 md:p-8 lg:gap-10 relative">
       {/* Background glows */}
       <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-[#e60012]/3 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-[#c5a028]/3 blur-[120px] rounded-full pointer-events-none" />
+
+      {/* 大画面では電話枠の左に案内パネル（横長スペースの活用） */}
+      <DesktopSidePanel
+        currentUser={currentUser}
+        userLocation={userLocation}
+        geoStatus={geoStatus}
+        nearbyCount={spots.filter((s) => distanceKm(userLocation.lat, userLocation.lng, s.latitude, s.longitude) < 3).length}
+        goshuinCount={goShuinList.length}
+      />
 
       {/* Phone frame */}
       <div className="w-full h-dvh sm:h-[840px] sm:max-w-[395px] sm:rounded-[48px] sm:border-[11px] sm:border-[#1E2024] sm:shadow-[0_24px_80px_rgba(0,0,0,0.15)] relative overflow-hidden flex flex-col bg-[#f5f7fa] z-10 sm:scale-[0.98] lg:scale-100 transition-all duration-300">
