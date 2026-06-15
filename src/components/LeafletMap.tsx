@@ -153,6 +153,16 @@ export default function LeafletMap({
     };
     map.on('rotate', onRotate);
 
+    // 軌跡（ポリライン）のズレ補正。leaflet-rotate は回転を有効化すると、回転していなくても
+    // ベクターレイヤーの transform 計算に既知のズレ（zoom/move 時に軌跡が地図とずれる）がある。
+    // 移動・ズーム・回転の確定時にレンダラを明示リセットし、軌跡を正しい位置へ戻す。
+    const settleVectors = () => {
+      const tl = trailLayerRef.current as unknown as { _renderer?: { _reset?: () => void } } | null;
+      const r = tl?._renderer ?? (map as unknown as { _renderer?: { _reset?: () => void } })._renderer;
+      if (r && typeof r._reset === 'function') r._reset();
+    };
+    map.on('zoomend moveend rotate', settleVectors);
+
     // 地図移動をアクティビティログへ（60秒スロットル）
     let lastMoveLog = 0;
     map.on('moveend', () => {
@@ -198,6 +208,7 @@ export default function LeafletMap({
         mapRef.current.off('move', bump);
         mapRef.current.off('zoomend', bump);
         mapRef.current.off('rotate', onRotate);
+        mapRef.current.off('zoomend moveend rotate', settleVectors);
         mapRef.current.remove();
         mapRef.current = null;
       }
@@ -351,6 +362,9 @@ export default function LeafletMap({
     } else {
       trailLayerRef.current.setLatLngs(pts);
     }
+    // 回転有効時のベクターずれ対策：描画直後にレンダラを正しい位置へリセットする。
+    const r = (trailLayerRef.current as unknown as { _renderer?: { _reset?: () => void } })._renderer;
+    if (r && typeof r._reset === 'function') r._reset();
   }, [trail]);
 
   // 2.7 クエスト中に撮った写真のマーク（サムネのピン。タップで振り返り）
