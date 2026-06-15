@@ -22,6 +22,8 @@ export interface VisitRecord {
   photos?: string[]; // 圧縮 dataURL（最大 MAX_RECORD_PHOTOS 枚・任意・容量超過時は写真なしで保存）
   trail?: { lat: number; lng: number }[]; // クエスト達成時に通ったルートの軌跡（任意）
   createdAt: string; // ISO 8601（記録を作った日時）
+  deletedAt?: string; // ISO 8601。ソフト削除（tombstone）。クラウドのマージで削除が復活しないよう、
+                      // 配列から消さず deletedAt を打って残す。表示時は除外する。
 }
 
 /** 1投稿に添付できる写真の上限 */
@@ -48,7 +50,8 @@ export function hasRecordForSpotOnDate(userId: string, spotId: string, visitedAt
   return getVisitRecords(userId).some((r) => r.spotId === spotId && dayKey(r.visitedAt) === k);
 }
 
-export function getVisitRecords(userId: string): VisitRecord[] {
+/** 生の保存配列（tombstone=削除済みも含む）。書き込み系で tombstone を保全するために使う。 */
+function getRawVisitRecords(userId: string): VisitRecord[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(storageKey(userId));
@@ -57,6 +60,11 @@ export function getVisitRecords(userId: string): VisitRecord[] {
   } catch {
     return [];
   }
+}
+
+/** 表示用の参拝記録（削除済み=tombstone は除外）。 */
+export function getVisitRecords(userId: string): VisitRecord[] {
+  return getRawVisitRecords(userId).filter((r) => !r.deletedAt);
 }
 
 function write(userId: string, list: VisitRecord[]): boolean {
@@ -95,7 +103,7 @@ export function addVisitRecord(
     trail,
     createdAt: now,
   };
-  const list = getVisitRecords(userId);
+  const list = getRawVisitRecords(userId); // tombstone も保全して書き戻す
   if (write(userId, [rec, ...list])) return rec;
   // 容量超過 → 写真を減らして（最終的に外して）保存し直す
   if (rec.photos) {
@@ -112,7 +120,7 @@ export function updateVisitRecord(
   id: string,
   patch: { visitedAt?: string; note?: string; photos?: string[] }
 ): VisitRecord | null {
-  const list = getVisitRecords(userId);
+  const list = getRawVisitRecords(userId); // tombstone も保全して書き戻す
   const idx = list.findIndex((r) => r.id === id);
   if (idx < 0) return null;
   const photos = (patch.photos ?? recordPhotos(list[idx])).slice(0, MAX_RECORD_PHOTOS);
@@ -135,7 +143,13 @@ export function updateVisitRecord(
 }
 
 export function deleteVisitRecord(userId: string, id: string): void {
-  write(userId, getVisitRecords(userId).filter((r) => r.id !== id));
+  // ソフト削除(tombstone)。配列から消すとクラウドのマージ（id 和集合）で復活してしまうため、
+  // deletedAt を打って残す。写真・軌跡など重いデータは破棄して容量を抑える。
+  const now = new Date().toISOString();
+  const next = getRawVisitRecords(userId).map((r) =>
+    r.id === id ? { ...r, deletedAt: now, photos: undefined, photo: undefined, trail: undefined } : r
+  );
+  write(userId, next);
 }
 
 /** その寺社の参拝記録の件数（「N回目の記録」表示用）。 */

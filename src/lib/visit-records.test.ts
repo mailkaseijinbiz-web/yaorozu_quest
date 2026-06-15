@@ -68,4 +68,32 @@ describe('参拝記録（visit-records）', () => {
     expect(m.recordPhotos({ photo: 'legacy' } as never)).toEqual(['legacy']);
     expect(m.recordPhotos({} as never)).toEqual([]);
   });
+
+  it('deleteVisitRecord: 表示からは消えるが tombstone として残る（クラウド復活防止）', async () => {
+    const ls = makeLocalStorage();
+    const m = await importWith(ls);
+    const rec = m.addVisitRecord('user-self', SPOT, { note: 'けす', photos: ['data:img,1'] })!;
+    expect(m.getVisitRecords('user-self').some((r) => r.id === rec.id)).toBe(true);
+
+    m.deleteVisitRecord('user-self', rec.id);
+    // 表示用一覧からは除外される
+    expect(m.getVisitRecords('user-self').some((r) => r.id === rec.id)).toBe(false);
+    // 生の保存データには deletedAt 付きで残り、写真は破棄されている（容量対策）
+    const raw = JSON.parse(ls.getItem('yaorozu_visit_records_user-self')!) as Array<{ id: string; deletedAt?: string; photos?: string[] }>;
+    const tomb = raw.find((r) => r.id === rec.id);
+    expect(tomb?.deletedAt).toBeTruthy();
+    expect(tomb?.photos).toBeUndefined();
+  });
+
+  it('addVisitRecord: 既存の tombstone を消さずに保全する', async () => {
+    const ls = makeLocalStorage();
+    const m = await importWith(ls);
+    const a = m.addVisitRecord('user-self', SPOT, { visitedAt: new Date('2026-06-10T12:00:00').toISOString() })!;
+    m.deleteVisitRecord('user-self', a.id);
+    m.addVisitRecord('user-self', SPOT, { visitedAt: new Date('2026-06-12T12:00:00').toISOString() });
+    const raw = JSON.parse(ls.getItem('yaorozu_visit_records_user-self')!) as Array<{ id: string; deletedAt?: string }>;
+    // tombstone(a) と新規(1件) の計2件が保存され、表示は新規の1件
+    expect(raw.some((r) => r.id === a.id && r.deletedAt)).toBe(true);
+    expect(m.getVisitRecords('user-self').length).toBe(1);
+  });
 });

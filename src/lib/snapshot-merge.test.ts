@@ -19,6 +19,21 @@ describe('mergeArray', () => {
     expect(mergeArray([], [{ id: 'a' }])).toEqual([{ id: 'a' }]);
     expect(mergeArray([{ id: 'a' }], [])).toEqual([{ id: 'a' }]);
   });
+
+  it('削除(tombstone)は復活しない: incoming の削除がサーバー(base)の生データに勝つ', () => {
+    // 端末で削除 → incoming に deletedAt 付きが乗る。base(サーバー)はまだ生。
+    const base = [{ id: 'r1' }, { id: 'r2' }];
+    const incoming = [{ id: 'r1', deletedAt: '2026-06-15T00:00:00Z' }, { id: 'r2' }];
+    const merged = mergeArray(base, incoming) as { id: string; deletedAt?: string }[];
+    expect(merged.find(m => m.id === 'r1')?.deletedAt).toBe('2026-06-15T00:00:00Z');
+  });
+
+  it('削除(tombstone)は復活しない: 削除を知らない古い端末(incoming)が来ても base の削除を維持', () => {
+    const base = [{ id: 'r1', deletedAt: '2026-06-15T00:00:00Z' }];
+    const incoming = [{ id: 'r1' }]; // 削除を知らない生データ
+    const merged = mergeArray(base, incoming) as { id: string; deletedAt?: string }[];
+    expect(merged.find(m => m.id === 'r1')?.deletedAt).toBe('2026-06-15T00:00:00Z');
+  });
 });
 
 describe('mergeValue', () => {

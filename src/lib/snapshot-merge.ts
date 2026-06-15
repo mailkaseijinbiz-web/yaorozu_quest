@@ -7,6 +7,8 @@
 // マージ方針:
 // - 配列(id付きオブジェクト): id をキーに和集合。両方に在る id は incoming を採用。
 //   → 片方にしか無い新規エンティティ(投稿/御朱印/活動 等)は決して失われない。
+//   ただし削除(tombstone=deletedAt付き)は復活させない: 同一 id でどちらかが削除済みなら削除を優先。
+//   → 削除した参拝記録などが、サーバー側 updated_at の進行(週次cron等)に伴うマージで戻らない。
 // - 配列(プリミティブ/混在): 値で重複排除した和集合(順序は base→incoming)。
 // - プレーンオブジェクト: キー単位に再帰マージ(incoming 優先)。
 // - スカラー/型不一致: incoming を採用。
@@ -25,12 +27,25 @@ function hasId(v: Json): v is { id: unknown } {
   return isPlainObject(v) && 'id' in v && (v as Record<string, Json>).id != null;
 }
 
-/** 2つの配列をマージする。要素が全て id 付きなら id で和集合、そうでなければ値で重複排除。 */
+/** ソフト削除(tombstone)済みか。deletedAt を持つエンティティは「削除された」とみなす。 */
+function isDeleted(v: Json): boolean {
+  return isPlainObject(v) && (v as Record<string, Json>).deletedAt != null;
+}
+
+/** 2つの配列をマージする。要素が全て id 付きなら id で和集合、そうでなければ値で重複排除。
+ *  削除(tombstone)は復活させない: 同一 id でどちらかが deletedAt を持てば削除を優先する。 */
 export function mergeArray(base: Json[], incoming: Json[]): Json[] {
   if (base.every(hasId) && incoming.every(hasId)) {
     const map = new Map<unknown, Json>();
     for (const it of base) map.set((it as { id: unknown }).id, it);
-    for (const it of incoming) map.set((it as { id: unknown }).id, it); // incoming 優先
+    for (const it of incoming) {
+      const id = (it as { id: unknown }).id;
+      const prev = map.get(id);
+      // base 側がすでに削除済みで incoming が未削除（=削除を知らない古い端末）なら、
+      // 削除を維持するため上書きしない。それ以外は incoming 優先（incoming の削除も反映）。
+      if (prev !== undefined && isDeleted(prev) && !isDeleted(it)) continue;
+      map.set(id, it);
+    }
     return [...map.values()];
   }
   const seen = new Set<string>();
