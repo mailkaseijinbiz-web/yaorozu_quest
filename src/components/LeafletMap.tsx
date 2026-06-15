@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import 'leaflet-rotate'; // L.Map に回転 API（rotate/touchRotate/setBearing）を後付けする
 import { Navigation } from 'lucide-react';
 import { Spot, isVerifiedSpot } from '../lib/db';
 import { roughDistance, distanceKm } from '../lib/geo';
@@ -105,6 +106,10 @@ export default function LeafletMap({
 
   // 地図の移動に追従して再描画するためのバージョン
   const [mapVersion, setMapVersion] = useState(0);
+  // 地図の回転角（度・北=0・時計回り）。コンパスボタンの表示/向きに使う。
+  const [bearing, setBearing] = useState(0);
+  // 現在地マーカーの方角ビーム角（度）。回転時に DOM 直更新するため ref で保持。
+  const headingRef = useRef(0);
 
   // 1. Initialize Map
   useEffect(() => {
@@ -113,6 +118,13 @@ export default function LeafletMap({
     const map = L.map(mapContainerRef.current, {
       zoomControl: false,
       attributionControl: false,
+      // 回転を有効化（2本指のひねり＝touchRotate / PCは Shift+ドラッグ）。
+      // 既定の回転コントロールは使わず、自前のコンパスボタンで北リセットする。
+      rotate: true,
+      touchRotate: true,
+      shiftKeyRotate: true,
+      rotateControl: false,
+      bearing: 0,
     }).setView([userLocation.lat, userLocation.lng], 16);
 
     // CartoDB Voyager Tile Layer (Bright, color-rich, highly readable map tiles)
@@ -130,6 +142,16 @@ export default function LeafletMap({
     map.on('moveend', bump);
     map.on('zoomend', bump);
     setMapVersion((v) => v + 1);
+
+    // 回転に追従：コンパスボタンの向き（state）と、現在地ビームの角度（DOM直更新）を更新する。
+    // ビームは divIcon（React管理外）なので、回転フレーム毎の再生成を避けて transform だけ書き換える。
+    const onRotate = () => {
+      const b = map.getBearing();
+      setBearing(b);
+      const beam = mapContainerRef.current?.querySelector<HTMLElement>('.user-beam');
+      if (beam) beam.style.transform = `rotate(${headingRef.current - b}deg)`;
+    };
+    map.on('rotate', onRotate);
 
     // 地図移動をアクティビティログへ（60秒スロットル）
     let lastMoveLog = 0;
@@ -175,6 +197,7 @@ export default function LeafletMap({
       if (mapRef.current) {
         mapRef.current.off('move', bump);
         mapRef.current.off('zoomend', bump);
+        mapRef.current.off('rotate', onRotate);
         mapRef.current.remove();
         mapRef.current = null;
       }
@@ -217,6 +240,9 @@ export default function LeafletMap({
         Math.sin((userLocation.lat * Math.PI) / 180) * Math.cos((activeSpot.latitude * Math.PI) / 180) * Math.cos(dLng);
       heading = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
     }
+    headingRef.current = heading;
+    // 地図が回転していてもビームは地理上の方角を指すよう、画面上の角度から地図方位を差し引く。
+    const beamDeg = heading - (mapRef.current?.getBearing() ?? 0);
 
     const userHtml = `
       <div style="position:relative;width:44px;height:44px;">
@@ -230,7 +256,7 @@ export default function LeafletMap({
         <div style="position:absolute;left:22px;top:22px;transform:translate(-50%,-50%);width:24px;height:24px;border-radius:50%;background:rgba(26,115,232,0.22);animation:gmap-pulse 2s infinite ease-out;pointer-events:none;"></div>
         
         <!-- Direction Beam（現在地の向き。視認性のため大きめに。SVG中心(40,40)をドット中心(22,22)に重ねる） -->
-        <svg style="position:absolute;left:-18px;top:-18px;width:80px;height:80px;transform:rotate(${heading}deg);transform-origin:40px 40px;pointer-events:none;" viewBox="0 0 80 80">
+        <svg class="user-beam" style="position:absolute;left:-18px;top:-18px;width:80px;height:80px;transform:rotate(${beamDeg}deg);transform-origin:40px 40px;pointer-events:none;" viewBox="0 0 80 80">
           <defs>
             <radialGradient id="beam-grad" cx="50%" cy="50%" r="50%">
               <stop offset="0%" stop-color="#1a73e8" stop-opacity="0.6"/>
@@ -593,6 +619,33 @@ export default function LeafletMap({
   return (
     <div className="relative w-full h-full">
       <div ref={mapContainerRef} className="w-full h-full rounded-2xl overflow-hidden" />
+
+      {/* 方位リセット（コンパス）。地図が回転しているときだけ表示。タップで北を上に戻す。
+          コンパスの針は北の実方向（画面上では -bearing）を指す。 */}
+      {(() => {
+        const off = bearing > 180 ? 360 - bearing : bearing; // 北からのズレ量
+        const showCompass = off > 1 && !hideControls;
+        return (
+          <button
+            onClick={() => mapRef.current?.setBearing(0)}
+            aria-label="北を上に戻す"
+            title="北を上に戻す"
+            style={{
+              bottom: controlsBottom + 52,
+              opacity: showCompass ? 1 : 0,
+              transform: showCompass ? 'scale(1)' : 'scale(0.7)',
+              pointerEvents: showCompass ? 'auto' : 'none',
+              transition: 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.2,1.4,0.4,1), bottom 0.25s ease',
+            }}
+            className="absolute right-3 z-[600] w-11 h-11 rounded-full bg-white shadow-lg border border-[#2563eb]/20 flex items-center justify-center cursor-pointer hover:bg-gray-50"
+          >
+            <svg viewBox="0 0 24 24" className="w-6 h-6" style={{ transform: `rotate(${-bearing}deg)` }}>
+              <polygon points="12,3 8.5,13 12,11 15.5,13" fill="#e60012" />
+              <polygon points="12,21 8.5,11 12,13 15.5,11" fill="#9ca3af" />
+            </svg>
+          </button>
+        );
+      })()}
 
       {/* 現在地へ戻るボタン（下部オーバーレイの上端 +10px に追従・開始時にふわっと） */}
       <button

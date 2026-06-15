@@ -6,6 +6,7 @@
 // 既存の3段フォールバック方針を踏襲: Gemini vision → OpenAI vision → 定型文。
 // どの失敗モードでも HTTP 200 で定型文を返し、達成演出を壊さない（graceful degradation）。
 import { NextResponse } from 'next/server';
+import { shouldUsePhotoVision } from '../../../lib/ai-budget';
 
 interface FeedbackContext {
   spotName?: string;
@@ -54,6 +55,13 @@ export async function POST(request: Request) {
     const body = await request.json();
     const photoDataUrl: string = String(body.photoDataUrl ?? '');
     const ctx: FeedbackContext = body.context ?? {};
+
+    // 生成AI(ビジョン)の節約: 既定では「道中の共有写真(casual)」のみ AI で講評し、
+    // クエストの証拠写真はルールベースの定型文で返す（撮影のたびのビジョン課金を抑える）。
+    // 範囲は AI_PHOTO_FEEDBACK（all|casual-only|off）で切替可能。
+    if (!shouldUsePhotoVision(ctx.casual === true)) {
+      return NextResponse.json({ feedback: fallbackFeedback(ctx), mode: 'fallback' });
+    }
 
     // data URL を分解（/api/upload と同じ形式チェック）。不正・過大は定型文で 200
     const m = photoDataUrl.match(/^data:(image\/(?:png|jpe?g|webp|gif));base64,(.+)$/);

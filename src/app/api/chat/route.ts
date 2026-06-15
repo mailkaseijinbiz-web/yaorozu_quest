@@ -1,6 +1,7 @@
 // Yaorozu God OS - Chat API Route with OpenAI & Rule-based Fallback
 import { NextResponse } from 'next/server';
 import { getTriviaNear } from '../../../data/tokyo-trivia';
+import { AI_BUDGET } from '../../../lib/ai-budget';
 
 // Interface matching DB types inside API
 interface Agent {
@@ -299,8 +300,10 @@ Real local knowledge near this place (verified facts; you may share these in con
 ${nearbyTrivia.map((t) => `- ${t.title} — ${t.body}`).join('\n')}`
       : '';
 
-    // 話題シード：会話が途切れたとき、神が自分から振れる寺社歩きの話題
-    const topicSection = `
+    // 話題シード：会話が途切れたとき、神が自分から振れる寺社歩きの話題。
+    // 会話が進むと不要になるため、序盤（履歴が少ないうち）だけ入れて入力トークンを節約する。
+    const includeTopicSeeds = (Array.isArray(history) ? history.length : 0) < AI_BUDGET.chatTopicSeedUntilTurns;
+    const topicSection = !includeTopicSeeds ? '' : `
 
 会話が一段落したら、次の話題から一つ選び、自分から短く振ってもよい:
 - ご祭神・御本尊の物語（いつ・誰のために祀られたかという由緒）
@@ -327,7 +330,7 @@ Consider the current local time in your response if appropriate (e.g. greeting t
     // ── Gemini を優先（GEMINI_API_KEY がある場合）──
     if (geminiKey) {
       const contents = [
-        ...history.slice(-10).map((msg: { sender: 'user' | 'agent'; text: string }) => ({
+        ...history.slice(-AI_BUDGET.chatHistoryTurns).map((msg: { sender: 'user' | 'agent'; text: string }) => ({
           role: msg.sender === 'user' ? 'user' : 'model',
           parts: [{ text: msg.text }],
         })),
@@ -343,7 +346,7 @@ Consider the current local time in your response if appropriate (e.g. greeting t
             systemInstruction: { parts: [{ text: fullSystemPrompt }] },
             contents,
             generationConfig: {
-              maxOutputTokens: 400,
+              maxOutputTokens: AI_BUDGET.chatMaxOutputTokens,
               temperature: 0.7,
               thinkingConfig: { thinkingBudget: 0 }, // 思考トークンを無効化（応答を確実に返す）
             },
@@ -363,7 +366,7 @@ Consider the current local time in your response if appropriate (e.g. greeting t
 
     const chatMessages = [
       { role: 'system', content: fullSystemPrompt },
-      ...history.slice(-10).map((msg: { sender: 'user' | 'agent'; text: string }) => ({
+      ...history.slice(-AI_BUDGET.chatHistoryTurns).map((msg: { sender: 'user' | 'agent'; text: string }) => ({
         role: msg.sender === 'user' ? 'user' : 'assistant',
         content: msg.text,
       })),
@@ -379,7 +382,7 @@ Consider the current local time in your response if appropriate (e.g. greeting t
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: chatMessages,
-        max_tokens: 300,
+        max_tokens: AI_BUDGET.chatMaxOutputTokens,
         temperature: 0.7
       })
     });
