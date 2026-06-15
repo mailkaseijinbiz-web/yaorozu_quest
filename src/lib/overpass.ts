@@ -5,6 +5,8 @@
 // 設計意図: 「場は実在の寺社であるべき」。AI に場を発明させるのではなく、
 // 実在の神社・寺院を一次情報（ベース）として採用する。
 
+import { isExcludedReligion } from './spot-filter';
+
 /** 場のカテゴリ（唯一の真実）。実在の寺社のみを場とする。/api/generate-spot と共有する。 */
 export const CATEGORIES = ['神社', '寺院'] as const;
 export type Category = (typeof CATEGORIES)[number];
@@ -162,6 +164,7 @@ export async function lookupRealPlaces(
     const tags = el.tags ?? {};
     const name = tags['name:ja'] || tags.name;
     if (!name) continue;
+    if (isExcludedReligion(name)) continue; // 新興宗教の施設は場にしない
     const category = mapCategory(tags);
     if (!category) continue;
     const plat = el.lat ?? el.center?.lat;

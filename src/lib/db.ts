@@ -3,6 +3,7 @@ import { generateTrivia } from '../data/trivia-seed';
 import { generateTokyoSpots } from '../data/tokyo-spots';
 import { schedulePush } from './cloud-sync';
 import { distanceKm } from './geo';
+import { isExcludedReligion } from './spot-filter';
 import type { Quest } from '../data/tasks';
 import { CHALLENGES, buildGoshuinQuest } from '../data/challenges';
 import { hasGoShuin } from './goshuin';
@@ -745,13 +746,15 @@ class MockDatabase {
     //   ② 寺社以外の場 — 場は実在の神社・寺院のみとする方針のため、旧仕様で生成された
     //      公園・商店街・史跡などの場を退役させる。
     //   ③ 旧フォールバックの「GPS地点 (lat, lng)」プレースホルダー — 実在の場のみとする方針のため退役。
+    //   ④ 新興宗教の施設 — 伝統的な信仰の場のみを場とする方針のため退役（旧シード/旧生成の混入を除外）。
     let mutated = false;
     const withTtl = stored.map(s => {
       if (s.deletedAt) return s;
       const ttlExpired = s.expiresAt != null && new Date(s.expiresAt).getTime() <= now;
       const notShrineOrTemple = s.category !== '神社' && s.category !== '寺院';
       const gpsPlaceholder = s.name.startsWith('GPS地点');
-      if (ttlExpired || notShrineOrTemple || gpsPlaceholder) {
+      const newReligion = isExcludedReligion(s.name);
+      if (ttlExpired || notShrineOrTemple || gpsPlaceholder || newReligion) {
         mutated = true;
         return { ...s, deletedAt: new Date().toISOString() };
       }

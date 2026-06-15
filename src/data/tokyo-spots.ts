@@ -11,6 +11,7 @@
 
 import type { Spot } from '../lib/db';
 import { REAL_TEMPLES } from './tokyo-temples';
+import { isExcludedReligion } from '../lib/spot-filter';
 
 // kind: 1=神社 / 0=寺院。カテゴリ別の味付けテンプレ。
 const FLAVOR = {
@@ -41,6 +42,8 @@ export function generateTokyoSpots(count = REAL_TEMPLES.length): Spot[] {
 
   for (let i = 0; i < n; i++) {
     const [name, lat, lng, kind] = REAL_TEMPLES[i];
+    // 新興宗教の施設は場にしない（id=osm-seed-${i} は元配列の添字で固定し、他スポットのIDはずらさない）。
+    if (isExcludedReligion(name)) continue;
     const f = FLAVOR[kind];
     const godName = `${name}の${f.god}`;
 
