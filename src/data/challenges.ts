@@ -137,8 +137,36 @@ export const GOOD_QUEST: Quest = {
   source: 'static',
 };
 
-/** 移動をともなわないクエスト（アバター設定・煩悩・最近良かったこと）か。距離表示・地図遷移を出さない判定に使う。 */
-const STATIONARY_TASK_TYPES = new Set(['avatar_photo', 'concerns_self', 'recent_good_self']);
+// アプリをスマホのホーム画面に追加する移動不要クエスト（モバイルのみ・未設置のときだけ表示）。
+// 達成判定はアプリ側で扱う：手順モーダルの「追加した」or スタンドアロン起動の検知で完了。
+export const HOMESCREEN_QUEST: Quest = {
+  id: 'add-to-home-self',
+  title: 'アプリをホーム画面に追加',
+  description: 'ホーム画面に追加すると、アプリのように一発で開けて通知も受け取りやすくなる。やり方はタップで案内するぞ。',
+  difficulty: 1,
+  minLevel: 0,
+  estMinutes: 1,
+  badgeIcon: '📲',
+  badgeName: 'ホームに祀りし者',
+  goalName: 'ホーム画面に追加',
+  goalLat: 0,
+  goalLng: 0,
+  tasks: [
+    {
+      id: 's0',
+      type: 'add_to_home',
+      kind: TASK_CATALOG.add_to_home.kind,
+      icon: TASK_CATALOG.add_to_home.icon,
+      label: TASK_CATALOG.add_to_home.label,
+      title: TASK_CATALOG.add_to_home.title,
+      reward: TASK_CATALOG.add_to_home.reward,
+    },
+  ],
+  source: 'static',
+};
+
+/** 移動をともなわないクエスト（アバター設定・煩悩・最近良かったこと・ホーム画面追加）か。距離表示・地図遷移を出さない判定に使う。 */
+const STATIONARY_TASK_TYPES = new Set(['avatar_photo', 'concerns_self', 'recent_good_self', 'add_to_home']);
 export function isStationaryQuest(q: Quest): boolean {
   return q.tasks.length === 1 && STATIONARY_TASK_TYPES.has(q.tasks[0].type);
 }
