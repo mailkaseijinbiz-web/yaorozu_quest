@@ -3,8 +3,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Trophy, Flag, Clock, X, Check, Hourglass } from 'lucide-react';
 import { User, db } from '../lib/db';
-import { difficultyLabel, terrainLabel, Challenge, AVATAR_QUEST, CONCERNS_QUEST, GOOD_QUEST, isStationaryQuest, buildGoshuinQuest } from '../data/challenges';
+import { difficultyLabel, terrainLabel, Challenge, AVATAR_QUEST, CONCERNS_QUEST, GOOD_QUEST, HOMESCREEN_QUEST, isStationaryQuest, buildGoshuinQuest } from '../data/challenges';
 import { hasGoShuin } from '../lib/goshuin';
+import { shouldOfferHomescreenQuest } from '../lib/pwa';
 import { getLevelInfo } from '../data/levels';
 import { distanceKm } from '../lib/geo';
 import { ttlInfo } from '../lib/quest-ui';
@@ -72,6 +73,11 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
   const progress = db.getChallengeProgress();
   const userLevel = getLevelInfo(currentUser.totalToku).current.level;
 
+  // ホーム画面追加クエストはモバイル かつ 未インストールのときだけ出す。
+  // SSRとのハイドレーション不一致を避けるため、判定はマウント後（クライアント）に行う。
+  const [showHomeQuest, setShowHomeQuest] = useState(false);
+  useEffect(() => { setShowHomeQuest(shouldOfferHomescreenQuest()); }, []);
+
   // フィルタごとの件数
   const FILTERS = [
     { key: 'todo', label: '未達成', n: null },
@@ -95,7 +101,7 @@ export default function HomeTab({ currentUser, userLocation, isGeneratingQuests,
     .sort((a, b) => a.d - b.d)
     .slice(0, 8)
     .map((x) => buildGoshuinQuest(x.s));
-  const scored = [...db.getAllQuests(), ...goshuinQuests, AVATAR_QUEST, CONCERNS_QUEST, GOOD_QUEST]
+  const scored = [...db.getAllQuests(), ...goshuinQuests, AVATAR_QUEST, CONCERNS_QUEST, GOOD_QUEST, ...(showHomeQuest ? [HOMESCREEN_QUEST] : [])]
     .filter((ch) => {
       const completed = progress.completed.includes(ch.id);
       const ok = userLevel >= ch.minLevel;

@@ -24,7 +24,8 @@ import AltruismDividendCelebrate from '../components/AltruismDividendCelebrate';
 import { isDebugEnabled, getDebugLocation, setDebugLocation, type DebugLatLng } from '../lib/debug';
 import { getLevelInfo } from '../data/levels';
 import { getBadgeStates, type BadgeState } from '../data/badges';
-import { Challenge, AVATAR_QUEST, CONCERNS_QUEST, GOOD_QUEST, CONCERN_PRESETS, RECENT_GOOD_PRESETS } from '../data/challenges';
+import { Challenge, AVATAR_QUEST, CONCERNS_QUEST, GOOD_QUEST, HOMESCREEN_QUEST, CONCERN_PRESETS, RECENT_GOOD_PRESETS } from '../data/challenges';
+import { isStandalone, homeAddPlatform } from '../lib/pwa';
 import { uploadImage } from '../lib/upload';
 import type { Quest } from '../data/tasks';
 import { subscribePush, notificationPermission } from '../lib/push-client';
@@ -83,6 +84,10 @@ export default function HomePage() {
   const [earnedBadge, setEarnedBadge] = useState<BadgeState | null>(null); // 新規獲得バッジの演出
   const [pushNotice, setPushNotice] = useState<string | null>(null); // 通知購読の結果トースト
   const [pushGranted, setPushGranted] = useState(false); // 通知が許可済みか（許可済みなら購読ボタンを出さない）
+  const [homeQuestOpen, setHomeQuestOpen] = useState(false); // ホーム画面追加の手順モーダル
+  // Android Chrome 等の「ホーム画面に追加」プロンプトを捕捉して、ワンタップ追加に使う
+  const installPromptRef = useRef<{ prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> } | null>(null);
+  const [canInstallPrompt, setCanInstallPrompt] = useState(false);
   const [generatingSpot, setGeneratingSpot] = useState(false); // 近くの場(神)を生成中の控えめな表示
   const [comebackDays, setComebackDays] = useState<number | null>(null); // カムバック歓迎（◯日ぶり）
   const [spots, setSpots] = useState<Spot[]>([]);
@@ -591,6 +596,26 @@ export default function HomePage() {
     if (fresh.length) setEarnedBadge(fresh[0]);
   };
 
+  // 「ホーム画面に追加」プロンプト（Android Chrome 等）を捕捉し、ワンタップ追加に使う
+  useEffect(() => {
+    const onBIP = (e: Event) => {
+      e.preventDefault();
+      installPromptRef.current = e as unknown as { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
+      setCanInstallPrompt(true);
+    };
+    window.addEventListener('beforeinstallprompt', onBIP);
+    return () => window.removeEventListener('beforeinstallprompt', onBIP);
+  }, []);
+
+  // すでにホーム画面（スタンドアロン）で起動していれば、ホーム画面追加クエストを自動達成にする
+  useEffect(() => {
+    if (!currentUser || !isStandalone()) return;
+    if (db.getChallengeProgress().completed.includes(HOMESCREEN_QUEST.id)) return;
+    db.completeChallenge(currentUser.id, HOMESCREEN_QUEST.id);
+    refreshDatabaseStates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser]);
+
   // 下に引っぱって更新：クラウドの最新スナップショットを取り込み、ローカル状態を再描画する。
   // 先に保留中の push を確定させ、直前の削除などがクラウド未反映のまま pull で
   // 巻き戻る（御朱印の復活など）のを防ぐ。
@@ -835,6 +860,8 @@ export default function HomePage() {
                     setGoodQuestOpen(true);
                     return;
                   }
+                  // ホーム画面追加：地図に行かず、その場で追加手順モーダルを開く
+                  if (cid === HOMESCREEN_QUEST.id) { setHomeQuestOpen(true); return; }
                   // クエスト参加を機に通知購読（以降サーバ自動プッシュが届く）。
                   // 拒否されても旅は続けられることを明示し、「無視された/壊れた」という不安を残さない。
                   subscribePush().then((r) => {
@@ -1468,6 +1495,79 @@ export default function HomePage() {
                 <Check className="w-4 h-4" />神に伝える
               </button>
               <p className="text-[11px] text-gray-400 mt-2 text-center">伝えると「{GOOD_QUEST.badgeName}」バッジと徳がもらえます</p>
+            </div>
+          </div>
+        )}
+
+        {/* ── ホーム画面に追加クエスト：端末別の手順を案内し、追加できたら達成にする ── */}
+        {homeQuestOpen && currentUser && (
+          <div className="absolute inset-0 z-[4200] bg-black/50 flex items-center justify-center p-5" onClick={() => setHomeQuestOpen(false)}>
+            <div className="relative w-full max-w-[360px] max-h-[85vh] overflow-y-auto bg-white rounded-3xl shadow-2xl px-5 py-6" onClick={(e) => e.stopPropagation()}>
+              <button onClick={() => setHomeQuestOpen(false)} aria-label="閉じる" className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/5 hover:bg-black/10 flex items-center justify-center text-gray-500 cursor-pointer"><X className="w-4 h-4" /></button>
+              <div className="text-center">
+                <div className="text-4xl mb-2">📲</div>
+                <h3 className="text-lg font-black text-gray-900 leading-tight">{HOMESCREEN_QUEST.title}</h3>
+                <p className="text-[12px] text-gray-500 mt-1.5 leading-snug">ホーム画面に追加すると、アプリのように一発で開けて、神々の呼びかけ（通知）も受け取りやすくなる。</p>
+              </div>
+
+              {/* 端末別の追加手順 */}
+              {(() => {
+                const plat = homeAddPlatform();
+                const steps = plat === 'ios'
+                  ? ['Safari下部の「共有」ボタン（□に↑）をタップ', 'メニューを少し下にスクロール', '「ホーム画面に追加」を選ぶ', '右上の「追加」をタップ']
+                  : plat === 'android'
+                  ? ['ブラウザ右上のメニュー（⋮）を開く', '「ホーム画面に追加」または「アプリをインストール」を選ぶ', '案内に従って「追加／インストール」']
+                  : ['ブラウザのメニューを開く', '「ホーム画面に追加」または「インストール」を選ぶ'];
+                return (
+                  <ol className="mt-4 space-y-2">
+                    {steps.map((t, i) => (
+                      <li key={i} className="flex items-start gap-2.5 text-[13px] text-gray-700">
+                        <span className="shrink-0 w-5 h-5 rounded-full bg-shrine-red/10 text-shrine-red text-[11px] font-black flex items-center justify-center mt-0.5">{i + 1}</span>
+                        <span className="leading-snug">{t}</span>
+                      </li>
+                    ))}
+                  </ol>
+                );
+              })()}
+
+              {/* Android 等：ワンタップ追加プロンプトが使えるなら出す */}
+              {canInstallPrompt && (
+                <button
+                  onClick={async () => {
+                    const p = installPromptRef.current;
+                    if (!p) return;
+                    try {
+                      await p.prompt();
+                      const choice = await p.userChoice;
+                      if (choice.outcome === 'accepted') {
+                        db.completeChallenge(currentUser.id, HOMESCREEN_QUEST.id);
+                        refreshDatabaseStates();
+                        setHomeQuestOpen(false);
+                      }
+                    } catch { /* キャンセル等は無視 */ }
+                    installPromptRef.current = null;
+                    setCanInstallPrompt(false);
+                  }}
+                  className="mt-5 w-full inline-flex items-center justify-center gap-2 text-[15px] font-black py-3 rounded-full bg-shrine-red text-white hover:opacity-90 active:scale-[0.99] cursor-pointer transition-all"
+                >
+                  ホーム画面に追加する
+                </button>
+              )}
+
+              {/* 手動で追加した人向け：達成として記録する */}
+              <button
+                onClick={() => {
+                  db.completeChallenge(currentUser.id, HOMESCREEN_QUEST.id);
+                  refreshDatabaseStates();
+                  setProfileSaved(true);
+                  setTimeout(() => setProfileSaved(false), 2000);
+                  setHomeQuestOpen(false);
+                }}
+                className={`w-full inline-flex items-center justify-center gap-2 text-[15px] font-black py-3 rounded-full active:scale-[0.99] cursor-pointer transition-all ${canInstallPrompt ? 'mt-2 bg-gray-100 text-gray-700 hover:bg-gray-200' : 'mt-5 bg-shrine-red text-white hover:opacity-90'}`}
+              >
+                <Check className="w-4 h-4" />追加した
+              </button>
+              <p className="text-[11px] text-gray-400 mt-2 text-center">追加すると「{HOMESCREEN_QUEST.badgeName}」バッジと徳がもらえます</p>
             </div>
           </div>
         )}
