@@ -27,7 +27,7 @@ import { getBadgeStates, type BadgeState } from '../data/badges';
 import { Challenge, AVATAR_QUEST, CONCERNS_QUEST, GOOD_QUEST, CONCERN_PRESETS, RECENT_GOOD_PRESETS } from '../data/challenges';
 import { uploadImage } from '../lib/upload';
 import type { Quest } from '../data/tasks';
-import { subscribePush } from '../lib/push-client';
+import { subscribePush, notificationPermission } from '../lib/push-client';
 import { useDeviceHeading } from '../lib/use-device-heading';
 import { backfillTrivia } from '../lib/trivia-fill';
 import { buildTourQuest, tourAreaKey } from '../lib/quest-tour';
@@ -82,6 +82,7 @@ export default function HomePage() {
   const [authProfile, setAuthProfile] = useState<AuthProfile | null>(null); // OAuthログイン中のユーザー
   const [earnedBadge, setEarnedBadge] = useState<BadgeState | null>(null); // 新規獲得バッジの演出
   const [pushNotice, setPushNotice] = useState<string | null>(null); // 通知購読の結果トースト
+  const [pushGranted, setPushGranted] = useState(false); // 通知が許可済みか（許可済みなら購読ボタンを出さない）
   const [generatingSpot, setGeneratingSpot] = useState(false); // 近くの場(神)を生成中の控えめな表示
   const [comebackDays, setComebackDays] = useState<number | null>(null); // カムバック歓迎（◯日ぶり）
   const [spots, setSpots] = useState<Spot[]>([]);
@@ -119,6 +120,11 @@ export default function HomePage() {
       document.body.style.overflow = prevOverflow;
     };
   }, [detailSpot]);
+
+  // 通知が既に許可済みかを判定（許可済みなら「呼びかけを受け取る」ボタンは出さない）
+  useEffect(() => {
+    setPushGranted(notificationPermission() === 'granted');
+  }, []);
 
   // User state
   const [currentUser, setCurrentUser] = useState<UserType | null>(null);
@@ -1107,11 +1113,13 @@ export default function HomePage() {
                     </div>
                   )}
 
-                  {/* プッシュ通知設定 */}
+                  {/* プッシュ通知設定（許可済みのときは出さない） */}
+                  {!pushGranted && (
                   <div className="relative mt-4 flex items-center justify-center gap-2 text-[12px]">
                     <button
                       onClick={async () => {
                         const res = await subscribePush();
+                        if (res === 'subscribed') setPushGranted(true); // 許可後はボタンを隠す
                         // 失敗理由を取り違えないよう、結果ごとに正確な文言を出す
                         setPushNotice(
                           res === 'subscribed' ? '神々からの呼びかけを許可しました'
@@ -1127,6 +1135,7 @@ export default function HomePage() {
                       🔔 神々からの呼びかけを受け取る
                     </button>
                   </div>
+                  )}
                 </div>
 
                 {/* タブ内容（マイページはバッジのみ） */}

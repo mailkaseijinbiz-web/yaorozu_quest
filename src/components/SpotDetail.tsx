@@ -785,11 +785,16 @@ function SpotDetailBody({
         >
           <Navigation className="w-4 h-4" />ここに行く
         </button>
+        {/* 訪問状態を見分けられるように：記録があれば塗り「✓ 行った（訪問済み）」、無ければ枠線の「行った？」（記録を促す）。 */}
         <button
           onClick={() => { setTab('records'); setRecFormOpen(true); }}
-          className="flex-1 flex items-center justify-center gap-1.5 text-[13px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 py-2.5 rounded-full hover:bg-emerald-100 active:scale-[0.97] transition-all cursor-pointer"
+          className={`flex-1 flex items-center justify-center gap-1.5 text-[13px] font-black py-2.5 rounded-full active:scale-[0.97] transition-all cursor-pointer ${
+            spotRecords.length > 0
+              ? 'text-white bg-emerald-500 hover:bg-emerald-600 shadow-sm'
+              : 'text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100'
+          }`}
         >
-          <Check className="w-4 h-4" />行った
+          <Check className="w-4 h-4" />{spotRecords.length > 0 ? '行った' : '行った？'}
         </button>
       </div>
 

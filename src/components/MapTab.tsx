@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import { Spot, User, db } from '../lib/db';
 import { uploadImage, compressImage } from '../lib/upload';
 import { hasGoShuin, grantGoShuin } from '../lib/goshuin';
+import { getVisitRecords } from '../lib/visit-records';
 import { playChime } from '../lib/sound';
 import { vibrateGentle } from '../lib/haptics';
 import GoshuinCelebrate from './GoshuinCelebrate';
@@ -478,6 +479,8 @@ export default function MapTab({
     }
     return top.map((x) => x.s);
   })();
+  // 参拝記録のある場（=「行った」）の集合。カードのボタンを「ここに行く／行った」で出し分ける。
+  const visitedSpotIds = new Set(getVisitRecords(currentUser.id).map((r) => r.spotId));
   // カードが指す場：選択中(activeSpot)があればそれ、無ければ最寄り。
   // マーカータップ/スワイプで activeSpot が変わり、それに追従してカードと地図ハイライトが更新される。
   const cardSpot = activeSpot ?? nearSpotList[0] ?? null;
@@ -1238,14 +1241,31 @@ export default function MapTab({
                       </div>
                     </div>
                   </div>
-                  {/* 下部：2ボタン（行った／詳細を見る） */}
+                  {/* 下部：2ボタン。未訪問は「ここに行く（経路案内）」、訪問済み（記録あり）は「✓ 行った」。 */}
                   <div className="flex border-t border-black/5">
-                    <button
-                      onClick={() => { onSelectSpot(s); onRecordVisit?.(s); }}
-                      className="flex-1 py-2.5 text-[13px] font-black text-emerald-700 hover:bg-emerald-50 active:bg-emerald-100 flex items-center justify-center gap-1 cursor-pointer border-r border-black/5"
-                    >
-                      <Check className="w-4 h-4" />行った
-                    </button>
+                    {visitedSpotIds.has(s.id) ? (
+                      <button
+                        onClick={() => { onSelectSpot(s); onOpenDetail?.(s); }}
+                        className="flex-1 py-2.5 text-[13px] font-black text-emerald-700 hover:bg-emerald-50 active:bg-emerald-100 flex items-center justify-center gap-1 cursor-pointer border-r border-black/5"
+                      >
+                        <Check className="w-4 h-4" />行った
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          // 端末の地図アプリ（iOSはAppleマップ／他はGoogleマップ）へ目的地つきで遷移。
+                          const dest = `${s.latitude},${s.longitude}`;
+                          const isIOS = typeof navigator !== 'undefined' && /iP(hone|ad|od)/.test(navigator.userAgent);
+                          const url = isIOS
+                            ? `https://maps.apple.com/?daddr=${dest}&q=${encodeURIComponent(s.name)}`
+                            : `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+                          window.open(url, '_blank', 'noopener,noreferrer');
+                        }}
+                        className="flex-1 py-2.5 text-[13px] font-black text-[#2563eb] hover:bg-blue-50 active:bg-blue-100 flex items-center justify-center gap-1 cursor-pointer border-r border-black/5"
+                      >
+                        <Navigation2 className="w-4 h-4" />ここに行く
+                      </button>
+                    )}
                     <button
                       onClick={() => { onSelectSpot(s); onOpenDetail?.(s); }}
                       className="flex-1 py-2.5 text-[13px] font-black text-[#2563eb] hover:bg-blue-50 active:bg-blue-100 flex items-center justify-center gap-1 cursor-pointer"

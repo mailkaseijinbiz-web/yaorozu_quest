@@ -12,6 +12,12 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 
 export type SubscribeResult = 'subscribed' | 'denied' | 'unsupported' | 'unconfigured' | 'error';
 
+/** この端末の通知許可状態。'granted'＝許可済み（購読ボタンを出す必要なし）。 */
+export function notificationPermission(): NotificationPermission | 'unsupported' {
+  if (typeof window === 'undefined' || !('Notification' in window)) return 'unsupported';
+  return Notification.permission;
+}
+
 export async function subscribePush(): Promise<SubscribeResult> {
   // ネイティブ(iOS Capacitor)アプリ内では Web Push が使えないため APNs を使う。
   if (typeof window !== 'undefined') {
