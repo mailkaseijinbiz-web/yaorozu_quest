@@ -1,7 +1,8 @@
 'use client';
 
-import React from 'react';
-import { MapPin, Sparkles, Stamp, Footprints, Navigation2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
+import { MapPin, Sparkles, Stamp, Footprints, Navigation2, Smartphone } from 'lucide-react';
 import type { User } from '../lib/db';
 import { getLevelInfo } from '../data/levels';
 
@@ -28,6 +29,19 @@ export default function DesktopSidePanel({
 }: DesktopSidePanelProps) {
   const lv = currentUser ? getLevelInfo(currentUser.totalToku) : null;
   const pct = lv ? Math.round(lv.progress * 100) : 0;
+
+  // PC では現在のURLをQRコード化し、スマホで読み取ってそのまま続きを遊べるようにする。
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    QRCode.toDataURL(window.location.origin, {
+      width: 320,
+      margin: 1,
+      color: { dark: '#1f2937', light: '#ffffff' },
+    })
+      .then(setQrDataUrl)
+      .catch(() => {});
+  }, []);
 
   const geoLabel =
     geoStatus === 'ok'
@@ -132,9 +146,25 @@ export default function DesktopSidePanel({
         </ul>
       </div>
 
-      <p className="mt-5 px-2 text-[11px] text-gray-400">
-        位置情報を使うため、スマートフォンでの体験を推奨しています。
-      </p>
+      {/* スマホで開くQRコード（位置情報を使うため、スマホでの体験を推奨） */}
+      <div className="mt-4 mx-2 rounded-2xl bg-white shadow-sm border border-black/5 p-4 flex items-center gap-4">
+        <div className="shrink-0 w-24 h-24 rounded-xl bg-white border border-black/5 p-1.5 flex items-center justify-center overflow-hidden">
+          {qrDataUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={qrDataUrl} alt="このアプリを開くQRコード" className="w-full h-full object-contain" />
+          ) : (
+            <Smartphone className="w-8 h-8 text-gray-300" />
+          )}
+        </div>
+        <div className="min-w-0">
+          <p className="flex items-center gap-1.5 text-[12px] font-black text-gray-700">
+            <Smartphone className="w-3.5 h-3.5 text-shrine-red" />スマホで読み取る
+          </p>
+          <p className="mt-1 text-[12px] leading-relaxed text-gray-500">
+            位置情報を使うため、<span className="font-bold text-gray-700">スマートフォンでの体験を推奨</span>しています。QRを読み取って続きを。
+          </p>
+        </div>
+      </div>
     </aside>
   );
 }
