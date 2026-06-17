@@ -5,6 +5,7 @@ import { X, Send, MapPin, MessageCircle, ShoppingBag, ImagePlus, Trash2, Camera,
 import { Spot, Agent, User, db, isVerifiedSpot, isQuotaError, type UgcVisibility } from '../lib/db';
 import { buildSpotTasks, GodTask, TASK_TONE, TASK_CATALOG, GOD_FUNCTIONS } from '../data/god-tasks';
 import { distanceKm } from '../lib/geo';
+import { openGoogleMapsDirections } from '../lib/maps';
 import { uploadImage, compressImage } from '../lib/upload';
 import { getVisitRecords, addVisitRecord, deleteVisitRecord, updateVisitRecord, hasRecordForSpotOnDate, recordPhotos, MAX_RECORD_PHOTOS, type VisitRecord } from '../lib/visit-records';
 import { getAddress } from '../lib/address';
@@ -137,13 +138,25 @@ function SpotDetailBody({
   const [isCreatorModalOpen, setIsCreatorModalOpen] = useState(false);
   const [creatorFirstMessage, setCreatorFirstMessage] = useState(agent.firstMessage || '');
 
-  // 右へ横スワイプすると詳細ページを閉じる（指追従。スワイプ中は縦スクロールをロック）。
-  // 左方向は戻る先がないので引っぱり抵抗のみ。全画面のオーバーレイ表示中は無効化する。
+  // 横スワイプで「記録 → 御朱印 → 写真」のタブを行き来できる（指追従・スワイプ中は縦スクロールをロック）。
+  // 先頭（記録）でさらに右へスワイプすると詳細ページを閉じる（戻る）。
+  // チャット/依頼タブや全画面オーバーレイ表示中は無効（入力や演出を妨げない）。
+  const SWIPE_TABS = ['records', 'goshuin', 'photos'] as const;
+  const swipeTabIdx = (SWIPE_TABS as readonly string[]).indexOf(tab);
+  const overlayOpen = isKataribeOpen || !!activeMeditation || isVintageCameraOpen || !!goshuinCelebrate || !!postingTask || isCreatorModalOpen;
   const swipeRef = useSwipeNav<HTMLDivElement>({
-    enabled: !isKataribeOpen && !activeMeditation && !isVintageCameraOpen && !goshuinCelebrate && !postingTask && !isCreatorModalOpen,
-    allowLeft: false,
-    animateOut: true,
-    onCommitRight: onClose,
+    enabled: !overlayOpen && swipeTabIdx >= 0,
+    allowLeft: swipeTabIdx >= 0 && swipeTabIdx < SWIPE_TABS.length - 1, // 次のタブがある
+    allowRight: true, // 前のタブ、または先頭なら閉じる
+    onCommitLeft: () => {
+      const i = (SWIPE_TABS as readonly string[]).indexOf(tab);
+      if (i >= 0 && i < SWIPE_TABS.length - 1) setTab(SWIPE_TABS[i + 1]);
+    },
+    onCommitRight: () => {
+      const i = (SWIPE_TABS as readonly string[]).indexOf(tab);
+      if (i > 0) setTab(SWIPE_TABS[i - 1]);
+      else onClose(); // 先頭（記録）で右スワイプ＝閉じる
+    },
   });
 
   // チャット。会話履歴はスポット毎に localStorage で保持し、再訪時に続きから話せる
@@ -771,16 +784,7 @@ function SpotDetailBody({
       {/* ── 行動ボタン（ここに行く＝地図アプリで経路案内／行った＝参拝記録を書く） ── */}
       <div className="flex gap-2 px-4 py-2.5 bg-white border-b border-black/5 flex-shrink-0">
         <button
-          onClick={() => {
-            // 端末の地図アプリ（iOS は Apple マップ／他は Google マップ）へ目的地つきで遷移。
-            const dest = `${spot.latitude},${spot.longitude}`;
-            const label = encodeURIComponent(spot.name);
-            const isIOS = typeof navigator !== 'undefined' && /iP(hone|ad|od)/.test(navigator.userAgent);
-            const url = isIOS
-              ? `https://maps.apple.com/?daddr=${dest}&q=${label}`
-              : `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
-            window.open(url, '_blank', 'noopener,noreferrer');
-          }}
+          onClick={() => openGoogleMapsDirections(spot.latitude, spot.longitude)}
           className="flex-1 flex items-center justify-center gap-1.5 text-[13px] font-black text-white bg-shrine-red py-2.5 rounded-full hover:opacity-90 active:scale-[0.97] transition-all cursor-pointer"
         >
           <Navigation className="w-4 h-4" />ここに行く

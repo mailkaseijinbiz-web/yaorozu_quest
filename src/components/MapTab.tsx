@@ -12,6 +12,7 @@ import { vibrateGentle } from '../lib/haptics';
 import GoshuinCelebrate from './GoshuinCelebrate';
 import FadeImg from './FadeImg';
 import { distanceKm, bearingDeg } from '../lib/geo';
+import { openGoogleMapsDirections } from '../lib/maps';
 import { ttlInfo } from '../lib/quest-ui';
 import { photoThemesFor } from '../lib/photo-themes';
 import { getHeartVoices } from '../data/god-tasks';
@@ -1208,11 +1209,11 @@ export default function MapTab({
                   style={{ width: slideW || '100%', flexShrink: 0 }}
                   className="text-left bg-white/97 backdrop-blur-md rounded-2xl shadow-xl border border-black/5 overflow-hidden"
                 >
-                  {/* 上部：タップでその場を選択（地図でフキダシ表示） */}
+                  {/* 上部：タップで詳細ページへ遷移（「ここに行く」以外はカード全体が詳細への入口） */}
                   <div
                     role="button"
                     tabIndex={0}
-                    onClick={() => { if (swipedRef.current) { swipedRef.current = false; return; } onSelectSpot(s); }}
+                    onClick={() => { if (swipedRef.current) { swipedRef.current = false; return; } onSelectSpot(s); onOpenDetail?.(s); }}
                     className="flex items-stretch gap-3 cursor-pointer"
                   >
                     {/* 左：その場の写真（奉納写真→代表写真の順）。無ければ神の絵文字 */}
@@ -1252,15 +1253,7 @@ export default function MapTab({
                       </button>
                     ) : (
                       <button
-                        onClick={() => {
-                          // 端末の地図アプリ（iOSはAppleマップ／他はGoogleマップ）へ目的地つきで遷移。
-                          const dest = `${s.latitude},${s.longitude}`;
-                          const isIOS = typeof navigator !== 'undefined' && /iP(hone|ad|od)/.test(navigator.userAgent);
-                          const url = isIOS
-                            ? `https://maps.apple.com/?daddr=${dest}&q=${encodeURIComponent(s.name)}`
-                            : `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
-                          window.open(url, '_blank', 'noopener,noreferrer');
-                        }}
+                        onClick={() => openGoogleMapsDirections(s.latitude, s.longitude)}
                         className="flex-1 py-2.5 text-[13px] font-black text-[#2563eb] hover:bg-blue-50 active:bg-blue-100 flex items-center justify-center gap-1 cursor-pointer border-r border-black/5"
                       >
                         <Navigation2 className="w-4 h-4" />ここに行く
