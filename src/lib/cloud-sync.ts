@@ -2,38 +2,42 @@
 // localStorage の「ユーザー生成データ」キーだけを /api/persist 経由で
 // Supabase に保存・復元する。鍵未設定時はサーバーが enabled:false を返し no-op。
 
-// 同期対象キー（全データをサーバー管理）
-const SYNC_KEYS = [
-  // ユーザー・プレイデータ
-  'yaorozu_users',
-  'yaorozu_ugc',
-  'yaorozu_user_stats',
-  'yaorozu_challenge_progress',
-  'yaorozu_challenge_photos',
-  'yaorozu_challenge_comments',
-  'yaorozu_activities',
-  'yaorozu_goshuin_user-self',
-  'yaorozu_visit_records_user-self', // 参拝記録（RecordTab）
-  'yaorozu_daily_v1',      // 参拝ストリーク・カムバック（日付キーマップ）
-  'yaorozu_god_tasks_v1',  // 場の御用の本日達成（日付キーマップ）
-  'yaorozu_letters',       // 神様からの手紙（週次・cron が追記／既読は client が同期）
-  // 管理者が作成するコンテンツ
-  'yaorozu_spots_v4',
-  'yaorozu_agents_v2',
-  'yaorozu_quests_v2',
-  // ルール・設定
-  'yaorozu_quest_rules',
-  'yaorozu_spot_rules',
-  'yaorozu_system_role',
-  'yaorozu_dainichi_identity',
-  // API監視・認証
-  'yaorozu_api_calls',
-  'yaorozu_revoked_users',
-  // 人間の煩悩（覚りの調整素材）
-  'yaorozu_bonnou',
-  // アプリ設定
-  'yaorozu_app_settings',
-];
+// 同期対象キー（全データをサーバー管理）。
+// goshuin / visit_records はユーザーごとに `<key>_<userId>` で保存されるため、
+// SNAPSHOT_ID に応じて動的に解決する（→ syncKeys() を使うこと）。
+function syncKeys(): string[] {
+  return [
+    // ユーザー・プレイデータ
+    'yaorozu_users',
+    'yaorozu_ugc',
+    'yaorozu_user_stats',
+    'yaorozu_challenge_progress',
+    'yaorozu_challenge_photos',
+    'yaorozu_challenge_comments',
+    'yaorozu_activities',
+    `yaorozu_goshuin_${SNAPSHOT_ID}`,
+    `yaorozu_visit_records_${SNAPSHOT_ID}`, // 参拝記録（RecordTab）
+    'yaorozu_daily_v1',      // 参拝ストリーク・カムバック（日付キーマップ）
+    'yaorozu_god_tasks_v1',  // 場の御用の本日達成（日付キーマップ）
+    'yaorozu_letters',       // 神様からの手紙（週次・cron が追記／既読は client が同期）
+    // 管理者が作成するコンテンツ
+    'yaorozu_spots_v5',
+    'yaorozu_agents_v2',
+    'yaorozu_quests_v3',
+    // ルール・設定
+    'yaorozu_quest_rules',
+    'yaorozu_spot_rules',
+    'yaorozu_system_role',
+    'yaorozu_dainichi_identity',
+    // API監視・認証
+    'yaorozu_api_calls',
+    'yaorozu_revoked_users',
+    // 人間の煩悩（覚りの調整素材）
+    'yaorozu_bonnou',
+    // アプリ設定
+    'yaorozu_app_settings',
+  ];
+}
 
 // スナップショットID。未ログインは 'user-self'、OAuth ログイン中は認証ユーザーIDに切り替える。
 let SNAPSHOT_ID = 'user-self';
@@ -69,7 +73,7 @@ export async function pullSnapshot(): Promise<boolean> {
     lastSyncedAt = json.updatedAt ?? lastSyncedAt;
     suspendPush = true;
     let applied = false;
-    for (const key of SYNC_KEYS) {
+    for (const key of syncKeys()) {
       if (!(key in json.data) || json.data[key] == null) continue;
       const v = json.data[key];
       // 空（または非配列）のユーザーリストでローカルを上書きしない。
@@ -112,7 +116,7 @@ export async function flushPush(): Promise<void> {
 async function pushNow(): Promise<void> {
   if (typeof window === 'undefined') return;
   const data: Record<string, unknown> = {};
-  for (const key of SYNC_KEYS) {
+  for (const key of syncKeys()) {
     const raw = localStorage.getItem(key);
     if (raw == null) continue;
     try {
@@ -136,7 +140,7 @@ async function pushNow(): Promise<void> {
     if (json.merged && json.data) {
       suspendPush = true;
       try {
-        for (const key of SYNC_KEYS) {
+        for (const key of syncKeys()) {
           if (!(key in json.data) || json.data[key] == null) continue;
           const v = json.data[key];
           if (key === 'yaorozu_users' && (!Array.isArray(v) || v.length === 0)) continue;

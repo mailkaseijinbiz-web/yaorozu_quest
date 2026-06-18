@@ -41,8 +41,10 @@ function hash(s: string): number {
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 function fmtDist(distKm: number): string {
-  if (distKm >= 1) return `${(Math.round(distKm * 10) / 10).toFixed(1)}km`;
-  return `${Math.max(100, Math.round((distKm * 1000) / 100) * 100)}m`;
+  // 100m 単位へ丸めてから単位を決める。0.96–0.99km を「1000m」と誤表記しないため。
+  const m = Math.max(100, Math.round((distKm * 1000) / 100) * 100);
+  if (m >= 1000) return `${(Math.round(distKm * 10) / 10).toFixed(1)}km`;
+  return `${m}m`;
 }
 
 // 残り距離の声かけ（決定論的に選択。寺社歩きの所作・歩く楽しみを織り込む）

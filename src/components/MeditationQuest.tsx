@@ -20,6 +20,12 @@ export default function MeditationQuest({ godName, godEmoji, requiredSeconds, on
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const completeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const elapsedRef = useRef(0); // 表向き時のリセット判定で参照（effect 依存から elapsed を外すため）
+  useEffect(() => { elapsedRef.current = elapsed; }, [elapsed]);
+
+  // アンマウント時に完了タイマーを破棄（閉じた後に onComplete が発火するのを防ぐ）
+  useEffect(() => () => { if (completeTimerRef.current) clearTimeout(completeTimerRef.current); }, []);
 
   // 1. Page Visibility API による検知（画面がオフになった、または別アプリへ）
   useEffect(() => {
@@ -66,25 +72,19 @@ export default function MeditationQuest({ godName, godEmoji, requiredSeconds, on
   // 判定ロジック：画面が隠れている(isHidden) か、伏せられている(isFaceDown) か
   const isValidating = isHidden || isFaceDown;
 
-  // カウントアップ
+  // カウントアップ。interval を毎秒作り直さないよう、依存に elapsed を含めない
+  // （含めると毎ティックで clear→再生成し、1秒の刻みがずれて所要時間が伸びる）。
   useEffect(() => {
     if (isFinished) return;
 
     if (isValidating) {
       timerRef.current = setInterval(() => {
-        setElapsed((prev) => {
-          const next = prev + 1;
-          if (next >= requiredSeconds) {
-            handleComplete();
-            return requiredSeconds;
-          }
-          return next;
-        });
+        setElapsed((prev) => Math.min(prev + 1, requiredSeconds));
       }, 1000);
     } else {
       // 表を向けたらリセット（厳しいルール）
       if (timerRef.current) clearInterval(timerRef.current);
-      if (elapsed > 0) {
+      if (elapsedRef.current > 0) {
         setElapsed(0); // やり直し
         // もし途中で表を向けられたらバイブで警告
         if (typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -96,10 +96,11 @@ export default function MeditationQuest({ godName, godEmoji, requiredSeconds, on
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isValidating, isFinished, requiredSeconds, elapsed]);
+  }, [isValidating, isFinished, requiredSeconds]);
 
-  const handleComplete = () => {
+  // 完了判定は setState 更新関数の外（専用 effect）で行い、二重発火を防ぐ。
+  useEffect(() => {
+    if (isFinished || elapsed < requiredSeconds) return;
     if (timerRef.current) clearInterval(timerRef.current);
     setIsFinished(true);
 
@@ -107,12 +108,12 @@ export default function MeditationQuest({ godName, godEmoji, requiredSeconds, on
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
       navigator.vibrate([200, 100, 200, 100, 500]); // 神聖な長い振動
     }
-    
-    // 3秒後に親コンポーネントへ通知して閉じる
-    setTimeout(() => {
+
+    // 3秒後に親コンポーネントへ通知して閉じる（アンマウント時は破棄）
+    completeTimerRef.current = setTimeout(() => {
       onComplete();
     }, 3000);
-  };
+  }, [elapsed, requiredSeconds, isFinished, onComplete]);
 
   const progressPercent = Math.min((elapsed / requiredSeconds) * 100, 100);
 

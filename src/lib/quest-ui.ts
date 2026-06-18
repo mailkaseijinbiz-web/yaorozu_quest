@@ -73,7 +73,9 @@ export function matchesEstTime(estMinutes: number, sel: TimeSel): boolean {
 
 /** 距離(km)を「999m」「1.2km」表記の {value, unit} に整形する。 */
 export function formatKm(d: number): { value: string; unit: 'm' | 'km' } {
-  return d < 1
-    ? { value: `${Math.round(d * 1000)}`, unit: 'm' }
-    : { value: `${d.toFixed(1)}`, unit: 'km' };
+  // 先にメートルへ丸めてから単位を決める。0.9999km を「1000m」と誤表記しないため。
+  const m = Math.round(d * 1000);
+  return m < 1000
+    ? { value: `${m}`, unit: 'm' }
+    : { value: `${(m / 1000).toFixed(1)}`, unit: 'km' };
 }
